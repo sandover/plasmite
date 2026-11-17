@@ -30,7 +30,9 @@ fi
   -o "$work_dir/abi_adversarial"
 
 if [[ "$(uname)" == "Darwin" ]]; then
-  DYLD_LIBRARY_PATH="$build_dir" "$work_dir/abi_adversarial" "$work_dir/pools"
+  cp "$build_dir/libplasmite.dylib" "$work_dir/libplasmite.2.dylib"
+  DYLD_LIBRARY_PATH="$work_dir" "$work_dir/abi_adversarial" "$work_dir/pools"
 else
-  LD_LIBRARY_PATH="$build_dir" "$work_dir/abi_adversarial" "$work_dir/pools"
+  cp "$build_dir/libplasmite.so" "$work_dir/libplasmite.so.2"
+  LD_LIBRARY_PATH="$work_dir" "$work_dir/abi_adversarial" "$work_dir/pools"
 fi

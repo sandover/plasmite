@@ -43,11 +43,11 @@ cp "$root_dir/include/plasmite.h" "$sdk_dir/include/plasmite.h"
 cp "$root_dir/LICENSE" "$root_dir/THIRD_PARTY_NOTICES.md" "$sdk_dir/"
 
 if [[ -f "$release_dir/libplasmite.dylib" ]]; then
-  cp "$release_dir/libplasmite.dylib" "$sdk_dir/lib/libplasmite.dylib"
-  # Keep dylib identity relocatable for Homebrew and bundled package consumers.
-  install_name_tool -id "@rpath/libplasmite.dylib" "$sdk_dir/lib/libplasmite.dylib"
+  cp "$release_dir/libplasmite.dylib" "$sdk_dir/lib/libplasmite.2.dylib"
+  sdk_link="-lplasmite.2"
 elif [[ -f "$release_dir/libplasmite.so" ]]; then
-  cp "$release_dir/libplasmite.so" "$sdk_dir/lib/libplasmite.so"
+  cp "$release_dir/libplasmite.so" "$sdk_dir/lib/libplasmite.so.2"
+  sdk_link="-l:libplasmite.so.2"
 else
   echo "shared lib not found in $release_dir (expected libplasmite.dylib or libplasmite.so)" >&2
   exit 1
@@ -59,7 +59,7 @@ fi
 
 libs_private=""
 if [[ "$target" == *linux* ]]; then
-  # Keep static consumers working with `pkg-config --static --libs plasmite`.
+  # Link system libraries when consuming the static archive.
   libs_private="Libs.private: -lpthread -ldl -lm"
 fi
 
@@ -73,7 +73,7 @@ includedir=\${prefix}/include
 Name: plasmite
 Description: Plasmite C ABI library
 Version: ${version}
-Libs: -L\${libdir} -lplasmite
+Libs: -L\${libdir} ${sdk_link}
 EOF
 if [[ -n "$libs_private" ]]; then
   echo "$libs_private"

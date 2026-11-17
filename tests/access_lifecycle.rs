@@ -1,6 +1,6 @@
 //! Access revocation stops existing streams and survives a server restart.
 
-use plasmite::api::{Durability, FollowOptions, PoolOptions, PoolRef, RemoteClient};
+use plasmite::api::{Feed, PoolOptions, PoolRef, Read, RemoteClient, Since};
 use serde_json::{Value, json};
 use std::fs;
 use std::sync::mpsc;
@@ -69,7 +69,7 @@ fn key_by_id<'a>(keys: &'a Value, id: &str) -> &'a Value {
 }
 
 fn wait_for_stream_end(
-    mut tail: plasmite::api::RemoteFollow,
+    mut tail: plasmite::api::RemoteRead,
     last_admitted_seq: u64,
 ) -> mpsc::Receiver<bool> {
     let (done_tx, done_rx) = mpsc::channel();
@@ -78,8 +78,8 @@ fn wait_for_stream_end(
             match tail.next_message() {
                 Ok(Some(message)) if message.seq <= last_admitted_seq => continue,
                 Ok(Some(_)) => break false,
-                Ok(None) => break true,
-                Err(_) => break false,
+                Ok(None) => break false,
+                Err(error) => break error.kind() == plasmite::api::ErrorKind::Permission,
             }
         };
         let _ = done_tx.send(ended);
@@ -253,40 +253,29 @@ fn revoke_stops_streams_denies_new_requests_and_survives_restart() -> TestResult
     let second_client = RemoteClient::with_access_key(&server.remote_url, &second_key)?;
     let pool_ref = PoolRef::name("lifecycle");
     first_client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let first_pool = first_client.open_pool(&pool_ref)?;
-    let second_pool = second_client.open_pool(&pool_ref)?;
-    let initial = first_pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
+    let first_pool = first_client.open_pool(&pool_ref, false)?;
+    let second_pool = second_client.open_pool(&pool_ref, false)?;
+    let initial = first_pool.feed(&json!({"n": 1}), Feed::default())?;
 
     // One stream has already delivered data; the other waits at the current end.
-    let mut active = first_pool.follow(FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(initial.seq),
-        timeout: Some(Duration::from_secs(20)),
-        ..Default::default()
-    })?;
+    let mut active = first_pool.follow(Read::since(Since::Seq(initial.seq)))?;
     assert_eq!(
         active.next_message()?.expect("initial stream message").seq,
         initial.seq
     );
-    let idle = first_pool.follow(FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(initial.seq + 2),
-        timeout: Some(Duration::from_secs(20)),
-        ..Default::default()
-    })?;
-
     // This write is admitted while the invitation remains active.
-    let before_cutoff =
-        first_pool.append_json_now(&json!({"write": "before cutoff"}), &[], Durability::Fast)?;
+    let before_cutoff = first_pool.feed(&json!({"write": "before cutoff"}), Feed::default())?;
     assert_eq!(before_cutoff.seq, initial.seq + 1);
+    let idle = first_pool.follow(Read::since(Since::Seq(before_cutoff.seq + 1)))?;
 
     revoke(&pool_dir, &first_id)?;
 
     // This later sequence must not reach streams opened with the revoked key.
-    let after_cutoff =
-        second_pool.append_json_now(&json!({"write": "other key"}), &[], Durability::Fast)?;
+    let after_cutoff = second_pool.feed(&json!({"write": "other key"}), Feed::default())?;
     assert!(after_cutoff.seq > before_cutoff.seq);
     assert!(
         first_pool
-            .append_json_now(&json!({"write": "after cutoff"}), &[], Durability::Fast)
+            .feed(&json!({"write": "after cutoff"}), Feed::default())
             .is_err(),
         "revoked key admitted a new write"
     );

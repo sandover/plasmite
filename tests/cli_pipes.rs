@@ -46,14 +46,58 @@ fn follow_tail(directory: &Path, pool: &str, count: &str) -> std::process::Outpu
         .args([
             "--dir",
             directory.to_str().expect("pool directory"),
-            "follow",
+            "fetch",
             pool,
-            "--tail",
+            "--last",
             count,
-            "--no-follow",
         ])
         .output()
         .expect("follow")
+}
+
+#[test]
+fn feed_lines_keeps_line_contents_and_rejects_invalid_utf8() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    create_pool(temp.path(), "logs");
+    let input = |bytes: &[u8]| {
+        let mut child = cmd()
+            .arg("--dir")
+            .arg(temp.path())
+            .args(["feed", "logs", "--tag", "build", "--input-format", "lines"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start feed");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(bytes)
+            .expect("write input");
+        child.wait_with_output().expect("feed output")
+    };
+    let output = input(b"  compiler output  \r\n\nlast line");
+    assert!(output.status.success(), "{output:?}");
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 3);
+    for (message, line) in messages
+        .iter()
+        .zip(["  compiler output  ", "", "last line"])
+    {
+        assert_eq!(message["data"], json!({"line": line}));
+        assert_eq!(message["meta"]["tags"], json!(["build"]));
+    }
+    let rejected = input(b"still stored\n\xff\n");
+    assert!(!rejected.status.success());
+    assert_eq!(
+        parse_json_lines(&rejected.stderr)[0]["error"]["kind"],
+        "Usage"
+    );
+    let stored = follow_tail(temp.path(), "logs", "10");
+    let messages = parse_json_lines(&stored.stdout);
+    assert_eq!(messages.len(), 4);
+    assert_eq!(messages[3]["data"], json!({"line": "still stored"}));
 }
 
 #[test]
@@ -113,14 +157,8 @@ fn default_messages_copy_edit_save_reload_and_chain() {
     assert!(seed.status.success());
 
     let reload = cmd()
-        .args([
-            "--dir",
-            directory.to_str().unwrap(),
-            "feed",
-            "reloaded",
-            "--file",
-            saved.to_str().unwrap(),
-        ])
+        .args(["--dir", directory.to_str().unwrap(), "feed", "reloaded"])
+        .stdin(File::open(saved).unwrap())
         .output()
         .expect("reload saved messages");
     assert!(
@@ -354,6 +392,45 @@ fn removed_data_flag_is_rejected_before_local_or_network_work() {
 
 #[cfg(unix)]
 #[test]
+fn follow_exits_after_the_pipe_closes_on_a_quiet_pool() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path();
+    create_pool(directory, "events");
+    assert!(
+        feed_stdin(directory, "events", b"{\"n\":1}\n")
+            .status
+            .success()
+    );
+
+    let mut child = KillOnDrop(
+        cmd()
+            .args([
+                "--dir",
+                directory.to_str().unwrap(),
+                "follow",
+                "events",
+                "--last",
+                "1",
+                "--format",
+                "json",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start follow"),
+    );
+    let stdout = child.0.stdout.take().expect("follow stdout");
+    let first_line = read_line_with_timeout(stdout, Duration::from_secs(5));
+    assert_eq!(parse_json(first_line.trim())["data"]["n"], 1);
+    let status = wait_within(
+        &mut child.0,
+        Duration::from_secs(2),
+        "quiet follow after pipe closure",
+    );
+    assert!(status.success(), "pipe closure should end follow normally");
+}
+
+#[cfg(unix)]
+#[test]
 fn broken_pipe_stops_after_the_message_being_written() {
     let temp = tempfile::tempdir().expect("tempdir");
     let directory = temp.path().join("pools");
@@ -439,14 +516,8 @@ fn ordinary_partial_and_reserved_objects_use_the_same_rule_for_all_sources() {
     let file = temp.path().join("message.json");
     std::fs::write(&file, reserved.to_string()).unwrap();
     let copied = cmd()
-        .args([
-            "--dir",
-            directory.to_str().unwrap(),
-            "feed",
-            "events",
-            "--file",
-            file.to_str().unwrap(),
-        ])
+        .args(["--dir", directory.to_str().unwrap(), "feed", "events"])
+        .stdin(File::open(file).unwrap())
         .output()
         .unwrap();
     assert!(copied.status.success());
@@ -503,7 +574,7 @@ fn actual_feed_follow_fetch_pipes_preserve_data_and_tags() {
     }
     for args in [
         vec!["feed", "source", "--tag", "pipe", "{\"x\":1}"],
-        vec!["follow", "source", "--tail", "1", "--no-follow"],
+        vec!["follow", "source", "--last", "1", "--one"],
         vec!["fetch", "source", "1"],
     ] {
         let mut source = cmd()

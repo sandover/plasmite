@@ -5,93 +5,33 @@ use crate::view::MessageView;
 
 #[repr(C)]
 pub struct ViewStreamText {
-    data: *const u8,
-    len: usize,
+    pub(super) data: *const u8,
+    pub(super) len: usize,
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn plsm_view_stream_open(
-    pool: *mut plsm_pool,
-    options: *const plsm_stream_options,
+// The caller keeps the array and each byte span valid for the whole call.
+pub(super) unsafe fn tag_spans<'a>(
     tags: *const ViewStreamText,
-    tag_count: usize,
-    out: *mut *mut plsm_stream,
-    error: *mut *mut plsm_error,
-) -> i32 {
-    let options = match parse_stream_options(options, error) {
-        Ok(options) => options,
-        Err(code) => return code,
-    };
-    open_view_follow(pool, options, tags, tag_count, out, error)
-}
-
-fn open_view_follow(
-    pool: *mut plsm_pool,
-    options: StreamOpenOptions,
-    tags: *const ViewStreamText,
-    tag_count: usize,
-    out: *mut *mut plsm_stream,
-    error: *mut *mut plsm_error,
-) -> i32 {
-    let pool = match borrow_pool(pool, error) {
-        Ok(pool) => pool,
-        Err(code) => return code,
-    };
-    let result = (|| {
-        if out.is_null() || (tag_count > 0 && tags.is_null()) {
-            return Err(Error::new(ErrorKind::Usage).with_message("null view stream argument"));
-        }
-        let spans = if tag_count == 0 {
-            &[][..]
-        } else {
-            unsafe { std::slice::from_raw_parts(tags, tag_count) }
-        };
-        let tags = spans
-            .iter()
-            .map(|span| {
-                if span.len > 0 && span.data.is_null() {
-                    return Err(Error::new(ErrorKind::Usage).with_message("null tag span"));
-                }
-                let bytes = if span.len == 0 {
-                    &[][..]
-                } else {
-                    unsafe { std::slice::from_raw_parts(span.data, span.len) }
-                };
-                std::str::from_utf8(bytes)
-                    .map(str::to_owned)
-                    .map_err(|_| Error::new(ErrorKind::Usage).with_message("tag is not UTF-8"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let cancel = Arc::new(AtomicBool::new(false));
-        let state = TailState::new(
-            &pool.pool,
-            FollowOptions {
-                start: options.start,
-                live: options.live,
-                max_messages: options.max_messages,
-                timeout: options.timeout,
-                gap_policy: options.gap_policy,
-                tags,
-                notify: true,
-                cancel: Some(cancel.clone()),
-                ..FollowOptions::default()
-            },
-        );
-        let info = pool.pool.info()?;
-        let pool = Pool::open(&info.path)?;
-        unsafe {
-            *out = Box::into_raw(Box::new(plsm_stream {
-                pool,
-                state: Mutex::new(state),
-                cancel,
-            }));
-        }
-        Ok(())
-    })();
-    match result {
-        Ok(()) => 0,
-        Err(err) => fail(error, err),
+    count: usize,
+) -> Result<Vec<&'a str>, Error> {
+    if count == 0 {
+        return Ok(Vec::new());
     }
+    if tags.is_null() {
+        return Err(Error::new(ErrorKind::Usage).with_message("null tag array"));
+    }
+    unsafe { std::slice::from_raw_parts(tags, count) }
+        .iter()
+        .map(|span| {
+            let bytes = if span.len == 0 {
+                &[][..]
+            } else {
+                unsafe { feed_input_bytes(span.data, span.len, "tag bytes") }?
+            };
+            std::str::from_utf8(bytes)
+                .map_err(|_| Error::new(ErrorKind::Usage).with_message("tag is not UTF-8"))
+        })
+        .collect()
 }
 
 #[unsafe(no_mangle)]
@@ -126,8 +66,7 @@ pub extern "C" fn plsm_view_stream_next(
             if !stream_frame_matches_tags(&frame, tags)? {
                 return Ok(None);
             }
-            MessageView::from_owned(frame.payload, frame.seq, frame.timestamp_ns, frame.flags)
-                .map(Some)
+            MessageView::from_owned(frame.payload, frame.seq, frame.time, frame.flags).map(Some)
         };
         // The ordinary iterator never allocates a companion/checkpoint collection.
         if max_count == 1 {
@@ -163,20 +102,4 @@ pub extern "C" fn plsm_view_stream_next(
         Ok(TailOutcome::Cancelled) => 3,
         Err(err) => fail(error, err),
     }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn plsm_pool_follow_views(
-    pool: *mut plsm_pool,
-    options: *const plsm_follow_options,
-    tags: *const ViewStreamText,
-    tag_count: usize,
-    out: *mut *mut plsm_stream,
-    error: *mut *mut plsm_error,
-) -> i32 {
-    let options = match parse_follow_options(options, error) {
-        Ok(options) => options,
-        Err(code) => return code,
-    };
-    open_view_follow(pool, options, tags, tag_count, out, error)
 }

@@ -30,7 +30,7 @@ func BenchmarkNativeInput(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			pool := pooled.(*Pool)
+			pool := pooled
 			defer pool.Close()
 			input := map[string]any{"sensor": "north", "power": 7, "real": 0.25}
 			switch fixture {
@@ -65,7 +65,7 @@ func BenchmarkNativeInput(b *testing.B) {
 			if err = json.Unmarshal(expected, &canonical); err != nil {
 				b.Fatal(err)
 			}
-			source, err := pool.AppendView(value, nil)
+			source, err := pool.FeedView(value, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -85,20 +85,20 @@ func BenchmarkNativeInput(b *testing.B) {
 						var err error
 						switch lane {
 						case "append_native_view", "pipeline_native":
-							view, err = pool.AppendView(value, nil)
+							view, err = pool.FeedView(value, nil)
 						case "append_json_view", "pipeline_json":
 							var raw []byte
 							raw, err = json.Marshal(value)
 							if err == nil {
-								view, err = pool.AppendJSONView(raw, nil)
+								view, err = pool.FeedJSONView(raw, nil)
 							}
 						case "forward_native_view":
-							view, err = pool.AppendView(source.Data(), nil)
+							view, err = pool.FeedView(source.Data(), nil)
 						case "forward_json_view":
 							var raw []byte
 							raw, err = source.DataJSON()
 							if err == nil {
-								view, err = pool.AppendJSONView(raw, nil)
+								view, err = pool.FeedJSONView(raw, nil)
 							}
 						}
 						if err != nil {
@@ -106,7 +106,7 @@ func BenchmarkNativeInput(b *testing.B) {
 						}
 						benchmarkView = view
 						if lane == "pipeline_native" || lane == "pipeline_json" {
-							fetched, e := pool.GetView(view.Seq())
+							fetched, e := pool.getView(view.Seq())
 							if e != nil {
 								b.Fatal(e)
 							}

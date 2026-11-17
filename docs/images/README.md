@@ -7,17 +7,17 @@ shows how to inspect retained messages and live traffic.
 
 ## Local IPC recording
 
-`ipc/local-ipc.gif` records a real shell and the installed, released
-`plasmite 1.0.0` CLI. Its commands match the README's local example.
-The writer finishes before the reader starts. The reader gets the retained
-message, keeps following, then stops with Ctrl+C.
+`ipc/local-ipc.gif` records the 2.0 command syntax in an actual shell.
+The writer finishes before the reader starts. The reader exits after the
+first retained message.
 
 `ipc/local-ipc.cast` contains the terminal's original bytes and timings, plus
 the CLI version and binary SHA-256. `ipc/local-ipc.png` is the final still.
-The recording is about 14 seconds at 840 × 370 pixels; its GIF is about 166 KB.
+The recording measures 1220 × 370 pixels. The cast identifies the candidate
+version and exact CLI binary.
 The renderer uses the terminal bytes, without inventing or replacing output.
 
-To record it again on macOS, install Plasmite 1.0.0 and run from the repo root:
+After the 2.0 release, install Plasmite 2.0.0 on macOS and run from the repo root.
 
 ```bash
 uv run scripts/record_readme_demo.py --font /System/Library/Fonts/Menlo.ttc
@@ -26,7 +26,7 @@ uv run scripts/record_readme_demo.py --font /System/Library/Fonts/Menlo.ttc
 The script requires a monospace TTF/TTC font; pass another font path on Linux.
 It creates its own temporary pool directory and removes it when finished.
 It checks the installed version and reads the retained message back before
-writing the assets. It does not use a development binary or touch user pools.
+writing the assets. For a 2.0 candidate, add `--candidate` and put that build on `PATH`.
 
 ## Pool diagram
 

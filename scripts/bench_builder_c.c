@@ -27,7 +27,8 @@ int main(int argc,char **argv) {
     char *note=malloc(length+1),*json=malloc(length+16384);if(!note||!json) abort();memset(note,'x',length);note[length]=0;
     char keys[200][16];for(size_t j=0;j<200;j++) snprintf(keys[j],sizeof(keys[j]),"field%zu",j);
     plsm_client_t *client=NULL;plsm_pool_t *pool=NULL;check(plsm_client_new(argv[1],&client,&error));check(plsm_pool_create(client,"events",8*1024*1024,&pool,&error));
-    const char *tags[]={"sensor"};plsm_text_t text={(const uint8_t *)"sensor",6};
+    plsm_text_t text={(const uint8_t *)"sensor",6};
+    plsm_feed_options_t options={sizeof(options),0,&text,1};
     uint64_t start=0,producer_ns=0; clock_t cpu_start=0; size_t initial_node=0;
     for(size_t i=0;i<n+100;i++) {
         if(i==100) { start=now(); cpu_start=clock(); }
@@ -43,12 +44,12 @@ int main(int argc,char **argv) {
             for(int64_t j=1;j<=3;j++) put(builder,array,NULL,(plsm_view_value_t){.kind=3,.integer=j});
             put(builder,root,"note",(plsm_view_value_t){.kind=5,.bytes=(const uint8_t *)note,.len=length});
             if(wide) for(size_t j=0;j<200;j++) put(builder,root,keys[j],(plsm_view_value_t){.kind=3,.integer=(int64_t)j});
-            check(plsm_pool_append_builder(pool,builder,0,&view,&error));plsm_builder_free(builder);
+            check(plsm_pool_feed_builder_view(pool,builder,0,&view,&error));plsm_builder_free(builder);
         } else {
             size_t used=(size_t)snprintf(json,length+16384,"{\"count\":%zu,\"power\":1.25,\"ok\":true,\"extra\":null,\"samples\":[1,2,3],\"note\":\"%s\"",i,note);
             if(wide) for(size_t j=0;j<200;j++) used+=(size_t)snprintf(json+used,length+16384-used,",\"%s\":%zu",keys[j],j);
             json[used++]='}';
-            check(plsm_pool_append_view_json(pool,(const uint8_t *)json,used,tags,1,0,&view,&error));
+            check(plsm_pool_feed_json_view(pool,(const uint8_t *)json,used,&options,&view,&error));
         }
         uint64_t operation_elapsed=now()-operation_start;
         if(i>=100) producer_ns+=operation_elapsed;

@@ -41,7 +41,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			pool := pooled.(*Pool)
+			pool := pooled
 			defer pool.Close()
 			sensor := "north"
 			if fixture == "long_string" {
@@ -64,11 +64,11 @@ func BenchmarkOwnedViews(b *testing.B) {
 				}
 				input["samples"] = values
 			}
-			receipt, err := pool.AppendIdentity(input, nil)
+			receipt, err := pool.FeedReceipt(input, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
-			view, err := pool.GetView(receipt.Seq)
+			view, err := pool.getView(receipt.Seq)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -104,7 +104,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 					for i := 0; i < b.N; i++ {
 						switch lane {
 						case "get_into":
-							v, e := pool.GetView(receipt.Seq)
+							v, e := pool.getView(receipt.Seq)
 							if e != nil {
 								b.Fatal(e)
 							}
@@ -119,17 +119,17 @@ func BenchmarkOwnedViews(b *testing.B) {
 							}
 							benchmarkView = v
 						case "get_c_copy":
-							frame, e := pool.GetLite3(receipt.Seq)
+							frame, e := pool.getLite3(receipt.Seq)
 							if e != nil {
 								b.Fatal(e)
 							}
-							v := &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.TimestampNs}
+							v := &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.Time}
 							if e = v.validate(); e != nil {
 								b.Fatal(e)
 							}
 							benchmarkView = v
 						case "cold_view_typed":
-							v, e := pool.GetView(receipt.Seq)
+							v, e := pool.getView(receipt.Seq)
 							if e != nil {
 								b.Fatal(e)
 							}
@@ -139,7 +139,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 							}
 							benchmarkReading = out
 						case "cold_json_typed":
-							data, e := pool.GetJSON(receipt.Seq)
+							data, e := pool.getJSON(receipt.Seq)
 							if e != nil {
 								b.Fatal(e)
 							}
@@ -149,7 +149,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 							}
 							benchmarkReading = out.Data
 						case "cold_json_selected":
-							data, e := pool.GetJSON(receipt.Seq)
+							data, e := pool.getJSON(receipt.Seq)
 							if e != nil {
 								b.Fatal(e)
 							}
@@ -164,7 +164,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 							}
 							benchmarkSelectedReading = out.Data
 						case "cold_view_selected":
-							v, e := pool.GetView(receipt.Seq)
+							v, e := pool.getView(receipt.Seq)
 							if e != nil {
 								b.Fatal(e)
 							}
@@ -259,8 +259,8 @@ func TestOwnedViewRetentionDiagnostics(t *testing.T) {
 	if os.Getenv("PLASMITE_GO_RETENTION") != "1" {
 		t.Skip("separate retention diagnostic")
 	}
-	pool := newTestPool(t, newTestClient(t), "view-retention").(*Pool)
-	receipt, err := pool.AppendIdentity(map[string]any{"sensor": "north", "metrics": map[string]any{"power": 7}, "zero": 0}, nil)
+	pool := newTestPool(t, newTestClient(t), "view-retention")
+	receipt, err := pool.FeedReceipt(map[string]any{"sensor": "north", "metrics": map[string]any{"power": 7}, "zero": 0}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestOwnedViewRetentionDiagnostics(t *testing.T) {
 			var v *MessageView
 			switch lane {
 			case "get_into":
-				v, err = pool.GetView(receipt.Seq)
+				v, err = pool.getView(receipt.Seq)
 			case "get_into_exact":
 				v, err = pool.copyViewCapacity(receipt.Seq, 0)
 				if err == nil {
@@ -281,9 +281,9 @@ func TestOwnedViewRetentionDiagnostics(t *testing.T) {
 				}
 			case "get_c_copy":
 				var frame *Lite3Frame
-				frame, err = pool.GetLite3(receipt.Seq)
+				frame, err = pool.getLite3(receipt.Seq)
 				if err == nil {
-					v = &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.TimestampNs}
+					v = &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.Time}
 					err = v.validate()
 				}
 			}

@@ -1,49 +1,32 @@
-use plasmite::api::{
-    AppendOptions, Durability, ErrorKind, FollowOptions, GapPolicy, Pool, PoolApiExt, PoolOptions,
-};
+use plasmite::api::{ErrorKind, Feed, Pool, PoolOptions, Read, Since};
+use plasmite::view::MessageView;
 use serde::Deserialize;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::time::Duration;
-
-fn options() -> FollowOptions {
-    FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(1),
-        timeout: Some(Duration::from_millis(100)),
-        notify: false,
-        ..Default::default()
-    }
-}
+use std::sync::{Arc, atomic::AtomicBool};
 
 #[test]
-fn view_tail_filters_counts_and_retains_each_snapshot() {
+fn fetch_view_filters_and_retains_each_snapshot() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("views.plasmite");
     let mut pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
     for (name, tag) in [("skip", "other"), ("first", "α\0β"), ("second", "α\0β")] {
-        pool.append_value(
+        let view = MessageView::encode(
             &serde_json::json!({"name":name,"exact":i64::MAX,"negative":-0.0}),
             &[tag],
-            AppendOptions::new(123, Durability::Fast),
         )
         .unwrap();
+        pool.feed_view(&view, Feed::default()).unwrap();
     }
-    let mut selected = options();
-    selected.tags = vec!["α\0β".into()];
-    selected.max_messages = Some(2);
     let retained = pool
-        .follow_views(selected)
+        .fetch_view(Read::default().tags(["α\0β"]))
+        .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     assert_eq!(retained.iter().map(|v| v.seq).collect::<Vec<_>>(), [2, 3]);
     // Overwrite and drop the producer; each retained snapshot stays independent.
     for _ in 0..500 {
-        pool.append_value(
+        pool.feed(
             &serde_json::json!({"padding":"x".repeat(500)}),
-            &[],
-            AppendOptions::new(456, Durability::Fast),
+            Feed::default(),
         )
         .unwrap();
     }
@@ -58,12 +41,11 @@ fn view_tail_filters_counts_and_retains_each_snapshot() {
     assert_eq!(first.name, "first");
     assert_eq!(first.exact, i64::MAX);
     assert!(first.negative.is_sign_negative());
-    assert_eq!(retained[0].timestamp_ns, 123);
     assert_ne!(retained[0].bytes().as_ptr(), retained[1].bytes().as_ptr());
 }
 
 #[test]
-fn view_tail_reuses_gap_cancel_and_zero_limit_policy() {
+fn view_read_reports_gaps_cancels_and_handles_empty_fetch() {
     let directory = tempfile::tempdir().unwrap();
     let mut pool = Pool::create(
         directory.path().join("policy.plasmite"),
@@ -71,30 +53,23 @@ fn view_tail_reuses_gap_cancel_and_zero_limit_policy() {
     )
     .unwrap();
     for _ in 0..100 {
-        pool.append_value(
+        pool.feed(
             &serde_json::json!({"padding":"x".repeat(300)}),
-            &[],
-            AppendOptions::new(1, Durability::Fast),
+            Feed::default(),
         )
         .unwrap();
     }
-    let mut strict = options();
-    strict.gap_policy = GapPolicy::Error;
-    let mut tail = pool.follow_views(strict);
-    assert!(matches!(tail.next_view(),Err(e) if e.kind()==ErrorKind::RetentionGap));
-    assert!(tail.next_view().unwrap().is_none());
-    let cancel = Arc::new(AtomicBool::new(true));
-    let mut cancelled = options();
-    cancelled.cancel = Some(cancel.clone());
-    assert!(pool.follow_views(cancelled).next_view().unwrap().is_none());
-    cancel.store(false, Ordering::Release);
-    let mut empty = options();
-    empty.max_messages = Some(0);
-    assert!(pool.follow_views(empty).next_view().unwrap().is_none());
-    let mut continued = options();
-    continued.max_messages = Some(1);
     assert!(
-        pool.follow_views(continued)
+        matches!(pool.follow_view(Read::since(Since::Seq(1))), Err(e) if e.kind() == ErrorKind::RetentionGap)
+    );
+    let cancel = Arc::new(AtomicBool::new(true));
+    let mut cancelled = pool.follow_view(Read::default().cancel(cancel)).unwrap();
+    assert!(cancelled.next_view().unwrap().is_none());
+    let mut empty = pool.fetch_view(Read::last(0)).unwrap();
+    assert!(empty.next_view().unwrap().is_none());
+    assert!(
+        pool.fetch_view(Read::default())
+            .unwrap()
             .next_view()
             .unwrap()
             .unwrap()

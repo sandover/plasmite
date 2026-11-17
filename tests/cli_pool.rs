@@ -515,7 +515,7 @@ fn readme_quickstart_flow() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "json",

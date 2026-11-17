@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 
 pub type ApiResult<T> = Result<T, Error>;
 
+pub const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PoolRef {
     Name(String),
@@ -90,21 +92,26 @@ impl LocalClient {
         }
     }
 
-    pub fn create_pool(&self, pool_ref: &PoolRef, options: PoolOptions) -> ApiResult<PoolInfo> {
+    pub fn create_pool(&self, pool_ref: &PoolRef, options: PoolOptions) -> ApiResult<Pool> {
         let path = self.resolve_pool_path(pool_ref)?;
-        let pool = Pool::create(&path, options)?;
-        pool.info()
+        Pool::create(&path, options)
     }
 
-    pub fn open_pool(&self, pool_ref: &PoolRef) -> ApiResult<Pool> {
+    pub fn open_pool(&self, pool_ref: &PoolRef, create: bool) -> ApiResult<Pool> {
         let path = self.resolve_pool_path(pool_ref)?;
-        Pool::open(&path)
+        match Pool::open(&path) {
+            Err(error) if create && error.kind() == ErrorKind::NotFound => {
+                match Pool::create(&path, PoolOptions::new(DEFAULT_POOL_SIZE)) {
+                    Err(error) if error.kind() == ErrorKind::AlreadyExists => Pool::open(&path),
+                    result => result,
+                }
+            }
+            result => result,
+        }
     }
 
     pub fn pool_info(&self, pool_ref: &PoolRef) -> ApiResult<PoolInfo> {
-        let path = self.resolve_pool_path(pool_ref)?;
-        let pool = Pool::open(&path)?;
-        pool.info()
+        self.open_pool(pool_ref, false)?.info()
     }
 
     pub fn list_pools(&self) -> ApiResult<Vec<PoolInfo>> {

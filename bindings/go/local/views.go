@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 	"unsafe"
 )
 
@@ -43,9 +42,9 @@ func (v valueSnapshot) proofPointer() *C.size_t {
 	return &v.duplicates[0]
 }
 
-// GetView copies the record into aligned Go storage and validates it once.
+// getView copies the record into aligned Go storage and validates it once.
 // It blocks under the same pool lock as Get and does not imply cancellation.
-func (p *Pool) GetView(seq uint64) (*MessageView, error) {
+func (p *Pool) getView(seq uint64) (*MessageView, error) {
 	view, err := p.copyView(seq)
 	if err != nil {
 		return nil, err
@@ -128,11 +127,8 @@ func (p *Pool) copyViewCapacity(seq uint64, initialWords int) (*MessageView, err
 }
 
 // Time constructs the UTC time only when requested.
-func (v *MessageView) Seq() uint64         { return v.seq }
-func (v *MessageView) TimestampNs() uint64 { return v.timestampNs }
-func (v *MessageView) Time() time.Time {
-	return time.Unix(int64(v.timestampNs/1_000_000_000), int64(v.timestampNs%1_000_000_000)).UTC()
-}
+func (v *MessageView) Seq() uint64  { return v.seq }
+func (v *MessageView) Time() uint64 { return v.timestampNs }
 
 // Lite3 returns a mutable copy of the complete encoded snapshot.
 func (v *MessageView) Lite3() []byte { return append([]byte(nil), v.bytes()...) }

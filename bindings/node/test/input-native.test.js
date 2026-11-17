@@ -16,16 +16,16 @@ function fixture(t) {
 test('foreign checked backends import once and preserve exact subtrees', async t => {
   const { pool } = fixture(t);
   const data = { exact: 9223372036854775807n, bytes: Buffer.from([0, 255]), nested: { value: 17 } };
-  const source = await pool.appendView(data, ['source']);
+  const source = await pool.feedView(data, { tags: ['source'] });
   const original = messageReference(source).backend;
   let copies = 0;
   const backend = { ...original, encodedBytes() { copies++; return original.owner.encodedBytes(); } };
   delete backend.owner;
-  const foreign = createMessageView(backend, source.seq, source.timestampNs);
-  const forwarded = await pool.appendView(foreign);
+  const foreign = createMessageView(backend, source.seq, source.time);
+  const forwarded = await pool.feedView(foreign);
   assert.deepEqual(toNative(forwarded.data), data);
   assert.deepEqual(toNative(forwarded.meta.tags), ['source']);
-  const mixed = await pool.appendView({ subset: foreign.data, nested: foreign.data.nested });
+  const mixed = await pool.feedView({ subset: foreign.data, nested: foreign.data.nested });
   assert.deepEqual(toNative(mixed.data), { subset: data, nested: { value: 17 } });
   assert.equal(copies, 1);
   const exported = toLite3(source);
@@ -39,11 +39,11 @@ test('native input keeps exact numeric values, bytes and a detached receipt', as
   const input = { integer: 42, smallBig: 42n, maximum: 9223372036854775807n,
     minimum: -9223372036854775808n, binary64: 9007199254740992,
     zero: -0, text: '雪😀�\0x', buffer: Buffer.from([0, 255]), bytes: new Uint8Array([1, 2]) };
-  const pending = pool.appendView(input, [' z ', 'a', 'a', '\0']);
+  const pending = pool.feedView(input, { tags: [' z ', 'a', 'a', '\0'] });
   input.integer = 0; input.buffer[0] = 9; input.bytes[0] = 9;
   const view = await pending;
   assert.equal(view.seq, 1n);
-  assert.equal(typeof view.timestampNs, 'bigint');
+  assert.equal(typeof view.time, 'bigint');
   assert.equal(view.data.integer, 42);
   assert.equal(view.data.smallBig, 42);
   assert.equal(view.data.maximum, 9223372036854775807n);
@@ -76,7 +76,7 @@ test('native input preserves JSON hook, Proxy and array access order', async t =
   }
   const expectedLog = [], actualLog = [];
   const expected = JSON.parse(JSON.stringify(input(expectedLog)));
-  const view = await pool.appendView(input(actualLog));
+  const view = await pool.feedView(input(actualLog));
   assert.deepEqual(toNative(view.data), expected);
   assert.deepEqual(actualLog, expectedLog);
 });
@@ -90,36 +90,36 @@ test('native input respects boxed values and custom binary serializers', async t
   boolean.valueOf = () => { throw new Error('must use internal boolean value'); };
   const input = { number: new Number(3), string: new String('text'), boolean,
     bigint: Object(7n), buffer, subclass: new Bytes([3]), date: new Date(0) };
-  const view = await pool.appendView(input);
+  const view = await pool.feedView(input);
   assert.deepEqual(toNative(view.data), { number: 3, string: 'text', boolean: true, bigint: 7,
     buffer: { custom: 'buffer' }, subclass: { subclass: 'subclass' }, date: new Date(0).toJSON() });
   const invalid = new Number(1);
   invalid[Symbol.toPrimitive] = () => 1n;
-  await assert.rejects(pool.appendView({ invalid }), TypeError);
+  await assert.rejects(pool.feedView({ invalid }), TypeError);
 });
 
 test('native input preserves thrown values and rejects before publication', async t => {
   const { pool } = fixture(t);
   const sentinel = Object.assign(new Error('from getter'), { kind: 'Usage' });
-  await assert.rejects(pool.appendView({ get value() { throw sentinel; } }), error => error === sentinel);
+  await assert.rejects(pool.feedView({ get value() { throw sentinel; } }), error => error === sentinel);
   const cycle = {}; cycle.self = cycle;
   for (const value of [cycle, { value: 9223372036854775808n }, { value: Infinity },
     { value: '\ud800' }, { '\udfff': 1 }, [], 1, Buffer.from([1])]) {
-    await assert.rejects(pool.appendView(value), TypeError);
+    await assert.rejects(pool.feedView(value), TypeError);
   }
-  assert.equal((await pool.appendView({ good: '�' })).seq, 1n);
+  assert.equal((await pool.feedView({ good: '�' })).seq, 1n);
 });
 
 test('native input invokes getters once across writer growth', async t => {
   const { pool } = fixture(t);
   let calls = 0;
   const input = { get value() { calls++; return 'x'.repeat(65536); } };
-  const view = await pool.appendView(input);
+  const view = await pool.feedView(input);
   assert.equal(calls, 1);
   assert.equal(view.data.value.length, 65536);
   const root = function () {};
   root.toJSON = key => ({ key });
-  assert.equal((await pool.appendView(root)).data.key, '');
+  assert.equal((await pool.feedView(root)).data.key, '');
 });
 
 test('native input retains its private target when hooks close the pool', async t => {
@@ -129,16 +129,16 @@ test('native input retains its private target when hooks close the pool', async 
       const input = mode === 'getter'
         ? { get value() { pool.close(); client.close(); return 42; } }
         : { toJSON() { pool.close(); client.close(); return { value: 42 }; } };
-      const view = await pool.appendView(input);
+      const view = await pool.feedView(input);
       assert.equal(view.data.value, 42);
-      await assert.rejects(pool.getView(view.seq), error => error.kind === ErrorKind.Usage);
+      await assert.rejects(pool._getView(view.seq), error => error.kind === ErrorKind.Usage);
     });
   }
 });
 
 test('queued native appends finish after close and retain their committed snapshots', async t => {
   const { pool, client } = fixture(t);
-  const pending = [1, 2, 3].map(value => pool.appendView({ value }));
+  const pending = [1, 2, 3].map(value => pool.feedView({ value }));
   pool.close(); client.close();
   const views = await Promise.all(pending);
   assert.deepEqual(views.map(view => view.data.value), [1, 2, 3]);
@@ -147,11 +147,11 @@ test('queued native appends finish after close and retain their committed snapsh
 
 test('native input copies checked subtrees without losing native bytes', async t => {
   const { pool } = fixture(t);
-  const first = await pool.appendView({ nested: { value: 3n }, bytes: Buffer.from([0, 255]) });
-  const copied = await pool.appendView({ subtree: first.data.nested, bytes: first.data.bytes });
+  const first = await pool.feedView({ nested: { value: 3n }, bytes: Buffer.from([0, 255]) });
+  const copied = await pool.feedView({ subtree: first.data.nested, bytes: first.data.bytes });
   assert.equal(copied.data.subtree.value, 3);
   assert.deepEqual([...copied.data.bytes], [0, 255]);
-  const root = await pool.appendView(first.data, ['retagged']);
+  const root = await pool.feedView(first.data, { tags: ['retagged'] });
   assert.equal(root.data.nested.value, 3);
   assert.deepEqual([...root.data.bytes], [0, 255]);
   assert.deepEqual([...root.meta.tags], ['retagged']);
@@ -159,9 +159,9 @@ test('native input copies checked subtrees without losing native bytes', async t
 
 test('whole-message forwarding preserves payload and optional retagging copies data', async t => {
   const { pool } = fixture(t);
-  const first = await pool.appendView({ value: 9223372036854775807n, bytes: Buffer.from([7, 8]) }, ['original']);
-  const forwarded = await pool.appendView(first);
-  const retagged = await pool.appendView(first, ['changed']);
+  const first = await pool.feedView({ value: 9223372036854775807n, bytes: Buffer.from([7, 8]) }, { tags: ['original'] });
+  const forwarded = await pool.feedView(first);
+  const retagged = await pool.feedView(first.data, { tags: ['changed'] });
   assert.equal(forwarded.seq, 2n);
   assert.equal(retagged.seq, 3n);
   assert.equal(forwarded.data.value, 9223372036854775807n);
@@ -169,16 +169,16 @@ test('whole-message forwarding preserves payload and optional retagging copies d
   assert.deepEqual([...forwarded.meta.tags], ['original']);
   assert.deepEqual([...retagged.meta.tags], ['changed']);
   assert.deepEqual([...retagged.data.bytes], [7, 8]);
-  const ordinary = await pool.appendView({ seq: 99, meta: { tags: ['data'] }, data: { value: 1 } });
+  const ordinary = await pool.feedView({ seq: 99, meta: { tags: ['data'] }, data: { value: 1 } });
   assert.equal(ordinary.data.seq, 99);
   assert.equal(ordinary.data.data.value, 1);
 });
 
 test('forwarded children survive GC of original and intermediate wrappers', { skip: !global.gc }, async t => {
   const { pool, client } = fixture(t);
-  let original = await pool.appendView({ bytes: Buffer.alloc(65536, 7) });
-  let intermediate = await pool.appendView(original);
-  let last = await pool.appendView(intermediate);
+  let original = await pool.feedView({ bytes: Buffer.alloc(65536, 7) });
+  let intermediate = await pool.feedView(original);
+  let last = await pool.feedView(intermediate);
   const child = last.data.bytes;
   original = null; intermediate = null; last = null;
   pool.close(); client.close();
@@ -194,10 +194,10 @@ test('forwarded children survive GC of original and intermediate wrappers', { sk
 test('encoding failure releases its target after the hook closes the pool', async t => {
   const { pool, client } = fixture(t);
   const sentinel = new Error('encoding stopped');
-  await assert.rejects(pool.appendView({ get value() {
+  await assert.rejects(pool.feedView({ get value() {
     pool.close(); client.close(); throw sentinel;
   } }), error => error === sentinel);
-  await assert.rejects(pool.appendView({}), error => error.kind === ErrorKind.Usage);
+  await assert.rejects(pool.feedView({}), error => error.kind === ErrorKind.Usage);
 });
 
 test('tag callbacks run after retaining the target and failures discard it', async t => {
@@ -212,7 +212,7 @@ test('tag callbacks run after retaining the target and failures discard it', asy
         if (fail) throw sentinel;
         return 'sensor';
       } });
-      const pending = pool.appendView({ value: 42 }, tags);
+      const pending = pool.feedView({ value: 42 }, { tags: tags });
       if (fail) await assert.rejects(pending, error => error === sentinel);
       else {
         const view = await pending;
@@ -231,7 +231,7 @@ test('array holes use inherited values and serializers receive actual index keys
   Object.setPrototypeOf(values, Object.create(Array.prototype, { 1: { get() { return 7; } } }));
   const keys = [];
   const serialized = Array.from({ length: 12 }, () => ({ toJSON(key) { keys.push(key); return key; } }));
-  const view = await pool.appendView({ values, serialized });
+  const view = await pool.feedView({ values, serialized });
   assert.deepEqual([...view.data.values], [1, 7, 3]);
   assert.deepEqual([...view.data.serialized], Array.from({ length: 12 }, (_, i) => String(i)));
   assert.deepEqual(keys, Array.from({ length: 12 }, (_, i) => String(i)));
@@ -247,7 +247,7 @@ test('BigInt prototype serializers run once with their primitive receiver', asyn
     return key + ':' + this.toString();
   } });
   try {
-    const view = await pool.appendView({ integer: 123n });
+    const view = await pool.feedView({ integer: 123n });
     assert.equal(view.data.integer, 'integer:123');
     assert.equal(calls, 1);
   } finally {
@@ -261,9 +261,9 @@ test('shared-backed byte input requires an ordinary caller-owned copy', async t 
   const { pool } = fixture(t);
   const bytes = new Uint8Array(new SharedArrayBuffer(4));
   bytes[0] = 7;
-  await assert.rejects(pool.appendView({ bytes }), /shared-backed/);
-  await assert.rejects(pool.appendView({ bytes: Buffer.from(bytes.buffer) }), /shared-backed/);
-  assert.equal((await pool.appendView({ bytes: Uint8Array.from(bytes) })).data.bytes[0], 7);
+  await assert.rejects(pool.feedView({ bytes }), /shared-backed/);
+  await assert.rejects(pool.feedView({ bytes: Buffer.from(bytes.buffer) }), /shared-backed/);
+  assert.equal((await pool.feedView({ bytes: Uint8Array.from(bytes) })).data.bytes[0], 7);
 });
 
 
@@ -277,22 +277,22 @@ test('BigInt serializer getters observe primitive receivers and raw JSON stays e
     return function(key) { 'use strict'; return key + ':' + this.toString(); };
   } });
   try {
-    const view = await pool.appendView({ value: 17n });
+    const view = await pool.feedView({ value: 17n });
     assert.equal(view.data.value, 'value:17');
     assert.equal(getters, 1);
   } finally {
     if (before) Object.defineProperty(BigInt.prototype, 'toJSON', before);
     else delete BigInt.prototype.toJSON;
   }
-  await assert.rejects(pool.appendView({ value: JSON.rawJSON('1') }), /explicit JSON/);
+  await assert.rejects(pool.feedView({ value: JSON.rawJSON('1') }), /explicit JSON/);
 });
 
 test('native receipts report backing capacity and JSON-produced copies use the same safe path', async t => {
   const { pool } = fixture(t);
-  const view = await pool.appendView({ text: 'x'.repeat(65536) });
+  const view = await pool.feedView({ text: 'x'.repeat(65536) });
   const owner = valueReference(view.data).backend.owner;
   assert.ok(owner.retainedBytes() > owner.byteLength());
-  const forwarded = await pool.appendView(view);
+  const forwarded = await pool.feedView(view);
   assert.equal(valueReference(forwarded.data).backend.owner.retainedBytes(), owner.retainedBytes());
   const target = pool._inner.prepareAppend(0);
   const jsonOwner = await target.json('{"value":3}', []);
@@ -310,18 +310,18 @@ test('input exceptions preserve every thrown value without coercing it', async t
   const object = { toString() { coerced++; throw new Error('must not stringify an exception'); } };
   for (const thrown of [undefined, null, 17, 'text', Symbol('error'), object]) {
     try {
-      await pool.appendView({ get value() { throw thrown; } });
+      await pool.feedView({ get value() { throw thrown; } });
       assert.fail('expected rejection');
     } catch (error) { assert.equal(error, thrown); }
   }
   assert.equal(coerced, 0);
-  assert.equal((await pool.appendView({ good: true })).seq, 1n);
+  assert.equal((await pool.feedView({ good: true })).seq, 1n);
 });
 
 test('captured primitives and bytes keep their value at the visit', async t => {
   const { pool } = fixture(t);
   const earlier = { value: 1 }, bytes = Buffer.from([1, 2]);
-  const view = await pool.appendView({ earlier, bytes, get later() { earlier.value = 9; bytes[0] = 9; return true; } });
+  const view = await pool.feedView({ earlier, bytes, get later() { earlier.value = 9; bytes[0] = 9; return true; } });
   assert.equal(view.data.earlier.value, 1);
   assert.deepEqual([...toNative(view.data.bytes)], [1, 2]);
 });
@@ -331,10 +331,10 @@ test('capture batches preserve traversal and reentrant appends', async t => {
   let reads = 0, nested;
   const rows = Array.from({ length: 700 }, (_, number) => ({ get value() {
     reads++;
-    if (number === 170) nested = pool.appendView({ inner: true });
+    if (number === 170) nested = pool.feedView({ inner: true });
     return number;
   } }));
-  const result = await pool.appendView({ rows });
+  const result = await pool.feedView({ rows });
   assert.equal(reads, 700);
   assert.equal(result.data.rows.length, 700);
   assert.equal(result.data.rows[0].value, 0);
@@ -350,11 +350,11 @@ test('key failures preserve Get and hook order before later fields', async t => 
     unicode.push('get'); return { toJSON() { unicode.push('hook'); return 1; } };
   } });
   Object.defineProperty(invalidKey, 'later', { enumerable: true, get() { unicode.push('later'); return 2; } });
-  await assert.rejects(pool.appendView(invalidKey), /surrogate/);
+  await assert.rejects(pool.feedView(invalidKey), /surrogate/);
   assert.deepEqual(unicode, ['get']);
-  await assert.rejects(pool.appendView({ ['\0']: { toJSON() { nul.push('hook'); return 1; } }, get later() { nul.push('later'); return 2; } }), /NUL/);
+  await assert.rejects(pool.feedView({ ['\0']: { toJSON() { nul.push('hook'); return 1; } }, get later() { nul.push('later'); return 2; } }), /NUL/);
   assert.deepEqual(nul, ['hook']);
-  const ignored = await pool.appendView({ ['\0']: undefined, value: 3 });
+  const ignored = await pool.feedView({ ['\0']: undefined, value: 3 });
   assert.equal(ignored.data.value, 3);
 });
 
@@ -362,11 +362,11 @@ test('checked subtree depth errors precede later getters', async t => {
   const { pool } = fixture(t);
   let deep = { leaf: 1 };
   for (let i = 0; i < 30; i++) deep = { nested: deep };
-  const source = await pool.appendView(deep);
+  const source = await pool.feedView(deep);
   let later = 0;
-  await assert.rejects(pool.appendView({ copy: source.data, get later() { later++; return 2; } }), /nest|depth/i);
+  await assert.rejects(pool.feedView({ copy: source.data, get later() { later++; return 2; } }), /nest|depth/i);
   assert.equal(later, 0);
-  assert.equal((await pool.appendView({ good: true })).seq, source.seq + 1n);
+  assert.equal((await pool.feedView({ good: true })).seq, source.seq + 1n);
 });
 
 test('mixed scalar commands remain exact across batches and buffer reuse', async t => {
@@ -374,7 +374,7 @@ test('mixed scalar commands remain exact across batches and buffer reuse', async
   const values = Array.from({ length: 1200 }, (_, i) => [null, false, true, -0, 0, 1, 3.5, 9007199254740991, 9007199254740992, 17n, 9223372036854775807n, -9223372036854775808n][i % 12]);
   const expected = values.map(value => value === 17n ? 17 : value);
   for (let i = 0; i < 2; i++) {
-    const view = await pool.appendView({ values });
+    const view = await pool.feedView({ values });
     assert.deepEqual(toNative(view.data.values), expected);
   }
 });
@@ -390,10 +390,10 @@ test('real portable owners import once for native whole, root, mixed and retagge
   let imports = 0;
   configureNativeInput(encoded => { imports++; return addon.nativeViewFromBytes(encoded); }, addon.NativeView);
   try {
-    const whole = await pool.appendView(source);
-    const root = await pool.appendView(source.data);
-    const retagged = await pool.appendView(source, ['retagged']);
-    const mixed = await pool.appendView({ subset: source.data.nested, payload: source.data });
+    const whole = await pool.feedView(source);
+    const root = await pool.feedView(source.data);
+    const retagged = await pool.feedView(source.data, { tags: ['retagged'] });
+    const mixed = await pool.feedView({ subset: source.data.nested, payload: source.data });
     assert.deepEqual(toNative(whole.data), data);
     assert.deepEqual(toNative(whole.meta.tags), ['source']);
     assert.deepEqual(toNative(root.data), data);
@@ -402,7 +402,7 @@ test('real portable owners import once for native whole, root, mixed and retagge
     assert.deepEqual(toNative(retagged.meta.tags), ['retagged']);
     assert.deepEqual(toNative(mixed.data), { subset: data.nested, payload: data });
     assert.equal(imports, 1);
-    await pool.appendView(whole);
+    await pool.feedView(whole);
     assert.equal(imports, 1, 'native owners bypass import');
   } finally { configureNativeInput(addon.nativeViewFromBytes, addon.NativeView); }
 });

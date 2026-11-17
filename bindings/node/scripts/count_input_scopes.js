@@ -17,7 +17,7 @@ async function main() {
     const counts = {};
     for (const [fixture, value] of Object.entries(fixtures)) {
       const before = native.inputScopeCount();
-      await pool.appendView(value);
+      await pool.feedView(value);
       counts[fixture] = native.inputScopeCount() - before;
     }
     process.stdout.write(JSON.stringify({ node: process.version, counts }) + '\n');

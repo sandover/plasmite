@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,10 +40,10 @@ func BenchmarkOwnedStreams(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			seed := initial.(*Pool)
+			seed := initial
 			defer seed.Close()
 			input := streamFixture(fixture)
-			source, err := seed.AppendView(input, nil)
+			source, err := seed.FeedView(input, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -64,30 +65,30 @@ func BenchmarkOwnedStreams(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					pool := sourceAPI.(*Pool)
+					pool := sourceAPI
 					defer pool.Close()
 					destinationAPI, err := laneClient.CreatePool(PoolRefName("destination-"+lane), capacity)
 					if err != nil {
 						b.Fatal(err)
 					}
-					destination := destinationAPI.(*Pool)
+					destination := destinationAPI
 					defer destination.Close()
 					for i := 0; i < window; i++ {
-						if _, err = pool.AppendView(source, nil); err != nil {
+						if _, err = pool.FeedView(source, nil); err != nil {
 							b.Fatal(err)
 						}
 					}
 					var viewStream *ViewStream
-					var rawStream api.Lite3Stream
-					var jsonStream api.Stream
+					var rawStream *Lite3Stream
+					var jsonStream *Stream
 					open := func() {
-						since, max := uint64(1), uint64(window)
+						selection := Since(uint64(1))
 						if strings.HasPrefix(lane, "view") {
-							viewStream, err = pool.OpenViewFollow(FollowOptions{Start: Sequence(since), MaxMessages: &max})
+							viewStream, err = pool.FetchView(selection)
 						} else if strings.HasPrefix(lane, "raw") {
-							rawStream, err = pool.OpenLite3Follow(Sequence(since), &max, nil)
+							rawStream, err = pool.FetchLite3(selection)
 						} else {
-							jsonStream, err = pool.OpenFollow(Sequence(since), &max, nil)
+							jsonStream, err = pool.openRead(true, false, []api.ReadOption{selection})
 						}
 						if err != nil {
 							b.Fatal(err)
@@ -137,15 +138,15 @@ func BenchmarkOwnedStreams(b *testing.B) {
 								streamBenchmarkValue = out.Value
 								streamBenchmarkFull = out
 							case "view_forward":
-								streamBenchmarkView, e = destination.AppendView(view, nil)
+								streamBenchmarkView, e = destination.FeedView(view, nil)
 							case "view_copy":
-								streamBenchmarkView, e = destination.AppendView(view.Data(), nil)
+								streamBenchmarkView, e = destination.FeedView(view.Data(), nil)
 							}
 							if e != nil {
 								b.Fatal(e)
 							}
 						} else if rawStream != nil {
-							frame, e := rawStream.Next()
+							frame, e := rawStream.Next(context.Background())
 							if e != nil {
 								b.Fatal(e)
 							}
@@ -153,7 +154,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 								b.Fatal("out of order")
 							}
 							if lane == "raw_forward" {
-								_, e = destination.AppendLite3(frame.Payload, DurabilityFast)
+								_, e = destination.FeedLite3Receipt(frame.Payload, DurabilityFast)
 								if e != nil {
 									b.Fatal(e)
 								}
@@ -161,7 +162,10 @@ func BenchmarkOwnedStreams(b *testing.B) {
 							streamBenchmarkValue = len(frame.Payload)
 							streamBenchmarkRaw = frame.Payload
 						} else {
-							raw, e := jsonStream.NextJSON()
+							raw, status, e := jsonStream.nextWait(0)
+							if status != 1 && e == nil {
+								e = io.EOF
+							}
 							if e != nil {
 								b.Fatal(e)
 							}
@@ -183,7 +187,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 								streamBenchmarkValue = out.Value
 								streamBenchmarkFull = out
 							case "json_forward":
-								streamBenchmarkView, e = destination.AppendJSONView(message.Data, nil)
+								streamBenchmarkView, e = destination.FeedJSONView(message.Data, nil)
 							}
 							if e != nil {
 								b.Fatal(e)
@@ -205,7 +209,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 						b.Fatal("raw bytes changed")
 					}
 					if strings.HasSuffix(lane, "forward") || lane == "view_copy" {
-						final, e := destination.GetView(uint64(b.N))
+						final, e := destination.getView(uint64(b.N))
 						if e != nil {
 							b.Fatal(e)
 						}

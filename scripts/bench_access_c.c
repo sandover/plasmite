@@ -6,6 +6,9 @@
 
 #include "plasmite.h"
 
+/* Private entry point for measuring the direct JSON acquisition cost. */
+int plsm_internal_pool_get_json(plsm_pool_t *, uint64_t, plsm_buf_t *, plsm_error_t **);
+
 #include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -152,18 +155,18 @@ static int run_request(const char *operation, size_t count, plsm_pool_t *pool, u
         plsm_error_t *err = NULL;
         int rc;
         if (strcmp(operation, "append") == 0) {
-            rc = plsm_pool_append_json(pool, (const uint8_t *)lines[i], strlen(lines[i]),
-                                       NULL, 0, 0, &messages[i], &err);
+            rc = plsm_pool_feed_json(pool, (const uint8_t *)lines[i], strlen(lines[i]),
+                                       NULL, &messages[i], &err);
             if (rc != 0) {
-                result = fail("plsm_pool_append_json", err);
+                result = fail("plsm_pool_feed_json", err);
                 goto done;
             }
         } else {
             uint64_t seq;
             (void)parse_u64(lines[i], &seq);
-            rc = plsm_pool_get_json(pool, seq, &messages[i], &err);
+            rc = plsm_internal_pool_get_json(pool, seq, &messages[i], &err);
             if (rc != 0) {
-                result = fail("plsm_pool_get_json", err);
+                result = fail("plsm_internal_pool_get_json", err);
                 goto done;
             }
         }
@@ -214,7 +217,7 @@ int main(int argc, char **argv) {
         plsm_client_free(client);
         return fail("plsm_client_new", err);
     }
-    if (plsm_pool_open(client, argv[2], &pool, &err) != 0) {
+    if (plsm_pool_open(client, argv[2], 0, &pool, &err) != 0) {
         plsm_client_free(client);
         return fail("plsm_pool_open", err);
     }

@@ -39,6 +39,7 @@ impl Drop for OwnedCursor {
         }
     }
 }
+#[cfg_attr(windows, link(name = "plasmite2", kind = "raw-dylib"))]
 unsafe extern "C" {
     fn plsm_view_from_lite3(
         bytes: *const u8,
@@ -60,7 +61,7 @@ unsafe extern "C" {
     fn plsm_view_release(owner: *const Owner);
     fn plsm_view_root(owner: *const Owner) -> ValueRef;
     fn plsm_view_seq(owner: *const Owner) -> u64;
-    fn plsm_view_timestamp_ns(owner: *const Owner) -> u64;
+    fn plsm_view_time(owner: *const Owner) -> u64;
     fn plsm_view_bytes(owner: *const Owner, len: *mut usize) -> *const u8;
     fn plsm_value_get(
         value: ValueRef,
@@ -88,7 +89,7 @@ unsafe extern "C" {
         out: *mut plsm_buf_t,
         err: *mut *mut plsm_error_t,
     ) -> i32;
-    pub fn plsm_pool_get_view(
+    pub fn plsm_internal_pool_get_view(
         pool: *mut plsm_pool_t,
         seq: u64,
         out: *mut *const Owner,
@@ -283,8 +284,8 @@ impl NativeView {
         BigInt::from(unsafe { plsm_view_seq(self.owner.0) })
     }
     #[napi(getter)]
-    pub fn timestamp_ns(&self) -> BigInt {
-        BigInt::from(unsafe { plsm_view_timestamp_ns(self.owner.0) })
+    pub fn time(&self) -> BigInt {
+        BigInt::from(unsafe { plsm_view_time(self.owner.0) })
     }
     #[napi]
     pub fn lookup(&self, env: Env, node: u32, key: String) -> Result<JsUnknown> {
@@ -533,11 +534,11 @@ pub fn available() -> bool {
     static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *SUPPORTED.get_or_init(|| {
         [
-            c"plsm_pool_get_view",
+            c"plsm_internal_pool_get_view",
             c"plsm_view_root",
             c"plsm_view_release",
             c"plsm_view_seq",
-            c"plsm_view_timestamp_ns",
+            c"plsm_view_time",
             c"plsm_view_bytes",
             c"plsm_value_get",
             c"plsm_value_index",
@@ -615,7 +616,7 @@ pub(super) fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
         fn GetProcAddress(module: *mut libc::c_void, name: *const u8) -> *mut libc::c_void;
     }
     unsafe {
-        let module = GetModuleHandleA(c"plasmite.dll".as_ptr().cast());
+        let module = GetModuleHandleA(c"plasmite2.dll".as_ptr().cast());
         if module.is_null() {
             ptr::null_mut()
         } else {

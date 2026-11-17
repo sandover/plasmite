@@ -771,13 +771,13 @@ mod pool_tests {
             )
             .unwrap();
         assert_eq!(first.seq, 1);
-        assert_eq!(first.timestamp_ns, 19);
+        assert_eq!(first.time, 19);
         assert!(first.json_native_safe());
         let second = pool
             .append_view(&first, AppendOptions::new(23, Durability::Fast))
             .unwrap();
         assert_eq!(second.seq, 2);
-        assert_eq!(second.timestamp_ns, 23);
+        assert_eq!(second.time, 23);
         assert_eq!(first.bytes().as_ptr(), second.bytes().as_ptr());
         let read = pool.get_view(2).unwrap();
         assert_eq!(

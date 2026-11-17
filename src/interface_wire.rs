@@ -8,6 +8,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub(crate) const LITE3_FRAME_HEADER_LEN: usize = 20;
+#[allow(dead_code, reason = "The CLI uses it before the HTTP stream cutover.")]
+pub(crate) const LITE3_RECORD_HEADER_LEN: usize = 5;
+#[allow(dead_code, reason = "The CLI uses it before the HTTP stream cutover.")]
+pub(crate) const LITE3_MESSAGE_ID_LEN: usize = 16;
+#[allow(dead_code, reason = "The CLI uses it before the HTTP stream cutover.")]
+pub(crate) const LITE3_MESSAGE_RECORD: u8 = b'M';
+#[allow(dead_code, reason = "The CLI uses it before the HTTP stream cutover.")]
+pub(crate) const LITE3_CONTROL_RECORD: u8 = b'C';
+
+#[allow(dead_code, reason = "The CLI uses it before the HTTP stream cutover.")]
+pub(crate) fn encode_lite3_record_header(kind: u8, length: u32) -> [u8; LITE3_RECORD_HEADER_LEN] {
+    let mut header = [0; LITE3_RECORD_HEADER_LEN];
+    header[0] = kind;
+    header[1..].copy_from_slice(&length.to_be_bytes());
+    header
+}
 
 pub(crate) struct Lite3FrameHeader {
     pub(crate) seq: u64,
@@ -25,6 +41,7 @@ impl Lite3FrameHeader {
         bytes
     }
 
+    #[allow(dead_code, reason = "The legacy HTTP client reads this header.")]
     pub(crate) fn decode(bytes: [u8; LITE3_FRAME_HEADER_LEN]) -> Self {
         Self {
             seq: u64::from_be_bytes(bytes[..8].try_into().expect("sequence field")),
@@ -191,6 +208,8 @@ pub(crate) struct HttpErrorWire {
     path: Option<String>,
     seq: Option<u64>,
     offset: Option<u64>,
+    missing: Option<u64>,
+    next_seq: Option<u64>,
 }
 
 impl HttpErrorWire {
@@ -210,7 +229,12 @@ impl HttpErrorWire {
     }
 
     pub(crate) fn into_error(self, kind: ErrorKind) -> Error {
-        let mut error = Error::new(kind);
+        let mut error = match (kind, self.missing, self.next_seq) {
+            (ErrorKind::RetentionGap, Some(missing), Some(next_seq)) if next_seq > missing => {
+                Error::retention_gap(missing, next_seq)
+            }
+            _ => Error::new(kind),
+        };
         if let Some(message) = self.message {
             error = error.with_message(message);
         }

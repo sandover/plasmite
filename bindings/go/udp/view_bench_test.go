@@ -45,9 +45,9 @@ func BenchmarkOwnedUDP(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					seed := seedAPI.(*local.Pool)
+					seed := seedAPI
 					defer seed.Close()
-					source, err := seed.AppendView(udpBenchmarkFixture(fixture), nil)
+					source, err := seed.FeedView(udpBenchmarkFixture(fixture), nil)
 					if err != nil {
 						b.Fatal(err)
 					}
@@ -60,7 +60,7 @@ func BenchmarkOwnedUDP(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					destination := destinationAPI.(*local.Pool)
+					destination := destinationAPI
 					defer destination.Close()
 					peer, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 					if err != nil {
@@ -128,11 +128,11 @@ func BenchmarkOwnedUDP(b *testing.B) {
 					defer pool.Close()
 					var follow *Follow
 					if strings.HasPrefix(lane, "view") {
-						follow, err = pool.FollowViews(NewFollowOptions())
+						follow, err = pool.FollowView()
 					} else if strings.HasPrefix(lane, "raw") {
-						follow, err = pool.FollowRaw(NewFollowOptions())
+						follow, err = pool.FollowLite3()
 					} else {
-						follow, err = pool.Follow(NewFollowOptions())
+						follow, err = pool.Follow()
 					}
 					if err != nil {
 						b.Fatal(err)
@@ -170,9 +170,9 @@ func BenchmarkOwnedUDP(b *testing.B) {
 								udpBenchmarkValue = out.Value
 								udpBenchmarkFull = out
 							case "view_forward":
-								udpBenchmarkView, e = destination.AppendView(frame.View, nil)
+								udpBenchmarkView, e = destination.FeedView(frame.View, nil)
 							case "view_copy":
-								udpBenchmarkView, e = destination.AppendView(frame.View.Data(), nil)
+								udpBenchmarkView, e = destination.FeedView(frame.View.Data(), nil)
 							}
 						case *Frame:
 							if frame.Seq != uint64(i) {
@@ -183,7 +183,7 @@ func BenchmarkOwnedUDP(b *testing.B) {
 								udpBenchmarkValue = len(frame.Payload)
 								udpBenchmarkRaw = frame.Payload
 							case "raw_forward":
-								_, e = destination.AppendLite3(frame.Payload, local.DurabilityFast)
+								_, e = destination.FeedLite3Receipt(frame.Payload, local.DurabilityFast)
 							case "json_selected":
 								var out struct{ Value int }
 								e = json.Unmarshal(frame.Message.Data, &out)
@@ -194,7 +194,7 @@ func BenchmarkOwnedUDP(b *testing.B) {
 								udpBenchmarkValue = out.Value
 								udpBenchmarkFull = out
 							case "json_forward":
-								udpBenchmarkView, e = destination.AppendJSONView(frame.Message.Data, nil)
+								udpBenchmarkView, e = destination.FeedJSONView(frame.Message.Data, nil)
 							}
 						default:
 							b.Fatal("unexpected control event")
@@ -222,7 +222,7 @@ func BenchmarkOwnedUDP(b *testing.B) {
 						b.Fatal("raw bytes changed")
 					}
 					if strings.HasSuffix(lane, "forward") || lane == "view_copy" {
-						final, e := destination.GetView(uint64(b.N))
+						final, e := fetchLocalView(destination, uint64(b.N))
 						if e != nil {
 							b.Fatal(e)
 						}

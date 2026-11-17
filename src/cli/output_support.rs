@@ -265,6 +265,10 @@ pub(crate) fn error_json(err: &Error) -> Value {
     if let Some(offset) = err.offset() {
         inner.insert("offset".to_string(), json!(offset));
     }
+    if let Some((missing, next_seq)) = err.missing().zip(err.next_seq()) {
+        inner.insert("missing".to_string(), json!(missing));
+        inner.insert("next_seq".to_string(), json!(next_seq));
+    }
     let causes = error_causes(err);
     if !causes.is_empty() {
         inner.insert("causes".to_string(), json!(causes));
@@ -320,12 +324,6 @@ pub(crate) fn error_text(err: &Error, use_color: bool) -> String {
     }
 
     lines.join("\n")
-}
-
-pub(crate) fn emit_follow_timeout_human(timeout_label: &str) {
-    if io::stderr().is_terminal() {
-        eprintln!("No messages received (timed out after {timeout_label}).");
-    }
 }
 
 pub(crate) fn clap_error_summary(err: &clap::Error) -> String {

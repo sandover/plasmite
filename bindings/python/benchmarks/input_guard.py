@@ -65,7 +65,7 @@ def main():
                 TemporaryDirectory() as directory,
                 plasmite.Client(directory) as client,
             ):
-                with client.pool("guard", 8 * 1024 * 1024) as pool:
+                with client.create_pool("guard", 8 * 1024 * 1024) as pool:
                     for repeat in range(7):
                         order = [("before", before), ("after", after)]
                         if repeat % 2:
@@ -73,11 +73,11 @@ def main():
                         for name, function in order:
                             _views.append_view = function
                             for _ in range(5):
-                                pool.append_view(data)
+                                pool.feed_view(data)
                             cpu = time.process_time_ns()
                             start = time.perf_counter_ns()
                             for _ in range(count):
-                                message = pool.append_view(data)
+                                message = pool.feed_view(data)
                             elapsed = time.perf_counter_ns() - start
                             used_cpu = time.process_time_ns() - cpu
                             assert message.data == data

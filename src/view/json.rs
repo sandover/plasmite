@@ -89,7 +89,7 @@ impl MessageView {
         let data = unsafe { JsonValue::from_validated(self.doc(), self.data().offset) };
         let wire = crate::interface_wire::MessageWire::new(
             self.seq,
-            crate::api::format_ts(self.timestamp_ns)?,
+            crate::api::format_ts(self.time)?,
             &tags,
             data,
         );

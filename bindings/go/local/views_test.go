@@ -11,8 +11,8 @@ import (
 
 func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 	client := newTestClient(t)
-	pool := newTestPool(t, client, "views").(*Pool)
-	original, err := pool.AppendJSON([]byte(`{"sensor":"north","metrics":{"power":7},"large":9223372036854775807,"zero":-0.0,"values":[1,null,"é"]}`), []string{"test"}, DurabilityFast)
+	pool := newTestPool(t, client, "views")
+	original, err := pool.FeedJSON([]byte(`{"sensor":"north","metrics":{"power":7},"large":9223372036854775807,"zero":-0.0,"values":[1,null,"é"]}`), []string{"test"}, DurabilityFast)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 	if err = json.Unmarshal(original, &receipt); err != nil {
 		t.Fatal(err)
 	}
-	view, err := pool.GetView(receipt.Seq)
+	view, err := pool.getView(receipt.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 		detached[i] = 0
 	}
 	pool.Close()
-	if _, err = pool.GetView(receipt.Seq); !errors.Is(err, ErrClosed) {
+	if _, err = pool.getView(receipt.Seq); !errors.Is(err, ErrClosed) {
 		t.Fatalf("closed %v", err)
 	}
 	var decoded struct {
@@ -98,13 +98,13 @@ func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 }
 
 func TestManagedViewRetriesCapacityAndAllowsConcurrentReads(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "large-views").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "large-views")
 	text := strings.Repeat("é", 40_000)
-	receipt, err := pool.AppendIdentity(map[string]any{"text": text, "power": 7}, nil)
+	receipt, err := pool.FeedReceipt(map[string]any{"text": text, "power": 7}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := pool.GetView(receipt.Seq)
+	view, err := pool.getView(receipt.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ type typedReading struct {
 }
 
 func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "typed-views").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "typed-views")
 	for _, text := range []string{
 		`{"sensor":"north","metrics":{"power":9223372036854775807},"zero":-0.0}`,
 		`{"sensor":"north","SENSOR":"later","metrics":{"power":7},"zero":1}`,
@@ -160,11 +160,11 @@ func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
 		`{"sensor":"north","metrics":{"power":1.5},"zero":1}`,
 		`{"sensor":"north","metrics":{"power":7},"zero":"bad"}`,
 	} {
-		receipt, err := pool.AppendJSONIdentity([]byte(text), nil, DurabilityFast)
+		receipt, err := pool.FeedJSONReceipt([]byte(text), nil, DurabilityFast)
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := pool.GetView(receipt.Seq)
+		view, err := pool.getView(receipt.Seq)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,12 +187,12 @@ func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
 }
 
 func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "duplicate-views").(*Pool)
-	receipt, err := pool.AppendIdentity(map[string]any{"ab": 1, "bA": 2}, nil)
+	pool := newTestPool(t, newTestClient(t), "duplicate-views")
+	receipt, err := pool.FeedReceipt(map[string]any{"ab": 1, "bA": 2}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := pool.GetView(receipt.Seq)
+	original, err := pool.getView(receipt.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,11 +208,11 @@ func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
 	bytes := original.Lite3()
 	second := int(values[1].node)
 	copy(bytes[second-3:second-1], "ab") // Valid collision probe: ab and bA share their native hash.
-	seq, err := pool.AppendLite3(bytes, DurabilityFast)
+	seq, err := feedLite3Sequence(pool, bytes, DurabilityFast)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := pool.GetView(seq)
+	view, err := pool.getView(seq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,12 +235,12 @@ func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
 }
 
 func TestManagedViewPartialASCIIAndCaseInsensitiveFieldsStayNative(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "partial-ascii").(*Pool)
-	receipt, err := pool.AppendIdentity(map[string]any{"SENSOR": "north", "metrics": map[string]any{"POWER": 7, "unused": "ignore"}, "ignored": strings.Repeat("x", 64*1024)}, nil)
+	pool := newTestPool(t, newTestClient(t), "partial-ascii")
+	receipt, err := pool.FeedReceipt(map[string]any{"SENSOR": "north", "metrics": map[string]any{"POWER": 7, "unused": "ignore"}, "ignored": strings.Repeat("x", 64*1024)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := pool.GetView(receipt.Seq)
+	view, err := pool.getView(receipt.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}

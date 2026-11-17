@@ -1,3 +1,4 @@
+const { timeText } = require("./message");
 // Immutable language views. Backends own checked Lite3 bytes and return node
 // descriptors for containers/bytes; scalars cross directly and undefined means absent.
 const refs = new WeakMap();
@@ -5,12 +6,6 @@ const messages = new WeakMap();
 const readonly = () => { throw new TypeError("Plasmite views are read-only"); };
 const indexOf = key => typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)
   && Number(key) < 0xffffffff ? Number(key) : -1;
-
-function timestampText(ns) {
-  const date = new Date(Number(ns / 1000000n));
-  const fraction = (ns % 1000000000n).toString().padStart(9, "0").replace(/0+$/, "");
-  return date.toISOString().slice(0, -5) + (fraction ? "." + fraction : "") + "Z";
-}
 
 function createMessageView(backend, seq, timestampNs) {
   const cache = new Map();
@@ -74,10 +69,10 @@ function createMessageView(backend, seq, timestampNs) {
     return backend.lookup(root.node, key);
   };
   const message = Object.freeze({
-    seq, timestampNs,
+    seq,
     get data() { return wrap(dataNode ??= lookupRoot("data")); },
     get meta() { return wrap(metaNode ??= lookupRoot("meta")); },
-    get timeRfc3339() { return timestampText(timestampNs); },
+    time: timestampNs,
   });
   messages.set(message, { backend });
   return message;
@@ -85,7 +80,7 @@ function createMessageView(backend, seq, timestampNs) {
 
 function toNative(value) {
   const message = messages.get(value);
-  if (message) return { seq: value.seq, time: value.timeRfc3339,
+  if (message) return { seq: value.seq, time: value.time,
     meta: { tags: toNative(value.meta.tags) }, data: toNative(value.data) };
   const ref = refs.get(value);
   if (ref) return ref.backend.materialize(ref.node);
@@ -98,7 +93,7 @@ function toJson(value) {
   if (message) {
     const data = refs.get(value.data);
     const tags = refs.get(value.meta.tags);
-    return `{"seq":${value.seq},"time":${JSON.stringify(value.timeRfc3339)},"meta":{"tags":${tags.backend.json(tags.node)}},"data":${data.backend.json(data.node)}}`;
+    return `{"seq":${value.seq},"time":${JSON.stringify(timeText(value.time))},"meta":{"tags":${tags.backend.json(tags.node)}},"data":${data.backend.json(data.node)}}`;
   }
   const ref = refs.get(value);
   if (ref) return ref.backend.json(ref.node);
@@ -125,7 +120,7 @@ function createNativeMessage(owner) {
       for (let value = cursor.nextValue(); value !== undefined; value = cursor.nextValue()) yield value;
     },
   };
-  return createMessageView(backend, owner.seq, owner.timestampNs);
+  return createMessageView(backend, owner.seq, owner.time);
 }
 
 const valueReference = value => refs.get(value);

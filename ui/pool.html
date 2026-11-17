@@ -911,10 +911,25 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (found) { select(found); return; }
           if (target > state.messages[state.messages.length - 1].seq) return;
           try {
-            const response = await fetch("/v0/pools/" + encodeURIComponent(poolName) + "/messages/" + target, { cache: "no-store" });
+            const response = await fetch("/v2/pools/" + encodeURIComponent(poolName) + "/fetch?since=" + target, { cache: "no-store" });
             if (response.ok) {
-              const message = parseJSON(await response.text()).message;
-              if (generation === state.generation) select(fromRaw(message));
+              const reader = response.body.getReader();
+              try {
+                const decoder = new TextDecoder();
+                let line = "";
+                while (!line.includes("\n")) {
+                  const chunk = await reader.read();
+                  if (chunk.done) break;
+                  line += decoder.decode(chunk.value, { stream: true });
+                }
+                if (line) {
+                  const message = parseJSON(line.split("\n", 1)[0]);
+                  if (!message.type && message.seq === target && generation === state.generation) select(fromRaw(message));
+                }
+              } finally {
+                await reader.cancel().catch(() => {});
+                reader.releaseLock();
+              }
             }
           } catch (_) { /* The address stays; the log is still here. */ }
         }
@@ -1244,7 +1259,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           let data;
           try { data = JSON.parse(input.value); } catch (_) { data = { text: input.value }; }
           try {
-            const response = await fetch("/v0/pools/" + encodeURIComponent(poolName) + "/append", {
+            const response = await fetch("/v2/pools/" + encodeURIComponent(poolName) + "/feed", {
               method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
             });
             if (response.status === 401) { toLogin(); return; }

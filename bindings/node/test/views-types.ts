@@ -2,17 +2,17 @@ import { Pool, toNative, toJson } from '../types';
 declare const pool: Pool;
 interface Reading { metrics: { power: number }; samples: { value: number }[]; bytes: Uint8Array }
 async function usage() {
-  const m = await pool.getView<Reading>(17n);
-  const written = await pool.appendView<Reading>({ metrics: { power: 42 } });
+  const m = (await (await pool.fetchView<Reading>({ since: 17n })).next()).value!;
+  const written = await pool.feedView<Reading>({ metrics: { power: 42 } });
   const writtenPower: number = written.data.metrics.power;
-  await pool.appendView(m, m.meta.tags);
-  await pool.appendView({}, ['sensor'] as const);
+  await pool.feedView(m, { tags: m.meta.tags });
+  await pool.feedView({}, { tags: ['sensor'] as const });
   // @ts-expect-error committed results remain immutable
   written.data.metrics.power = 2;
   const power: number = m.data.metrics.power;
   const editable: Reading = toNative(m.data);
   const child: { power: number } = toNative(m.data.metrics);
-  const envelope: { seq: bigint; time: string; meta: { tags: string[] }; data: Reading } = toNative(m);
+  const envelope: { seq: bigint; time: bigint; meta: { tags: string[] }; data: Reading } = toNative(m);
   editable.metrics.power = 1;
   child.power = 2;
   // @ts-expect-error views are immutable
@@ -26,12 +26,12 @@ async function usage() {
 void usage;
 
 async function streamTypes(pool: Pool, udp: import('../types').UdpPool) {
-  for await (const message of pool.followViews<Reading>({ maxMessages: 1 })) {
+  for await (const message of await pool.fetchView<Reading>()) {
     const power: number = message.data.metrics.power;
     // @ts-expect-error streamed snapshots stay immutable
     message.data.metrics.power = power;
   }
-  const follow = await udp.followViews<Reading>();
+  const follow = await udp.followView<Reading>();
   for await (const event of follow) {
     if (event.kind === 'frame') {
       const power: number = event.message.data.metrics.power;

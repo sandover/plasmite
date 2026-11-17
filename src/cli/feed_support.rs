@@ -3,14 +3,12 @@
 use super::message_stream::{InputFormat, InputRecord, read_records};
 use super::output::OutputMode;
 use super::output_support::{emit_lite3, emit_message};
-use super::support::{RetryConfig, message_to_json, now_ns, retry_append};
+use super::support::message_to_json;
 use crate::ColorMode;
-use plasmite::api::{
-    AppendOptions, Durability, Error, ErrorKind, Message, Pool, PoolApiExt, RemotePool, lite3,
-};
+use plasmite::api::{Durability, Error, ErrorKind, Feed, Message, Pool, RemotePool, lite3};
 use serde::Deserialize;
 use serde_json::Value;
-use std::io::{self, Read};
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Deserialize)]
@@ -99,25 +97,12 @@ pub(crate) fn record_payload(record: InputRecord, tags: &[String]) -> Result<Vec
 pub(crate) fn missing_feed_data_error() -> Error {
     Error::new(ErrorKind::Usage)
         .with_message("missing message input")
-        .with_hint("Pipe messages to feed, use --file, or provide a message argument.")
-}
-
-pub(crate) fn open_feed_reader(path: &str) -> Result<Box<dyn Read>, Error> {
-    if path == "-" {
-        return Ok(Box::new(io::stdin()));
-    }
-    Ok(Box::new(std::fs::File::open(path).map_err(|err| {
-        Error::new(ErrorKind::Io)
-            .with_message("failed to read message file")
-            .with_path(path)
-            .with_source(err)
-    })?))
+        .with_hint("Pipe messages to feed or provide a message argument.")
 }
 
 pub(crate) struct FeedIngestContext<'a> {
     pub(crate) tags: &'a [String],
     pub(crate) durability: Durability,
-    pub(crate) retry_config: Option<RetryConfig>,
     pub(crate) pool_handle: &'a mut Pool,
     pub(crate) color_mode: ColorMode,
     pub(crate) output_mode: OutputMode,
@@ -128,7 +113,6 @@ pub(crate) struct FeedIngestContext<'a> {
 pub(crate) struct RemoteFeedIngestContext<'a> {
     pub(crate) tags: &'a [String],
     pub(crate) durability: Durability,
-    pub(crate) retry_config: Option<RetryConfig>,
     pub(crate) remote_pool: &'a RemotePool,
     pub(crate) color_mode: ColorMode,
     pub(crate) output_mode: OutputMode,
@@ -194,20 +178,19 @@ pub(crate) fn ingest_from_stdin(
         emit: emit_receipt,
         stop: ctx.stop,
     };
+    let feed = Feed::new().durability(ctx.durability);
     ingest_with_append(reader, options, |payload| {
-        retry_append(ctx.retry_config, || {
-            if options.output.is_binary() {
-                let timestamp_ns = now_ns()?;
-                let seq = ctx
-                    .pool_handle
-                    .append_lite3(payload, AppendOptions::new(timestamp_ns, ctx.durability))?;
-                Ok(Receipt::Binary { seq, timestamp_ns })
-            } else {
-                ctx.pool_handle
-                    .append_lite3_with_receipt_now(payload, ctx.durability)
-                    .map(Receipt::Text)
-            }
-        })
+        if options.output.is_binary() {
+            let receipt = ctx.pool_handle.feed_lite3_receipt(payload, feed.clone())?;
+            Ok(Receipt::Binary {
+                seq: receipt.seq,
+                timestamp_ns: receipt.time,
+            })
+        } else {
+            ctx.pool_handle
+                .feed_lite3(payload, feed.clone())
+                .map(Receipt::Text)
+        }
     })
 }
 
@@ -224,18 +207,19 @@ pub(crate) fn ingest_from_stdin_remote(
         emit: emit_receipt,
         stop: ctx.stop,
     };
+    let feed = Feed::new().durability(ctx.durability);
     ingest_with_append(reader, options, |payload| {
-        retry_append(ctx.retry_config, || {
-            let append = AppendOptions::new(0, ctx.durability);
-            if options.output.is_binary() {
-                let (seq, timestamp_ns) = ctx.remote_pool.append_lite3_identity(payload, append)?;
-                Ok(Receipt::Binary { seq, timestamp_ns })
-            } else {
-                ctx.remote_pool
-                    .append_lite3_with_receipt(payload, append)
-                    .map(Receipt::Text)
-            }
-        })
+        if options.output.is_binary() {
+            let receipt = ctx.remote_pool.feed_lite3_receipt(payload, feed.clone())?;
+            Ok(Receipt::Binary {
+                seq: receipt.seq,
+                timestamp_ns: receipt.time,
+            })
+        } else {
+            ctx.remote_pool
+                .feed_lite3(payload, feed.clone())
+                .map(Receipt::Text)
+        }
     })
 }
 
@@ -251,7 +235,7 @@ pub(crate) fn ingest_from_stdin_udp(
         if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
             return Ok(());
         }
-        pool.send_lite3(&payload)
+        pool.feed_lite3(&payload, Feed::new())
     })
 }
 

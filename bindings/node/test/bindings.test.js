@@ -1,4 +1,3 @@
-const { FollowStart } = require("../follow");
 /*
 Purpose: Exercise the Node binding against native pools and remote servers.
 Key Exports: None (node:test suite).
@@ -26,11 +25,14 @@ const {
   UdpClient,
   UdpFollow,
   UdpPool,
-  UdpStart,
   RemoteClient,
   RemoteError,
   RemotePool,
 } = require("../index.js");
+
+function feedForTest(pool, value, tags) {
+  return parseMessage(pool.feedJson(Buffer.from(JSON.stringify(value)), { tags }));
+}
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "plasmite-node-"));
@@ -64,9 +66,9 @@ function withPool(poolName, run, sizeBytes = TEST_POOL_SIZE_BYTES) {
 
 function fillPast(pool, seq) {
   for (let i = 0; i < 10000; i += 1) {
-    pool.append({ padding: "x".repeat(4096), i });
+    feedForTest(pool, { padding: "x".repeat(4096), i });
     try {
-      pool.get(seq);
+      parseMessage(pool._getJson(seq));
     } catch (err) {
       if (err instanceof PlasmiteNativeError && err.kind === ErrorKind.NotFound) {
         return;
@@ -81,16 +83,16 @@ test("native output buffers and slices survive handle close and garbage collecti
   const script = `
     const assert = require('node:assert/strict');
     const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
-    const { Client } = require(${JSON.stringify(path.resolve(__dirname, "../index.js"))});
+    const { Client, parseMessage } = require(${JSON.stringify(path.resolve(__dirname, "../index.js"))});
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-owned-'));
     try {
       const client = new Client(dir), pool = client.createPool('owned', 1048576n);
-      const message = pool.append({text:'x'.repeat(4096)});
-      let frame = pool.getLite3(message.seq);
+      const message = parseMessage(pool.feedJson(Buffer.from(JSON.stringify({text:'x'.repeat(4096)}))));
+      let frame = pool._getLite3(message.seq);
       const expected = Buffer.from(frame.payload);
       const slice = frame.payload.subarray(1);
-      const json = pool.getJson(message.seq);
-      const other = pool.getLite3(message.seq).payload;
+      const json = pool._getJson(message.seq);
+      const other = pool._getLite3(message.seq).payload;
       other.fill(0);
       assert.deepEqual(frame.payload, expected);
       frame = null;
@@ -123,16 +125,15 @@ test("append/get supports large payload and tags", () => {
   withPool("big", ({ pool }) => {
     const payload = { blob: "0123456789abcdef".repeat(4096) };
     const tags = ["alpha", "beta", "gamma"];
-    const messageBuf = pool.appendJson(
+    const messageBuf = pool.feedJson(
       Buffer.from(JSON.stringify(payload)),
-      tags,
-      Durability.Fast
+      { tags, durability: Durability.Fast }
     );
     const message = JSON.parse(messageBuf.toString("utf8"));
     assert.deepEqual(message.data, payload);
     assert.deepEqual(message.meta.tags, tags);
 
-    const fetchedBuf = pool.getJson(BigInt(message.seq));
+    const fetchedBuf = pool._getJson(BigInt(message.seq));
     const fetched = JSON.parse(fetchedBuf.toString("utf8"));
     assert.deepEqual(fetched.data, payload);
   });
@@ -150,32 +151,32 @@ test("parseMessage accepts plain envelope objects", () => {
     meta: { tags: ["alpha"] },
   });
   assert.equal(message.seq, 7n);
-  assert.equal(message.timeRfc3339, "2026-02-18T00:00:00Z");
+  assert.equal(message.time, BigInt(Date.parse("2026-02-18T00:00:00Z")) * 1_000_000n);
+  assert.equal(JSON.parse(message.raw).time, "2026-02-18T00:00:00.000000000Z");
   assert.deepEqual(message.tags, ["alpha"]);
 });
 
-test("append/get aliases and parseMessage helper round-trip JSON", () => {
+test("encoded feed and parseMessage round-trip JSON", () => {
   withPool("aliases", ({ pool }) => {
-    const parsed = pool.append({ kind: "alias", ok: true }, ["alpha"]);
+    const parsed = feedForTest(pool, { kind: "alias", ok: true }, ["alpha"]);
     assert.equal(parsed.data.kind, "alias");
     assert.equal(parsed.data.ok, true);
     assert.deepEqual(parsed.meta.tags, ["alpha"]);
     assert.ok(Buffer.isBuffer(parsed.raw));
-    assert.ok(parsed.time instanceof Date);
-    assert.equal(typeof parsed.timeRfc3339, "string");
+    assert.equal(typeof parsed.time, "bigint");
 
-    const fetched = pool.get(parsed.seq);
+    const fetched = parseMessage(pool._getJson(parsed.seq));
     assert.equal(fetched.data.kind, "alias");
     assert.equal(fetched.data.ok, true);
   });
 });
 
-test("client.pool creates missing pool and reopens existing pool", () => {
+test("openPool with create preserves existing pools", () => {
   withClient(({ client }) => {
-    const first = client.pool("work", TEST_POOL_SIZE_BYTES);
-    const second = client.pool("work", 2 * TEST_POOL_SIZE_BYTES);
-    const appended = first.append({ kind: "created" }, ["alpha"]);
-    const fetched = second.get(appended.seq);
+    const first = client.openPool("work", { create: true });
+    const second = client.openPool("work", { create: true });
+    const appended = feedForTest(first, { kind: "created" }, ["alpha"]);
+    const fetched = parseMessage(second._getJson(appended.seq));
     assert.equal(fetched.data.kind, "created");
     first.close();
     second.close();
@@ -189,10 +190,10 @@ test("default client creates pool dir in fresh HOME", () => {
   assert.equal(fs.existsSync(expectedPoolDir), false);
 
   const script = `
-    const { Client } = require("./index.js");
+    const { Client, parseMessage } = require("./index.js");
     const client = new Client();
-    const pool = client.pool("work", ${TEST_POOL_SIZE_BYTES});
-    pool.append({ kind: "one" }, ["alpha"]);
+    const pool = client.openPool("work", { create: true });
+    pool.feedJson(Buffer.from(JSON.stringify({ kind: "one" })), { tags: ["alpha"] });
     pool.close();
     client.close();
   `;
@@ -206,55 +207,45 @@ test("default client creates pool dir in fresh HOME", () => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test("tail timeout returns no message and close is safe", () => {
-  withPool("tail", ({ pool }) => {
-    const stream = pool.openFollow(FollowStart.sequence(BigInt(9999)), BigInt(1), BigInt(10));
-    const next = stream.nextJson();
-    assert.equal(next, null);
-    stream.close();
-    stream.close();
+test("follow per-call wait expires and close is safe", async () => {
+  await withPoolAsync("live", async ({ pool }) => {
+    const reader = await pool.follow();
+    assert.deepEqual(await reader.next(0.01), { done: false, value: undefined });
+    await reader.return();
+    await reader.return();
   });
 });
 
-test("stream and lite3 stream support for-of iteration", () => {
-  withPool("iter", ({ pool }) => {
-    const first = pool.append({ kind: "one" }, ["iter"]);
-    pool.append({ kind: "two" }, ["iter"]);
-    pool.append({ kind: "three" }, ["iter"]);
+test("text and Lite3 fetch readers share finite iteration", async () => {
+  await withPoolAsync("iter", async ({ pool }) => {
+    const first = await pool.feed({ kind: "one" }, { tags: ["iter"] });
+    await pool.feed({ kind: "two" }, { tags: ["iter"] });
+    await pool.feed({ kind: "three" }, { tags: ["iter"] });
 
-    const stream = pool.openFollow(FollowStart.sequence(first.seq), BigInt(3), BigInt(50));
     const seenKinds = [];
-    for (const message of stream) {
-      seenKinds.push(parseMessage(message).data.kind);
-    }
+    for await (const message of await pool.fetch({ since: first.seq })) seenKinds.push(message.data.kind);
     assert.deepEqual(seenKinds, ["one", "two", "three"]);
-    assert.equal(stream.nextJson(), null);
-    stream.close();
 
-    const frameSeed = pool.getLite3(first.seq);
-    assert.ok(frameSeed.time instanceof Date);
-    const liteSeq = pool.appendLite3(frameSeed.payload);
-    pool.appendLite3(frameSeed.payload);
-    const lite3Stream = pool.openLite3Follow(FollowStart.sequence(liteSeq), BigInt(2), BigInt(50));
+    const seed = await pool.fetchLite3({ since: first.seq });
+    const { value: frameSeed } = await seed.next();
+    await seed.return();
+    const liteSeq = pool.feedLite3Receipt(frameSeed.payload).seq;
+    pool.feedLite3Receipt(frameSeed.payload);
     const frameSeqs = [];
-    for (const frame of lite3Stream) {
-      frameSeqs.push(frame.seq);
-    }
+    for await (const frame of await pool.fetchLite3({ since: liteSeq })) frameSeqs.push(frame.seq);
     assert.deepEqual(frameSeqs, [liteSeq, liteSeq + 1n]);
-    assert.equal(lite3Stream.next(), null);
-    lite3Stream.close();
   });
 });
 
-test("tail filters by tags before limiting matching messages", async () => {
+test("fetch filters retained messages by tags", async () => {
   await withPoolAsync("tail-matching", async ({ pool }) => {
-    pool.append({ kind: "drop", i: 1 }, ["drop"]);
-    pool.append({ kind: "keep", i: 2 }, ["keep"]);
-    pool.append({ kind: "drop", i: 3 }, ["drop"]);
-    pool.append({ kind: "keep", i: 4 }, ["keep"]);
+    feedForTest(pool, { kind: "drop", i: 1 }, ["drop"]);
+    feedForTest(pool, { kind: "keep", i: 2 }, ["keep"]);
+    feedForTest(pool, { kind: "drop", i: 3 }, ["drop"]);
+    feedForTest(pool, { kind: "keep", i: 4 }, ["keep"]);
 
     const tailed = [];
-    for await (const message of pool.follow({start: FollowStart.all(),  tags: ["keep"], maxMessages: 2, timeoutMs: 10 })) {
+    for await (const message of await pool.fetch({ tags: ["keep"] })) {
       tailed.push(message.data.i);
     }
     assert.deepEqual(tailed, [2, 4]);
@@ -263,14 +254,14 @@ test("tail filters by tags before limiting matching messages", async () => {
   });
 });
 
-test("tail timeout with no messages returns done", async () => {
+test("follow timeout keeps the reader open", async () => {
   await withPoolAsync("tail-empty", async ({ pool }) => {
-    const iterator = pool
-      .follow({ start: FollowStart.sequence(9999), maxMessages: 1, timeoutMs: 10, tags: ["nope"] })
-      [Symbol.asyncIterator]();
-    const next = await iterator.next();
-    assert.equal(next.done, true);
-    assert.equal(next.value, undefined);
+    const reader = await pool.follow({ tags: ["keep"] });
+    try {
+      assert.deepEqual(await reader.next(0.01), { done: false, value: undefined });
+      const message = feedForTest(pool, { later: true }, ["keep"]);
+      assert.equal((await reader.next(0.1)).value.seq, message.seq);
+    } finally { reader.close(); }
   });
 });
 
@@ -278,15 +269,17 @@ test("a quiet native tail leaves timers free to append and abort", async () => {
   await withPoolAsync("responsive-tail", async ({ pool }) => {
     let timer;
     try {
-      timer = setTimeout(() => pool.append({ from: "timer" }), 10);
-      const result = await pool.follow({start: FollowStart.all(),  maxMessages: 1, timeoutMs: 1000 }).next();
+      timer = setTimeout(() => feedForTest(pool, { from: "timer" }), 10);
+      const reader = await pool.follow({ since: "oldest" });
+      const result = await reader.next(1);
+      reader.close();
       assert.equal(result.done, false);
       assert.equal(result.value.data.from, "timer");
     } finally {
       clearTimeout(timer);
     }
     const controller = new AbortController();
-    const tail = pool.follow({ start: FollowStart.sequence(2n), timeoutMs: 5000, signal: controller.signal });
+    const tail = await pool.follow({ since: 2n, signal: controller.signal });
     const next = tail.next();
     const abortTimer = setTimeout(() => controller.abort(), 10);
     let deadline;
@@ -306,26 +299,26 @@ test("a quiet native tail leaves timers free to append and abort", async () => {
 
 test("worker waits preserve position and close keeps an active handle alive", async () => {
   await withPoolAsync("worker-waits", async ({ pool }) => {
-    const stream = pool.openFollow(FollowStart.sequence(1n), 1n);
+    const stream = (await pool.follow({ since: 1n }))._stream;
     try {
       assert.equal((await stream.nextJsonWait(0)).status, 0);
-      const message = pool.append({ value: 7 });
+      const message = feedForTest(pool, { value: 7 });
       const read = await stream.nextJsonWait(0);
       assert.equal(read.status, 1);
       assert.equal(parseMessage(read.message).seq, message.seq);
-      assert.equal((await stream.nextJsonWait(0)).status, 2);
-      const raw = pool.openLite3Follow(FollowStart.sequence(1n), 1n);
+      assert.equal((await stream.nextJsonWait(0)).status, 0);
+      const raw = (await pool.fetchLite3({ since: 1n }))._stream;
       try {
         const result = await raw.nextWait(0);
         assert.equal(result.status, 1);
         assert.equal(result.frame.seq, message.seq);
-        assert.ok(result.frame.time instanceof Date);
+        assert.ok(typeof result.frame.time === "bigint");
         assert.equal((await raw.nextWait(0)).status, 2);
       } finally { raw.close(); }
     } finally { stream.close(); }
     for (const [stream, wait] of [
-      [pool.openFollow(FollowStart.sequence(2n)), (s) => s.nextJsonWait(5000)],
-      [pool.openLite3Follow(FollowStart.sequence(2n)), (s) => s.nextWait(5000)],
+      [(await pool.follow({ since: 2n }))._stream, (s) => s.nextJsonWait(5000)],
+      [(await pool.followLite3({ since: 2n }))._stream, (s) => s.nextWait(5000)],
     ]) {
       const pending = wait(stream);
       await assert.rejects(wait(stream), /active reader/);
@@ -338,7 +331,7 @@ test("worker waits preserve position and close keeps an active handle alive", as
 
 test("local tail finishes at u64 maximum without reopening from zero", async () => {
   await withPoolAsync("last-sequence", async ({ pool, poolDir }) => {
-    pool.append({ last: true });
+    feedForTest(pool, { last: true });
     const file = fs.openSync(path.join(poolDir, "last-sequence.plasmite"), "r+");
     const header = Buffer.alloc(104);
     fs.readSync(file, header, 0, header.length, 0);
@@ -351,96 +344,46 @@ test("local tail finishes at u64 maximum without reopening from zero", async () 
       }
     } finally { fs.closeSync(file); }
     const messages = [];
-    for await (const message of pool.follow({ start: FollowStart.sequence(last), timeoutMs: 100 })) messages.push(message.seq);
+    for await (const message of await pool.follow({ since: last })) messages.push(message.seq);
     assert.deepEqual(messages, [last]);
   });
 });
 
-test("local tails can fail closed on retention gaps", async () => {
-  await withPoolAsync(
-    "tail-gap",
-    async ({ pool }) => {
-      const first = pool.append({ kind: "first" });
-      fillPast(pool, first.seq);
-
-      const continuedIterator = pool
-        .follow({ start: FollowStart.sequence(first.seq), maxMessages: 1, timeoutMs: 50 })
-        [Symbol.asyncIterator]();
-      const continued = await continuedIterator.next();
-      assert.equal(continued.done, false);
-      assert.ok(continued.value.seq > first.seq);
-      await continuedIterator.return();
-
-      await assert.rejects(
-        async () =>
-          pool
-            .follow({
-              start: FollowStart.sequence(first.seq),
-              tags: ["never"],
-              timeoutMs: 50,
-              errorOnGap: true,
-            })
-            [Symbol.asyncIterator]()
-            .next(),
-        (err) => {
-          assert.ok(err instanceof PlasmiteNativeError);
-          assert.equal(err.kind, ErrorKind.RetentionGap);
-          assert.equal(err.seq, first.seq);
-          return true;
-        },
-      );
-    },
-    64 * 1024,
-  );
-});
-
-test("an open stream reports the first unread sequence after overwrite", () => {
-  withPool("slow-reader", ({ pool }) => {
-    const seed = pool.append({ kind: "seed" });
-    const stream = pool.openFollow(FollowStart.sequence(seed.seq), null, 500n, true);
-    try {
-      assert.equal(parseMessage(stream.nextJson()).seq, seed.seq);
-      const lost = pool.append({ kind: "lost" });
-      fillPast(pool, lost.seq);
-      assert.throws(() => stream.nextJson(), {
-        kind: ErrorKind.RetentionGap,
-        seq: lost.seq,
+test("a retention gap gives the caller the first retained sequence", async () => {
+  await withPoolAsync("tail-gap", async ({ pool }) => {
+    const first = feedForTest(pool, { kind: "first" });
+    fillPast(pool, first.seq);
+    for (const open of [pool.follow, pool.fetchLite3]) {
+      await assert.rejects(open.call(pool, { since: first.seq, tags: ["never"] }), (err) => {
+        assert.ok(err instanceof PlasmiteNativeError);
+        assert.equal(err.kind, ErrorKind.RetentionGap);
+        assert.equal(err.seq, first.seq);
+        assert.ok(err.nextSeq > first.seq);
+        return true;
       });
-      assert.equal(stream.nextJson(), null);
-    } finally {
-      stream.close();
     }
   }, 64 * 1024);
 });
 
-test("lite3 streams can fail closed on retention gaps", () => {
-  withPool(
-    "lite3-gap",
-    ({ pool }) => {
-      const first = pool.append({ kind: "first" });
-      fillPast(pool, first.seq);
-
-      const stream = pool.openLite3Follow(FollowStart.sequence(first.seq), null, BigInt(50), true);
-      assert.throws(
-        () => stream.next(),
-        (err) => {
-          assert.ok(err instanceof PlasmiteNativeError);
-          assert.equal(err.kind, ErrorKind.RetentionGap);
-          assert.equal(err.seq, first.seq);
-          return true;
-        },
-      );
-      stream.close();
-    },
-    64 * 1024,
-  );
+test("an open stream reports the first unread sequence after overwrite", async () => {
+  await withPoolAsync("slow-reader", async ({ pool }) => {
+    const seed = feedForTest(pool, { kind: "seed" });
+    const reader = await pool.follow({ since: seed.seq });
+    try {
+      assert.equal((await reader.next()).value.seq, seed.seq);
+      const lost = feedForTest(pool, { kind: "lost" });
+      fillPast(pool, lost.seq);
+      await assert.rejects(reader.next(), { kind: ErrorKind.RetentionGap, seq: lost.seq });
+      assert.equal((await reader.next()).done, true);
+    } finally { reader.close(); }
+  }, 64 * 1024);
 });
 
 test("closed pool/client reject operations", () => {
   withClient(({ client }) => {
     const pool = client.createPool("closed", TEST_POOL_SIZE_BYTES);
     pool.close();
-    assert.throws(() => pool.appendJson(Buffer.from("{}"), [], Durability.Fast));
+    assert.throws(() => pool.feedJson(Buffer.from("{}"), { durability: Durability.Fast }));
     client.close();
     assert.throws(() => client.createPool("other", TEST_POOL_SIZE_BYTES));
   });
@@ -483,7 +426,7 @@ test("native error paths do not become error metadata", () => {
 
 test("missing sequences and corrupt pool files carry different error details", () => {
   withPool("damaged", ({ client, pool, poolDir }) => {
-    assert.throws(() => pool.get(42n), {
+    assert.throws(() => parseMessage(pool._getJson(42n)), {
       kind: ErrorKind.NotFound,
       seq: 42n,
       path: undefined,
@@ -501,14 +444,14 @@ test("missing sequences and corrupt pool files carry different error details", (
 
 test("native corrupt-frame errors retain a zero bigint offset", () => {
   withPool("offset-error", ({ pool, poolDir }) => {
-    pool.append({ value: 1 });
+    feedForTest(pool, { value: 1 });
     const filename = path.join(poolDir, "offset-error.plasmite");
     const header = fs.readFileSync(filename);
     const ring = Number(header.readBigUInt64LE(40));
     const file = fs.openSync(filename, "r+");
     try { fs.writeSync(file, Buffer.from("X"), 0, 1, ring); }
     finally { fs.closeSync(file); }
-    assert.throws(() => pool.get(1n), (err) => {
+    assert.throws(() => parseMessage(pool._getJson(1n)), (err) => {
       assert.ok(err instanceof PlasmiteNativeError);
       assert.equal(err.kind, ErrorKind.Corrupt);
       assert.equal(err.offset, 0n);
@@ -520,7 +463,7 @@ test("native corrupt-frame errors retain a zero bigint offset", () => {
 test("native missing-message errors retain exact uint64 sequences", () => {
   withPool("exact-errors", ({ pool }) => {
     for (const seq of [0n, 9007199254740992n, 9007199254740993n, (1n << 64n) - 1n]) {
-      assert.throws(() => pool.get(seq), (err) => {
+      assert.throws(() => parseMessage(pool._getJson(seq)), (err) => {
         assert.ok(err instanceof PlasmiteNativeError);
         assert.equal(err.seq, seq);
         assert.equal(err.offset, undefined);
@@ -532,13 +475,13 @@ test("native missing-message errors retain exact uint64 sequences", () => {
 
 test("native errors with unknown kind default to Io", () => {
   const pool = new Pool({
-    appendJson() {
+    feedJson() {
       throw Object.assign(new Error("plasmite error: kind=NoSuchKind; message=bad"), { kind: "NoSuchKind" });
     },
   });
 
   assert.throws(
-    () => pool.appendJson(Buffer.from("{}"), [], Durability.Fast),
+    () => pool.feedJson(Buffer.from("{}"), { durability: Durability.Fast }),
     (err) => {
       assert.ok(err instanceof PlasmiteNativeError);
       assert.equal(err.kind, ErrorKind.Io);
@@ -547,36 +490,35 @@ test("native errors with unknown kind default to Io", () => {
   );
 });
 
-test("lite3 append/get/tail round-trips bytes", () => {
-  withPool("lite3", ({ pool }) => {
+test("Lite3 feed and fetch round-trip bytes", async () => {
+  await withPoolAsync("lite3", async ({ pool }) => {
     const payload = { x: 1 };
-    const messageBuf = pool.appendJson(
+    const messageBuf = pool.feedJson(
       Buffer.from(JSON.stringify(payload)),
-      ["alpha"],
-      Durability.Fast
+      { tags: ["alpha"], durability: Durability.Fast }
     );
     const message = JSON.parse(messageBuf.toString("utf8"));
-    const lite3Frame = pool.getLite3(BigInt(message.seq));
-    assert.ok(lite3Frame.time instanceof Date);
+    const lite3Frame = pool._getLite3(BigInt(message.seq));
+    assert.equal(typeof lite3Frame.time, "bigint");
     assert.ok(lite3Frame.payload.length > 0);
 
-    const seq2 = pool.appendLite3(lite3Frame.payload);
-    const lite3Frame2 = pool.getLite3(seq2);
+    const seq2 = pool.feedLite3Receipt(lite3Frame.payload).seq;
+    const lite3Frame2 = pool._getLite3(seq2);
     assert.deepEqual(lite3Frame2.payload, lite3Frame.payload);
 
-    const stream = pool.openLite3Follow(FollowStart.sequence(seq2), BigInt(1), BigInt(50));
-    const next = stream.next();
+    const stream = await pool.fetchLite3({ since: seq2 });
+    const { value: next } = await stream.next();
     assert.ok(next);
     assert.equal(next.seq, seq2);
     assert.deepEqual(next.payload, lite3Frame.payload);
-    assert.equal(stream.next(), null);
+    assert.equal((await stream.next()).done, true);
     stream.close();
   });
 });
 
 test("lite3 append rejects invalid payloads", () => {
   withPool("lite3-bad", ({ pool }) => {
-    assert.throws(() => pool.appendLite3(Buffer.from([0x01]), Durability.Fast));
+    assert.throws(() => pool.feedLite3Receipt(Buffer.from([0x01]), { durability: Durability.Fast }));
   });
 });
 
@@ -605,24 +547,18 @@ test("remote tail encodes tags as repeated tag query params", async () => {
   try {
     const client = new RemoteClient("http://127.0.0.1:9700");
     const pool = new RemotePool(client, "demo");
-    for await (const message of pool.follow({start: FollowStart.all(),
+    for await (const message of await pool.follow({ since: "oldest",
       tags: ["keep", "prod"],
-      maxMessages: 1,
-      timeoutMs: 10,
-      errorOnGap: true,
     })) {
       assert.equal(message.seq, 1n);
-      assert.ok(message.time instanceof Date);
+      assert.equal(typeof message.time, "bigint");
       assert.deepEqual(message.tags, ["keep", "prod"]);
       break;
     }
 
     assert.ok(capturedUrl, "expected fetch URL to be captured");
-    assert.equal(capturedUrl.pathname, "/v0/pools/demo/follow");
+    assert.equal(capturedUrl.pathname, "/v2/pools/demo/follow");
     assert.deepEqual(capturedUrl.searchParams.getAll("tag"), ["keep", "prod"]);
-    assert.equal(capturedUrl.searchParams.get("max"), "1");
-    assert.equal(capturedUrl.searchParams.get("timeout_ms"), "10");
-    assert.equal(capturedUrl.searchParams.get("gap_policy"), "error");
   } finally {
     global.fetch = originalFetch;
   }
@@ -637,7 +573,7 @@ test("remote tail preserves terminal retention-gap errors", async () => {
       start(controller) {
         controller.enqueue(
           new TextEncoder().encode(
-            '{"error":{"kind":"RetentionGap","message":"retention gap","seq":7}}\n',
+            '{"type":"error","error":{"kind":"RetentionGap","message":"retention gap","missing":7,"next_seq":18}}\n',
           ),
         );
         controller.close();
@@ -650,14 +586,12 @@ test("remote tail preserves terminal retention-gap errors", async () => {
     const pool = new RemotePool(client, "demo");
     await assert.rejects(
       async () =>
-        pool
-          .follow({ start: FollowStart.sequence(7), errorOnGap: true })
-          [Symbol.asyncIterator]()
-          .next(),
+        (await pool.follow({ since: 7 })).next(),
       (err) => {
         assert.ok(err instanceof RemoteError);
         assert.equal(err.kind, ErrorKind.RetentionGap);
-        assert.equal(err.seq, 7n);
+        assert.equal(err.missing, 7n);
+        assert.equal(err.nextSeq, 18n);
         return true;
       },
     );
@@ -680,7 +614,7 @@ test("remote errors with unknown kind map to Io", async () => {
     const client = new RemoteClient("http://127.0.0.1:9700");
     const pool = new RemotePool(client, "demo");
     await assert.rejects(
-      pool.append({ value: 1 }),
+      pool.feed({ value: 1 }),
       (err) => {
         assert.equal(err.kind, ErrorKind.Io);
         return true;
@@ -703,7 +637,7 @@ test("remote append rejects invalid durability before fetch", async () => {
     const client = new RemoteClient("http://127.0.0.1:9700");
     const pool = new RemotePool(client, "demo");
     await assert.rejects(
-      pool.append({ value: 1 }, [], "bogus"),
+      pool.feed({ value: 1 }, { durability: "bogus" }),
       /durability must be Durability\.Fast or Durability\.Flush/
     );
     assert.equal(called, false);
@@ -735,10 +669,9 @@ test("UDP SDK waits without blocking, cancels, and rejects imprecise sequence nu
     close() {},
   });
 
-  assert.throws(() => UdpStart.sequence(Number.MAX_SAFE_INTEGER + 1), TypeError);
-  assert.throws(
-    () => pool.follow({ start: { kind: "sequence", seq: Number.MAX_SAFE_INTEGER + 1 } }),
-    TypeError,
+  await assert.rejects(
+    pool.follow({ since: Number.MAX_SAFE_INTEGER + 1 }),
+    err => err.kind === ErrorKind.Usage,
   );
 
   let timerFired = false;
@@ -786,7 +719,7 @@ test("UDP follow handshake is async, bounded, and safe when its pool closes", as
         resolve();
       }, 25);
     });
-    const opening = pool.follow({start: FollowStart.all(),  finite: true }).then(
+    const opening = pool.fetch({ since: "oldest" }).then(
       (follow) => {
         openingSettled = true;
         openedFollow = follow;
@@ -848,8 +781,8 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
 
   const localClient = new Client(poolDir);
   const localPool = localClient.createPool("udp-sdk", DEFAULT_POOL_SIZE_BYTES);
-  const original = localPool.append({ origin: "lite3", value: 7 }, ["source"]);
-  const originalLite3 = localPool.getLite3(original.seq).payload;
+  const original = feedForTest(localPool, { origin: "lite3", value: 7 }, ["source"]);
+  const originalLite3 = localPool._getLite3(original.seq).payload;
   const server = childProcess.spawn(
     binary,
     [
@@ -892,30 +825,28 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
 
     udpClient = new UdpClient(`udp://127.0.0.1:${port}`);
     udpPool = udpClient.openPool("udp-sdk");
-    follow = await udpPool.follow({ start: UdpStart.sequence(original.seq + 1n), finite: false });
+    follow = await udpPool.follow({ since: original.seq + 1n });
 
-    assert.equal(udpPool.sendJson({ origin: "json", value: 8 }, ["sensor"]), undefined);
+    assert.equal(udpPool.feed({ origin: "json", value: 8 }, { tags: ["sensor"] }), undefined);
     const jsonEvent = await nextUdpFrame(follow);
     assert.equal(jsonEvent.message.data.origin, "json");
     assert.equal(jsonEvent.message.data.value, 8);
     assert.deepEqual(jsonEvent.message.tags, ["sensor"]);
-    const jsonTime = localPool.getLite3(jsonEvent.seq).timestampNs;
-    assert.equal(jsonEvent.timestampNs, jsonTime);
-    assert.ok(jsonEvent.timestampNs > (1n << 53n));
-    assert.equal(localPool.get(jsonEvent.seq).data.value, 8);
+    const jsonTime = localPool._getLite3(jsonEvent.seq).time;
+    assert.equal(jsonEvent.time, jsonTime);
+    assert.ok(jsonEvent.time > (1n << 53n));
+    assert.equal(parseMessage(localPool._getJson(jsonEvent.seq)).data.value, 8);
 
-    assert.equal(udpPool.sendLite3(originalLite3), undefined);
+    assert.equal(udpPool.feedLite3(originalLite3), undefined);
     const lite3Event = await nextUdpFrame(follow);
     assert.deepEqual(lite3Event.payload, originalLite3);
     assert.equal(lite3Event.message.data.origin, "lite3");
     assert.deepEqual(lite3Event.message.tags, ["source"]);
-    assert.equal(localPool.get(lite3Event.seq).data.value, 7);
+    assert.equal(parseMessage(localPool._getJson(lite3Event.seq)).data.value, 7);
 
     const largeStart = (1n << 53n) + 1n;
-    const largeFollow = await udpPool.follow({ start: UdpStart.sequence(largeStart), finite: true });
-    const largeProgress = await largeFollow.nextEvent(1000);
-    assert.equal(largeProgress.startSeq, largeStart);
-    largeFollow.close();
+    await assert.rejects(udpPool.fetch({ since: largeStart }),
+      err => err.kind === ErrorKind.Usage);
 
     const cancelFollow = await udpPool.follow();
     await cancelFollow.nextEvent(0n);
@@ -927,7 +858,7 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
     assert.equal(await cancelFollow.nextEvent(0n), null);
     cancelFollow.close();
 
-    const ownedFollow = await udpPool.followViews({ start: UdpStart.sequence(original.seq), finite: true });
+    const ownedFollow = await udpPool.fetchView({ since: original.seq });
     let ownedFrame;
     for await (const event of ownedFollow) { if (event.kind === "frame") { ownedFrame = event; break; } }
     ownedFollow.close();
@@ -980,8 +911,8 @@ test("UDP native frames retain arrival order, duplicates, and uint64 metadata", 
   const temp = makeTempDir();
   const client = new Client(temp);
   const pool = client.createPool("udp-order", DEFAULT_POOL_SIZE_BYTES);
-  const original = pool.append({ value: 17 }, ["tag"]);
-  const payload = pool.getLite3(original.seq).payload;
+  const original = feedForTest(pool, { value: 17 }, ["tag"]);
+  const payload = pool._getLite3(original.seq).payload;
   const base = 1n << 53n;
   const timestamp = 1_700_000_000_000_000_001n;
   const peer = dgram.createSocket("udp4");
@@ -1026,7 +957,7 @@ test("UDP native frames retain arrival order, duplicates, and uint64 metadata", 
   });
   udpClient = new UdpClient(`udp://127.0.0.1:${peer.address().port}`);
   udpPool = udpClient.openPool("sensors");
-  follow = await udpPool.follow({ start: UdpStart.last(4), finite: true });
+  follow = await udpPool.fetch({ last: 4 });
   const events = [];
   for (let i = 0; i < 7; i++) events.push(await follow.nextEvent(1000));
   assert.equal(await follow.nextEvent(0), null);
@@ -1034,7 +965,7 @@ test("UDP native frames retain arrival order, duplicates, and uint64 metadata", 
   assert.deepEqual(frames.map((frame) => frame.seq), [base + 10n, base + 12n, base + 11n, base + 12n]);
   for (const frame of frames) {
     assert.deepEqual(frame.payload, payload);
-    assert.equal(frame.timestampNs, timestamp);
+    assert.equal(frame.time, timestamp);
     assert.equal(frame.message.seq, frame.seq);
     assert.deepEqual(frame.message.data, { value: 17 });
   }
@@ -1046,43 +977,231 @@ test("UDP native frames retain arrival order, duplicates, and uint64 metadata", 
 });
 
 
-test("numeric append receipts match stored frames without echoing data", () => {
-  withPool("identities", ({ pool }) => {
+test("numeric feed receipts match stored frames without echoing data", async () => {
+  await withPoolAsync("identities", async ({ pool }) => {
     const value = { nested: [1, { text: "hello" }] };
-    const first = pool.appendIdentity(value, ["tag"], Durability.Flush);
-    assert.deepEqual(Object.keys(first).sort(), ["seq", "timestampNs"]);
+    const first = await pool.feedReceipt(value, { tags: ["tag"], durability: Durability.Flush });
+    assert.deepEqual(Object.keys(first).sort(), ["seq", "time"]);
     assert.equal(first.seq, 1n);
-    const stored = pool.getLite3(first.seq);
-    assert.equal(first.timestampNs, stored.timestampNs);
-    assert.ok(first.timestampNs > 2n ** 53n);
+    const stored = pool._getLite3(first.seq);
+    assert.equal(first.time, stored.time);
+    assert.ok(first.time > 2n ** 53n);
     value.nested.length = 0;
-    assert.deepEqual(pool.get(first.seq).data, { nested: [1, { text: "hello" }] });
-    const second = pool.appendLite3Identity(stored.payload);
+    assert.deepEqual(parseMessage(pool._getJson(first.seq)).data, { nested: [1, { text: "hello" }] });
+    const second = pool.feedLite3Receipt(stored.payload);
     assert.equal(second.seq, 2n);
-    assert.equal(second.timestampNs, pool.getLite3(2n).timestampNs);
-    assert.throws(() => pool.appendIdentity(Buffer.from("bad")), PlasmiteNativeError);
-    assert.throws(() => pool.appendLite3Identity(Buffer.from("bad")), PlasmiteNativeError);
-    assert.equal(pool.appendIdentity({}).seq, 3n);
+    assert.equal(second.time, pool._getLite3(2n).time);
+    assert.throws(() => pool.feedJsonReceipt(Buffer.from("bad")), PlasmiteNativeError);
+    assert.throws(() => pool.feedLite3Receipt(Buffer.from("bad")), PlasmiteNativeError);
+    assert.equal((await pool.feedReceipt({})).seq, 3n);
   });
 });
 
 test("follow defaults to new messages and history requires a selection", async () => {
   await withPoolAsync("follow-default", async ({pool}) => {
-    pool.append({old:1}, ["skip"]);
-    pool.append({old:2}, ["keep"]);
-    const stream = pool.openFollow();
+    feedForTest(pool, {old:1}, ["skip"]);
+    feedForTest(pool, {old:2}, ["keep"]);
+    const stream = (await pool.follow())._stream;
     try {
       assert.equal((await stream.nextJsonWait(0)).status, 0);
-      const appended = pool.append({new:1}, ["keep"]);
+      const appended = feedForTest(pool, {new:1}, ["keep"]);
       const item = await stream.nextJsonWait(100);
       assert.equal(item.status, 1);
       assert.equal(JSON.parse(item.message.toString()).seq, Number(appended.seq));
     } finally { stream.close(); }
     const seen=[];
-    for await (const message of pool.follow({start:FollowStart.last(2), finite:true})) seen.push(message.seq);
+    for await (const message of await pool.fetch({ last: 2 })) seen.push(message.seq);
     assert.deepEqual(seen,[2n,3n]);
     const views=[];
-    for await (const message of pool.followViews({start:FollowStart.all(), finite:true})) views.push(message.seq);
+    for await (const message of await pool.fetchView()) views.push(message.seq);
     assert.deepEqual(views,[1n,2n,3n]);
   });
+});
+
+
+test("2.0 listener opens before first pull, resumes, and inspects history", async () => {
+  await withPoolAsync("v2-listener", async ({ pool }) => {
+    const old = await pool.feed({ n: 1 }, { tags: ["keep"] });
+    const reader = await pool.follow({ tags: ["keep"] });
+    try {
+      assert.deepEqual(await reader.next(0), { done: false, value: undefined });
+      await pool.feed({ n: 2 });
+      const added = await pool.feed({ n: 3 }, { tags: ["keep"] });
+      assert.equal((await reader.next()).value.seq, added.seq);
+      assert.equal(typeof added.time, "bigint");
+      assert.deepEqual(pool.info().bounds, { oldest: old.seq, newest: added.seq });
+      const batch = await pool.fetch({ since: added.seq, tags: ["keep"] });
+      const forwarded = await pool.feed(added);
+      assert.deepEqual(forwarded.tags, added.tags);
+      assert.equal((await batch.next()).value.seq, added.seq);
+      assert.equal((await batch.next()).done, true);
+      await assert.rejects(pool.feed(added, { tags: [] }), err => err.kind === ErrorKind.Usage);
+      const view = await pool.feedView(added);
+      assert.deepEqual([...view.meta.tags], added.tags);
+      await assert.rejects(pool.feedView(view, { tags: [] }), err => err.kind === ErrorKind.Usage);
+      await assert.rejects(pool.fetch({ since: "oldest", last: 1 }), err => err.kind === ErrorKind.Usage);
+    } finally {
+      await reader.return();
+    }
+  });
+});
+
+const conformance = JSON.parse(fs.readFileSync(
+  path.resolve(__dirname, "../../../tests/fixtures/conformance/reads.json"), "utf8",
+));
+
+async function conformanceFeed(pool, records) {
+  for (const record of records) await pool.feed(record.data, { tags: record.tags });
+}
+
+function selection({ since, last, tags }) {
+  return { since, last, tags };
+}
+
+async function checkReadCases(pool) {
+  for (const [single, cases] of [[false, conformance.fetch], [true, conformance.single_fetch]]) {
+    for (const entry of cases) {
+      const start = () => pool.fetch(selection(entry));
+      if (entry.error) {
+        await assert.rejects(start, err => err.kind === ErrorKind[entry.error], entry.name);
+        continue;
+      }
+      const reader = await start();
+      try {
+        const sequences = [];
+        for await (const message of reader) {
+          sequences.push(Number(message.seq));
+          if (single) break;
+        }
+        assert.deepEqual(sequences, entry.expect, entry.name);
+      } finally {
+        await reader.return();
+      }
+    }
+  }
+
+  const snapshot = conformance.fetch_snapshot;
+  const reader = await pool.fetch();
+  await conformanceFeed(pool, snapshot.after_open);
+  const sequences = [];
+  for await (const message of reader) sequences.push(Number(message.seq));
+  assert.deepEqual(sequences, snapshot.expect, snapshot.name);
+}
+
+test("2.0 shared conformance covers retained history, snapshots, and gaps", async () => {
+  await withPoolAsync("events", async ({ client, pool }) => {
+    assert.throws(() => client.openPool("missing"), err => err.kind === ErrorKind[conformance.pools.missing]);
+    assert.throws(() => client.createPool("events"), err => err.kind === ErrorKind[conformance.pools.existing]);
+    await assert.rejects(pool.feed([]), err => err.kind === ErrorKind[conformance.pools.non_object_feed]);
+    await conformanceFeed(pool, conformance.seed);
+    await checkReadCases(pool);
+  });
+  const retained = conformance.retention;
+  await withPoolAsync("retained", async ({ pool }) => {
+    for (let i = 0; i < retained.inserts; i++) {
+      await pool.feed({ i, padding: "x".repeat(retained.padding_bytes) });
+    }
+    await assert.rejects(pool.fetch({ since: retained.since, tags: retained.tags }), err => {
+      assert.equal(err.kind, ErrorKind[retained.error]);
+      assert.equal(err.missing, BigInt(retained.since));
+      assert.equal(err.nextSeq, pool.info().bounds.oldest);
+      return true;
+    });
+  }, retained.size);
+  await withPoolAsync("unused", async ({ client, poolDir }) => {
+    const previous = conformance.previous_release;
+    fs.copyFileSync(path.resolve(__dirname, "../../..", previous.fixture),
+      path.join(poolDir, "previous.plasmite"));
+    const pool = client.openPool("previous");
+    try {
+      const records = [];
+      for await (const message of await pool.fetch()) {
+        records.push({ data: message.data, tags: message.tags });
+      }
+      assert.deepEqual(records, previous.messages);
+    } finally {
+      pool.close();
+    }
+  });
+});
+
+async function checkLiveCases(withFreshPool) {
+  for (const entry of conformance.follow) {
+    await withFreshPool(async pool => {
+      await conformanceFeed(pool, conformance.seed);
+      const controller = new AbortController();
+      const reader = await pool.follow({ ...selection(entry), signal: controller.signal });
+      try {
+        await conformanceFeed(pool, entry.after_open ?? []);
+        const sequences = [];
+        for (const _ of entry.expect) sequences.push(Number((await reader.next(2)).value.seq));
+        assert.deepEqual(sequences, entry.expect, entry.name);
+        controller.abort();
+        assert.equal((await reader.next()).done, true);
+      } finally {
+        await reader.return();
+      }
+    });
+  }
+}
+
+test("2.0 shared conformance covers live starts, checkpoints, and cancellation", async () => {
+  await checkLiveCases(run => withPoolAsync("events", ({ pool }) => run(pool)));
+});
+
+test("2.0 shared reads use the same contract over HTTP", { timeout: 20000 }, async t => {
+  const binary = process.env.PLASMITE_BIN ?? path.resolve(__dirname, "../../../target/debug/plasmite");
+  if (!fs.existsSync(binary)) {
+    t.skip("Plasmite CLI is not built");
+    return;
+  }
+  const directory = makeTempDir();
+  const server = childProcess.spawn(binary, [
+    "--dir", directory, "serve", "--bind", "127.0.0.1:0", "--remote-bind", "127.0.0.1:0",
+  ], {
+    env: { ...process.env, PLASMITE_ACCESS_HOME: path.join(directory, "access") },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  server.stderr.on("data", chunk => { stderr += chunk; });
+  t.after(async () => {
+    if (server.exitCode === null) {
+      const exited = new Promise(resolve => server.once("exit", resolve));
+      server.kill();
+      await exited;
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const bind = path.join(directory, ".plasmite-serve", "local.json");
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(bind)) {
+    assert.ok(server.exitCode === null && Date.now() < deadline, stderr || "server did not start");
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  const client = new RemoteClient("http://" + JSON.parse(fs.readFileSync(bind, "utf8")));
+  assert.equal((await client.listPools()).length, 0);
+  await assert.rejects(client.openPool("missing"), { kind: ErrorKind[conformance.pools.missing] });
+  const history = await client.createPool("history");
+  await assert.rejects(client.createPool("history"), { kind: ErrorKind[conformance.pools.existing] });
+  await assert.rejects(history.feed([]), { kind: ErrorKind[conformance.pools.non_object_feed] });
+  await conformanceFeed(history, conformance.seed);
+  await checkReadCases(history);
+
+  let next = 0;
+  await checkLiveCases(async run => run(await client.createPool(`live-${next++}`)));
+
+  const retained = conformance.retention;
+  const pool = await client.createPool("retained", retained.size);
+  for (let i = 0; i < retained.inserts; i++) {
+    await pool.feed({ i, padding: "x".repeat(retained.padding_bytes) });
+  }
+  const reader = await pool.fetch({ since: retained.since, tags: retained.tags });
+  const oldest = (await pool.info()).bounds.oldest;
+  try {
+    await assert.rejects(reader.next(), {
+      kind: ErrorKind[retained.error], missing: BigInt(retained.since), nextSeq: oldest,
+    });
+  } finally {
+    await reader.return();
+  }
 });

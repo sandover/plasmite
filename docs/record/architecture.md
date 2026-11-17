@@ -1,12 +1,9 @@
 # Architecture
 
 This is the implementation architecture for Plasmite.
-Normative behavior lives in:
-
-- `spec/v0/SPEC.md` (CLI contract)
-- `spec/api/v0/SPEC.md` (public API)
-- `spec/remote/v0/SPEC.md` (HTTP protocol)
-- `spec/udp/v1/SPEC.md` (UDP subscriptions and delivery)
+The [2.0 contract](../../spec/v2/SPEC.md) defines the public CLI, library,
+HTTP, UDP and MCP behavior. The [spec index](../../spec/README.md) points to
+the versioned wire contracts.
 
 ## Design principles
 
@@ -35,7 +32,7 @@ Interface layer  →  Core domain layer  →  Platform layer
 - Must release pool mappings and cursors when data delivery ends.
 
 **Core domain layer** (`src/core/*`):
-- Must: own all append/get/tail semantics, validation, sequencing, and corruption detection.
+- Must: own all storage writes, reads and reader positions, validation, sequencing, and corruption detection.
 - Must not: call into interface-layer modules.
 - Must not: make network calls or depend on a runtime async context.
 
@@ -79,17 +76,16 @@ owners and borrowed references; Rust uses borrows or an owned child; Python and
 Node wrappers retain owners; Go keeps private immutable bytes and proof in its
 own heap. Mutable byte exports copy.
 
-Legacy message APIs remain available. Owned local tails reuse `TailState` and
-`TailReader`; owned UDP delivery shares the existing receive/order/skip state.
-Adapters select a representation without duplicating those policies. Node's
-HTTP adapter runs the checked core in bundled WebAssembly and uses the same
-Proxy interface. It retains the binary transport's existing delivery limits.
+Decoded messages, immutable views and encoded Lite3 select different forms
+of the same reader. The adapters share the selection and loss checks. Node's
+HTTP adapter uses the checked core in bundled WebAssembly and offers the same
+read-only view interface.
 
 ## Ownership and abstraction choices
 
 Shared code belongs with the invariant it enforces. Storage and readability
 checks have common owners; interface-specific progress and delivery policies
-stay at their boundaries. CLI follow and API tails retain their distinct rules.
+stay at their boundaries. The CLI decides how to report a loss and whether to resume.
 Browser pages own displayed rows and progress; their shared reader handles
 stream framing. A universal message or subscription model adds state without
 removing these responsibilities.
@@ -108,7 +104,7 @@ Ordinary HTTP handlers propagate errors through the shared response policy.
 Each handler keeps its authorization, extraction and storage-admission order
 explicit. Cancellation and revocation retain their existing owners. Binary CLI
 tag filters reuse metadata/readability checks without constructing unused data
-trees; JSON output and jq request full decoding.
+trees. JSON output requests full decoding.
 
 ## CLI ownership
 
@@ -128,9 +124,8 @@ with clear ownership. `cli::dispatch` converts
 parsed variants into explicit argument structures for these command families:
 
 - `pool` and `doctor` for lifecycle, metadata, and diagnostics;
-- `feed` and `fetch` for ingestion and exact lookup;
+- `feed` for writing, and `fetch` for finite history and exact lookup;
 - `stream` for follow and duplex;
-- `tap` for child-process capture;
 - `server` and `access` for serving and connection commands;
 - `utility` for version, completion, and MCP stdio.
 
@@ -139,7 +134,7 @@ JSON presentation choice.
 `CommandResult` carries the selected exit code back to `main.rs`. The larger
 command families use focused helper modules: `doctor_support`, `pool_support`,
 `feed_support`, and `stream_support`. Shared parsing, pool
-references, retry, and payload conversion live in `cli::support`. CLI
+references and payload conversion live in `cli::support`. CLI
 presentation helpers live in `output_support`; JSON output lives in
 `cli::output`. Command modules import the helpers they use by name. There is
 no command framework, service container, or handler trait hierarchy.
@@ -186,7 +181,7 @@ Key invariants:
 ## Write/read paths
 
 The storage reader returns an owned Lite3 frame. Interface adapters choose the
-representation their caller requests. C JSON get/tail validates the immutable
+representation their caller requests. C JSON readers validates the immutable
 frame, borrows its tags, keys and string values, and formats the envelope
 directly through Serde. It uses temporary collection-entry lists to retain
 deterministic key order. Native byte fields stream base64 into that same writer.
@@ -199,7 +194,7 @@ an extra parser's rounding does not define the value. Raw reads retain their
 encoded bytes. Every route keeps the existing snapshot copy under the storage
 lock, so pool overwrite or close cannot change a returned message.
 
-Append (high level):
+Feed writes a record in this order.
 
 1. Validate input and prepare frame.
 2. Acquire writer lock.
@@ -234,7 +229,7 @@ An open handle to a deleted or replaced pool therefore cannot acknowledge a
 write that new readers would miss. These checks coordinate Plasmite operations;
 other programs that rename files without the pool lock can still race them.
 
-Get-by-seq path:
+A point lookup can use the storage index to seek.
 
 1. Acquire a shared file lock and capture visible bounds.
 2. Validate requested seq and probe the index slot.
@@ -248,11 +243,9 @@ payload bytes, so retaining a frame cannot observe a later overwrite. Internal
 frame views remain inside the lock lifetime; scans do not copy skipped
 payloads. Corrupt stable frames return `Corrupt` rather than retrying forever.
 
-Core tail path (network adapters apply their own delivery contracts):
-
-1. Resolve start position (`tail`, `since`, `from`).
-2. Stream committed messages in order.
-3. Use notify + bounded polling fallback for low-latency follow mode.
+The core resolves a position and, for fetch, records the end boundary when
+the reader opens. It checks sequence continuity before checking tags. Follow
+waits for commits, using notifications and bounded polling.
 
 Invariant: Correctness of the tail path must not depend on notify delivery. Notify is a latency optimization; a tail that never receives a notification must still eventually return all committed messages. Removing notify must not cause failures in non-timing tests.
 
@@ -266,24 +259,26 @@ read, so closing a JavaScript wrapper cancels without freeing a worker's handle.
 Native JSON and Lite3 streams enable the same best-effort notifications as Rust
 tails. They retain bounded polling when notification setup or waiting fails.
 
-The CLI and language APIs expose `follow` with the same starting model: new
-messages by default, explicit all/last-N/time/sequence history, and an optional
-finite read bounded by the opening sequence. Local APIs share `TailState` across
-Rust and C adapters; bindings pass selections through that boundary. HTTP opens
-its reader before returning response headers. Go opens before returning channels;
-Python and JavaScript lazy iterators open on first iteration. UDP retains its
-separate arrival-order delivery contract while using the same selection vocabulary.
+A read opens at a position. `follow` defaults to new messages, and `fetch`
+defaults to retained history. Either accepts `since` or `last`. A library
+lookup takes the first item of `fetch(since=seq)`. CLI `fetch POOL SEQ` adds the
+shell shortcut for that lookup. Sequence and time are exact integers in code.
+A sequence belongs to one pool. Each feed, including a forwarded message,
+gets a new destination sequence and a wall-clock timestamp.
 
-Interface policies still differ where the existing contracts require it. CLI
-follow resets its timeout after output and reports dropped messages; native
-readers retain their documented deadlines or polling waits and optional gap
-errors. Sharing selection does not silently change those policies.
-Timed playback
-belongs to CLI follow; SDK callers use ordinary streams and control their own
-scheduling. Duplex uses the same input parser for terminals and pipes. It starts
-sending after the receiver chooses its initial position; successful input EOF
-closes sending while reception continues. It assigns no meaning to application
-fields.
+Callers stop readers, choose deadlines, decide whether to retry a write and
+filter application fields. Plasmite owns position, tag matching and durability,
+because it can apply them while accessing the pool. The CLI keeps `follow --one`
+to make a one-message wait portable across shells. It watches its output pipe
+where the platform can detect a closed reader. It warns about a retention gap
+and resumes from the reported next sequence. Library readers raise the gap so
+the application can decide whether its state needs rebuilding. UDP only
+reports the losses the server can announce.
+
+`duplex` opens its reader before sending and keeps receiving after input ends.
+Command capture uses an ordinary shell pipe into `feed --input-format lines`.
+The major release keeps the pool format and replaces the old public verbs so
+each surface can share the new vocabulary.
 
 ## Transport architecture
 
@@ -309,9 +304,8 @@ Plasmite is transport-agnostic at the core.
   packet validation and event handling; their wait and retry rules stay separate.
   The client performs no data repair. Public `Gap`/`udp-gap` names describe server
   skips for compatibility; the reserved `Unknown` value is not a wire skip reason.
-  Standalone UDP APIs return local send success; HTTP append still returns a
-  committed receipt. The private wire codec serves the CLI/server and library.
-- Process capture mode (`plasmite tap`): CLI spawns a child process, reads stdout/stderr on separate threads, and appends line messages through the same local append path as `feed`.
+  UDP feed reports local submission success. HTTP feed returns a
+  committed message or a numeric receipt. The private wire codec serves the CLI/server and library.
 - Future transports must be adapters over the existing core, not alternate correctness engines.
 
 Adapters use the core's storage rules. Keep network operations and delivery
@@ -334,23 +328,12 @@ cancellation. HTTP tail producers carry an absolute deadline from admission
 through reads and bounded output-queue waits. Expiry releases the tail permit
 even if the connected client stops draining the queue.
 
-## Tap execution model (CLI adapter)
-
-`tap` is an interface-layer adapter over existing local pool operations:
-
-1. Parse tap arguments and resolve a local pool ref.
-2. Spawn child process with inherited stdin and piped stdout/stderr.
-3. Run one reader thread per stream (`stdout`, `stderr`) and frame each line as a JSON message.
-   Readers use a bounded event queue so a slow pool append backpressures the
-   child pipes instead of accumulating pending lines without limit. Each
-   captured line is bounded by the pool ring capacity; an oversized line or
-   reader failure terminates and reaps the wrapped child with an actionable
-   error.
-4. Emit lifecycle messages (`start`, then `exit`) around captured output.
-5. Append all messages via the shared local append path; tap does not introduce a parallel storage path.
-6. On Unix, forward SIGINT/SIGTERM received by tap to the child, then drain buffered output before emitting the exit lifecycle message.
-
-Invariant: tap may add ingestion behavior, but it must not fork correctness semantics from the shared append/read contracts.
+HTTP JSON and binary readers carry the same end states. Complete ends a
+finite fetch, error carries the failure, and cutoff carries the next unread
+sequence when the server reaches a limit. A client opens a new request at
+that sequence and keeps its original fetch boundary. A connection that ends
+without a final record raises `Io`. This prevents partial history from looking
+like a finished fetch, including when the client filters by tags.
 
 ## Extension seams
 

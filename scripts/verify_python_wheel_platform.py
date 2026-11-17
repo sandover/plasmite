@@ -53,11 +53,11 @@ def verify(wheel: Path, sdk: Path) -> None:
         assert len(tags) == 1, "Expected one native platform tag"
         tag = tags.pop()
         names = (
-            ["plasmite.exe", "plasmite.dll"]
+            ["plasmite.exe", "plasmite2.dll"]
             if tag.startswith("win")
             else [
                 "plasmite",
-                "libplasmite.dylib" if tag.startswith("macosx_") else "libplasmite.so",
+                "libplasmite.2.dylib" if tag.startswith("macosx_") else "libplasmite.so.2",
             ]
         )
         binaries = []

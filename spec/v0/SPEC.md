@@ -39,7 +39,7 @@ form the current command inventory. The separately versioned MCP contract
 owns its protocol guarantees.
 
 The source checkout includes next-major duplex changes described in the
-[upgrade guide](../../docs/record/upgrading-next-major.md); do not ship them
+[upgrade guide](../../docs/record/upgrading-2.0.md); do not ship them
 under the current 1.x package version.
 
 ### Messages, input, and output

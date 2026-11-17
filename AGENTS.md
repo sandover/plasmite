@@ -45,7 +45,7 @@ docs/
 ├── record/architecture.md                      — Implementation architecture; read when changing internals or layering
 ├── record/testing.md                           — Test strategy + commands; read when adding/fixing tests
 ├── record/releasing.md                         — Release policy + versioning; read for what/why (mechanics live in release skill)
-├── record/upgrading-next-major.md             — Read when migrating duplex sessions, SDK playback, and HTTP tail limits
+├── record/upgrading-2.0.md                    — Read when moving 1.x applications, scripts and HTTP clients to 2.0
 ├── record/upgrading-1.2.md                     — Read when migrating CLI scripts to complete-message pipes and shared formats
 ├── record/upgrading-1.0.md                     — Read when updating scripts, remote configuration, or Rust clients to 1.0
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
@@ -63,6 +63,7 @@ docs/
 
 spec/
 ├── README.md                                   — Spec index; start here for contract navigation
+├── v2/SPEC.md                                   — Read when reviewing or implementing the Plasmite 2.0 contract
 ├── v0/SPEC.md                                  — Command-line interface (CLI) contract; read before changing CLI behavior
 ├── udp/v0/SPEC.md                              — User Datagram Protocol (UDP) input contract; read when changing UDP messages or listener behavior
 ├── udp/v1/SPEC.md                              — Read when changing UDP feed/follow controls, clients, subscriptions, or delivery events

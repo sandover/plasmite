@@ -1,4 +1,3 @@
-const { FollowStart } = require("../follow");
 /* Exact sequence IDs at local and remote JSON boundaries. */
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -85,19 +84,22 @@ test("remote append, fetch, and tail preserve exact uint64 message sequences", a
       ...numericForms,
     ]) {
       global.fetch = async (url) => new Response(
-        new URL(url).pathname.endsWith("/follow")
+        !new URL(url).pathname.endsWith("/feed")
           ? `${envelope(source)}\n`
           : `{"message":${envelope(source)}}`,
         { headers: { "Content-Type": "application/json" } },
       );
       const pool = new RemotePool(new RemoteClient("http://localhost:9700"), "exact");
-      assertExact(await pool.append({ test: true }), seq);
-      assertExact(await pool.get(BigInt(seq)), seq);
+      assertExact(await pool.feed({ test: true }), seq);
+      const retained = await pool.fetch({ since: BigInt(seq) });
+      assertExact((await retained.next()).value, seq);
+      await retained.return();
       const seen = [];
-      for await (const message of pool.follow({start: FollowStart.all(),  maxMessages: 1 })) {
+      for await (const message of await pool.follow({ since: "oldest" })) {
         assertExact(message, seq);
         assert.equal(message.raw.toString(), envelope(source));
         seen.push(message.seq);
+        break;
       }
       assert.deepEqual(seen, [BigInt(seq)]);
     }
@@ -128,15 +130,15 @@ test("raw local and remote message sequences reject invalid uint64 boundaries", 
     ]) {
       assert.throws(() => parseMessage(Buffer.from(envelope(seq))));
       global.fetch = async (url) => new Response(
-        new URL(url).pathname.endsWith("/follow")
+        !new URL(url).pathname.endsWith("/feed")
           ? `${envelope(seq)}\n`
           : `{"message":${envelope(seq)}}`,
       );
       const pool = new RemotePool(new RemoteClient("http://localhost:9700"), "invalid");
-      await assert.rejects(pool.append({}));
-      await assert.rejects(pool.get(1));
+      await assert.rejects(pool.feed({}));
+      await assert.rejects(async () => (await pool.fetch({ since: 1 })).next());
       await assert.rejects(async () => {
-        for await (const message of pool.follow()) {
+        for await (const message of await pool.follow()) {
           assert.fail(`invalid message ${message.seq} was accepted`);
         }
       });

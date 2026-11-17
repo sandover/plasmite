@@ -6,7 +6,7 @@
 - [Live Event Stream](#live-event-stream)
 - [Record TouchOSC messages with OSC](#record-touchosc-messages-with-open-sound-control-osc)
 - [Lite3 Documents](#lite3-documents)
-- [Process Capture with tap](#process-capture-with-tap)
+- [Capture command output](#capture-command-output)
 - [Two-way communication](#two-way-communication)
 - [System Log Ring Buffer](#system-log-ring-buffer)
 - [Replay & Debug](#replay--debug)
@@ -19,8 +19,8 @@
 ---
 
 A pool retains a bounded history, and readers keep their own checkpoints.
-`--tail N` selects the last N retained messages before filters. Use
-`--no-follow` for a finite history read. Pipes and files default to JSON; choose
+`--last N` selects the last N retained messages before filters. Use
+`fetch` to read retained messages and exit. Pipes and files default to JSON; choose
 `--format yaml` when that helps your workflow. See the [CLI guide](cli.md) for shared rules and the
 [1.2 upgrade guide](record/upgrading-1.2.md) for changed defaults.
 
@@ -31,7 +31,7 @@ plasmite pool create source destination
 plasmite feed source --tag sensor '{"temperature":21}'
 
 # Copy history as YAML documents.
-plasmite follow source --no-follow --format yaml |
+plasmite fetch source --format yaml |
   plasmite feed destination
 ```
 
@@ -47,10 +47,10 @@ A deploy script needs to wait until the test runner says "green". No polling loo
 
 ```bash
 # deploy.sh — blocks until this run's tests pass
-pls follow "ci-$CI_RUN_ID" --create --tail 1 --where '.data.status == "green"' --one > /dev/null && ./deploy-to-staging.sh
+pls follow "ci-$CI_RUN_ID" --create --last 1 --tag green --one > /dev/null && ./deploy-to-staging.sh
 
 # test-runner.sh — signals when done (--create makes the pool if needed)
-./run-tests.sh && pls feed "ci-$CI_RUN_ID" --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
+./run-tests.sh && pls feed "ci-$CI_RUN_ID" --create --tag green '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
 ```
 
 Set `CI_RUN_ID` to the same unique value in both jobs. `--one` exits when a matching message arrives.
@@ -61,38 +61,37 @@ Set `CI_RUN_ID` to the same unique value in both jobs. `--one` exits when a matc
 **Python — wait for green**
 
 ```python
-from plasmite import FollowStart, Client
+from os import environ
+from plasmite import Client
 
-with Client() as c, c.open_pool("ci") as pool:
-    for msg in pool.follow(timeout_ms=30000):
-        if msg.data.get("status") == "green":
-            print(f"commit {msg.data['commit']} passed — deploying")
-            break
+with Client() as c, c.open_pool(f"ci-{environ['CI_RUN_ID']}", create=True) as pool:
+    with pool.follow(last=1, tags=["green"]) as reader:
+        msg = next(reader)
+        print(f"commit {msg.data['commit']} passed")
 ```
 
 **Python — signal green**
 
 ```python
-from plasmite import FollowStart, Client
+from os import environ
+from plasmite import Client
 
-with Client() as c, c.pool("ci") as pool:
-    pool.append({"status": "green", "commit": "a1b2c3d", "suite": "unit"})
+with Client() as c, c.open_pool(f"ci-{environ['CI_RUN_ID']}", create=True) as pool:
+    pool.feed({"status": "green", "commit": "a1b2c3d", "suite": "unit"}, tags=["green"])
 ```
 
 **Node — wait for green**
 
 ```js
-const { FollowStart, Client } = require("plasmite");
+const { Client } = require("plasmite");
 (async () => {
   const c = new Client();
   let pool;
   try {
-    pool = c.openPool("ci");
-    for await (const msg of pool.follow()) {
-      if (msg.data.status === "green") {
-        console.log(`commit ${msg.data.commit} passed — deploying`);
-        break;
-      }
+    pool = c.openPool(`ci-${process.env.CI_RUN_ID}`, { create: true });
+    for await (const msg of await pool.follow({ last: 1, tags: ["green"] })) {
+      console.log(`commit ${msg.data.commit} passed`);
+      break;
     }
   } finally {
     if (pool) pool.close();
@@ -105,21 +104,17 @@ const { FollowStart, Client } = require("plasmite");
 
 ```go
 c, _ := plasmite.NewDefaultClient()
-p, _ := c.OpenPool(plasmite.PoolRefName("ci"))
+p, _ := c.OpenPool(plasmite.PoolRefName("ci-"+os.Getenv("CI_RUN_ID")), plasmite.Create(true))
+defer p.Close()
+defer c.Close()
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
-out, errs := p.Tail(ctx, plasmite.FollowOptions{Timeout: 30 * time.Second})
-for msg := range out {
-    var d map[string]any
-    json.Unmarshal(msg.Data, &d)
-    if d["status"] == "green" {
-        fmt.Printf("commit %s passed — deploying\n", d["commit"])
-        cancel()
-        break
-    }
-}
-if err := <-errs; err != nil && err != context.Canceled { log.Fatal(err) }
-p.Close(); c.Close()
+reader, err := p.Follow(plasmite.Last(1), plasmite.Tags("green"))
+if err != nil { log.Fatal(err) }
+defer reader.Close()
+msg, err := reader.Next(ctx)
+if err != nil { log.Fatal(err) }
+fmt.Println(string(msg.Data))
 ```
 
 </details>
@@ -142,10 +137,10 @@ while true; do
 done
 
 # on a laptop, after saving access to the Pi's shared server:
-pls follow https://pi.example.net:9743/telemetry --tag sensor --where '.data.value > 80000'
+pls follow https://pi.example.net:9743/telemetry --tag sensor | jq -c 'select(.data.value > 80000)'
 
 # replay the last hour of readings to see the trend
-pls follow https://pi.example.net:9743/telemetry --tag sensor --since 1h --no-follow \
+pls fetch https://pi.example.net:9743/telemetry --tag sensor --since 1h \
   | jq '.data | [.ts, .value]'
 ```
 
@@ -160,7 +155,7 @@ Send an identifiable reading, then read it at the destination:
 ```sh
 pls feed https://pi.example.net:9743/telemetry \
   '{"reading_id":"check-001","measured_at":"2026-11-16T20:00:00Z","temperature_c":21.5}'
-pls follow https://pi.example.net:9743/telemetry --tail 1 --no-follow
+pls fetch https://pi.example.net:9743/telemetry --last 1
 ```
 
 Check `data.reading_id` and the value. The destination assigns `seq` and `time`
@@ -173,8 +168,7 @@ An I/O error can occur after storage but before the sender receives the result.
 Inspect the pool for the reading's application ID before sending it again.
 A manual resend can create another message with the same data and a new sequence.
 
-`feed --retry` retries busy-pool errors. A connection failure ends `feed` and
-leaves later input unsent; it creates no offline backlog. A full input pipe
+A connection failure ends `feed` and leaves later input unsent. A full input pipe
 slows the producer, and closing it exposes a broken pipe to upstream writers.
 When a downstream stdout failure ends `feed`, completed appends remain stored.
 For shell pipelines, use `set -o pipefail` in Bash to preserve failure status.
@@ -267,9 +261,8 @@ plasmite feed udp://127.0.0.1:9701/sensors '{"temperature_c":22.4}' --tag sensor
 not storage. The
 [UDP receive policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
 `follow` to deliver matching messages in arrival order, including late messages
-and duplicates, and report only explicit server skips. This source change awaits
-a major release. Sequence jumps never create notices or
-discard messages. Use `--tail 10 --no-follow` for a best-effort finite read;
+and duplicates, and report only explicit server skips. Sequence jumps never create notices or
+discard messages. Use `fetch POOL --last 10` for a best-effort finite read;
 explicit oversized/pressure skips make it exit 1, and a confirmed retention
 gap makes it exit 9. Terminal progress ends the read and can leave DATA in
 flight. Exit 0 gives no assurance of complete delivery. Filters never create
@@ -349,11 +342,11 @@ pls feed telemetry --tag alert  '{"service": "api", "msg": "latency spike"}'
 pls feed telemetry --tag metric '{"service": "web", "rps": 1420}'
 
 # on-call — show only api alerts
-pls follow telemetry --tail 100 --tag alert --where '.data.service == "api"'
+pls follow telemetry --last 100 --tag alert | jq -c 'select(.data.service == "api")'
 
 # postmortem — what happened in the 10 minutes before the alert?
 mkdir -p tmp
-pls follow telemetry --since 10m --no-follow > tmp/timeline.jsonl
+pls fetch telemetry --since 10m > tmp/timeline.jsonl
 ```
 
 ### Import external API events
@@ -367,14 +360,14 @@ curl -fsS -G https://api.stripe.com/v1/events \
   | jq -c '.data[]' | pls feed stripe-events --create
 
 # filter imported completed payments
-pls follow stripe-events --tail 100 --no-follow --where '.data.type == "payment_intent.succeeded"'
+pls fetch stripe-events --last 100 | jq -c 'select(.data.type == "payment_intent.succeeded")'
 
 # replay messages imported in the last 20 minutes
-pls follow stripe-events --since 20m --replay 1
+pls fetch stripe-events --since 20m
 
 # export the last 500 events for offline analysis, then exit
 mkdir -p tmp
-pls follow stripe-events --tail 500 --no-follow > tmp/stripe-dump.jsonl
+pls fetch stripe-events --last 500 > tmp/stripe-dump.jsonl
 ```
 
 ### Build progress
@@ -394,10 +387,10 @@ pls feed build --tag done '{"step": "finished", "ok": true}'
 pls follow build
 
 # a deploy script — ship only when the completed build succeeded
-pls follow build --tag done --tail 100 --one | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
+pls follow build --tag done --last 100 --one | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
 
 # next morning — what happened overnight?
-pls follow build --since 12h --no-follow
+pls fetch build --since 12h
 ```
 
 <details>
@@ -406,49 +399,52 @@ pls follow build --since 12h --no-follow
 **Python — produce tagged events**
 
 ```python
-from plasmite import FollowStart, Client, Durability
+from plasmite import Client
 
-with Client() as c, c.pool("telemetry") as pool:
-    pool.append({"sensor": "temp", "value": 42100}, ["sensor"], Durability.FAST)
-    pool.append({"service": "api", "sha": "f4e5d6c"}, ["deploy"], Durability.FAST)
-    pool.append({"service": "api", "msg": "latency spike"}, ["alert"], Durability.FAST)
+with Client() as c, c.open_pool("telemetry", create=True) as pool:
+    pool.feed({"sensor": "temp", "value": 42100}, tags=["sensor"])
+    pool.feed({"service": "api", "sha": "f4e5d6c"}, tags=["deploy"])
+    pool.feed({"service": "api", "msg": "latency spike"}, tags=["alert"])
 ```
 
 **Python — filter by tag**
 
 ```python
-from plasmite import FollowStart, Client
+from plasmite import Client
 
 with Client() as c, c.open_pool("telemetry") as pool:
-    for msg in pool.follow(timeout_ms=5000, tags=["alert"]):
-        print(msg.seq, msg.tags, msg.data)
+    with pool.follow(tags=["alert"]) as reader:
+        for msg in reader:
+            print(msg.seq, msg.tags, msg.data)
 ```
 
 **Node — produce tagged events**
 
 ```js
-const { FollowStart, Client } = require("plasmite");
-const c = new Client();
-let pool;
-try {
-  pool = c.pool("telemetry");
-  pool.append({ sensor: "temp", value: 42100 }, ["sensor"]);
-  pool.append({ service: "api", sha: "f4e5d6c" }, ["deploy"]);
-  pool.append({ service: "api", msg: "latency spike" }, ["alert"]);
-} finally {
-  if (pool) pool.close();
-  c.close();
-}
+const { Client } = require("plasmite");
+(async () => {
+  const c = new Client();
+  let pool;
+  try {
+    pool = c.openPool("telemetry", { create: true });
+    await pool.feed({ sensor: "temp", value: 42100 }, { tags: ["sensor"] });
+    await pool.feed({ service: "api", sha: "f4e5d6c" }, { tags: ["deploy"] });
+    await pool.feed({ service: "api", msg: "latency spike" }, { tags: ["alert"] });
+  } finally {
+    pool?.close();
+    c.close();
+  }
+})();
 ```
 
 **Go — produce tagged events**
 
 ```go
 c, _ := plasmite.NewDefaultClient()
-p, _ := c.Pool(plasmite.PoolRefName("telemetry"), 0)
-p.Append(map[string]any{"sensor": "temp", "value": 42100}, []string{"sensor"}, plasmite.WithDurability(plasmite.DurabilityFast))
-p.Append(map[string]any{"service": "api", "sha": "f4e5d6c"}, []string{"deploy"}, plasmite.WithDurability(plasmite.DurabilityFast))
-p.Append(map[string]any{"service": "api", "msg": "latency spike"}, []string{"alert"}, plasmite.WithDurability(plasmite.DurabilityFast))
+p, _ := c.OpenPool(plasmite.PoolRefName("telemetry"), plasmite.Create(true))
+p.Feed(map[string]any{"sensor": "temp", "value": 42100}, []string{"sensor"})
+p.Feed(map[string]any{"service": "api", "sha": "f4e5d6c"}, []string{"deploy"})
+p.Feed(map[string]any{"service": "api", "msg": "latency spike"}, []string{"alert"})
 p.Close(); c.Close()
 ```
 
@@ -457,10 +453,16 @@ p.Close(); c.Close()
 ```go
 c, _ := plasmite.NewDefaultClient()
 p, _ := c.OpenPool(plasmite.PoolRefName("telemetry"))
-out, errs := p.Tail(ctx, plasmite.FollowOptions{Tags: []string{"alert"}, Timeout: 5 * time.Second})
-for msg := range out { fmt.Println(msg.Seq, msg.Tags(), string(msg.Data)) }
-if err := <-errs; err != nil { log.Fatal(err) }
-p.Close(); c.Close()
+defer c.Close()
+defer p.Close()
+reader, err := p.Follow(plasmite.Tags("alert"))
+if err != nil { log.Fatal(err) }
+defer reader.Close()
+for {
+    msg, err := reader.Next(ctx)
+    if err != nil { break }
+    fmt.Println(msg.Seq, msg.Tags(), string(msg.Data))
+}
 ```
 
 </details>
@@ -502,8 +504,8 @@ with an OSC address and its arguments. `feed` wraps it in the usual
 Plasmite envelope; `follow` reads those messages:
 
 ```bash
-plasmite --dir ./tmp/osc-pools follow osc --tail 1 --no-follow --format json \
-  --where '.data.address == "/fader/1"'
+plasmite --dir ./tmp/osc-pools fetch osc --last 1 --format json \
+  | jq -c 'select(.data.address == "/fader/1")'
 ```
 
 The result contains `"data":{"address":"/fader/1","args":[0.75]}` along
@@ -562,7 +564,7 @@ plasmite follow source |
   plasmite feed destination
 
 # Save retained messages and load them later.
-plasmite follow source --no-follow > messages.jsonl
+plasmite fetch source > messages.jsonl
 plasmite feed destination < messages.jsonl
 ```
 
@@ -601,32 +603,19 @@ for native binary redirection; earlier versions can use `cmd.exe`.
 
 ---
 
-## Process Capture with tap
+## Capture command output
 
-Use `tap` to wrap an existing command and persist its stdout/stderr as pool messages without changing the wrapped program.
-
-```bash
-# capture command output into a pool
-pls tap build --create -- cargo build
-
-# in another terminal, watch output live
-pls follow build
-
-# replay recent output
-pls follow build --since 2h
-
-# filter only stderr lines
-pls follow build --where '.data.stream == "stderr"'
-
-# tag captured lines for downstream filters
-pls tap deploy --tag prod -- ./deploy.sh
-```
-
-For long-running or high-volume commands, choose an explicit pool size so the ring does not overwrite data too quickly:
+Pipe a command's output into `feed --input-format lines` to store one message
+per line. Use your shell's redirection to include stderr.
 
 ```bash
-pls tap api --create-size 64M -- ./server
+set -o pipefail
+cargo build 2>&1 | pls feed build --create --input-format lines
+pls fetch build --last 10
 ```
+
+For a larger history, create the pool with `pls pool create build --size 64M`
+before running the build.
 
 ---
 
@@ -638,13 +627,13 @@ including when stdin is a terminal. Application data has no reserved sender or
 chat fields. Both sides can use this command against the same pool:
 
 ```bash
-pls duplex events --create --tail 20
+pls duplex events --create --last 20
 ```
 
 Enter a JSON object such as `{"event":"ready"}`. The receive stream includes
 all matching messages, including your own appends. Applications can use data and
 tags for their own conventions. For remote use, connect with `access connect`,
-then run `pls duplex https://192.0.2.10:9743/events --tail 20`.
+then run `pls duplex https://192.0.2.10:9743/events --last 20`.
 
 Input EOF closes sending while reception continues, so a script can send a
 request and wait for another process's reply:
@@ -656,7 +645,7 @@ printf '{"ping": true}\n' | pls duplex events --timeout 5s || [ $? -eq 124 ]
 The shell example accepts exit 124 as the chosen end of the receive session.
 `--timeout` exits 124 after a period without output. Ctrl+C or closed stdout
 also ends the session. Use `feed` for a finite copy that exits at input EOF.
-See the [next major upgrade guide](record/upgrading-next-major.md) when replacing
+See the [2.0 upgrade guide](record/upgrading-2.0.md) when replacing
 older `--me`/`--echo-self` usage.
 
 ---
@@ -684,13 +673,13 @@ Then, when something crashes:
 
 ```bash
 # replay the last 30 minutes
-pls follow syslog --since 30m --replay 1
+pls fetch syslog --since 30m
 
 # find kernel panics
-pls follow syslog --since 1h --no-follow --where '.data.MESSAGE | test("panic")'
+pls fetch syslog --since 1h | jq -c 'select(.data.MESSAGE | test("panic"))'
 
 # pipe to jq for further analysis
-pls follow syslog --since 10m --no-follow | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
+pls fetch syslog --since 10m | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
 ```
 
 ---
@@ -702,21 +691,18 @@ Every message in a pool has a sequence number and a nanosecond timestamp, so rep
 An incident pool has been accumulating events. Something went wrong in the last hour:
 
 ```bash
-# replay the last hour at 10× real-time speed — watch the incident unfold
-pls follow incidents --since 1h --replay 10
-
-# replay at original speed (1×) to see exact timing
-pls follow incidents --since 1h --replay 1
+# inspect the last hour in sequence order
+pls fetch incidents --since 1h
 
 # narrow down: only sev1 events with a 503 code
-pls follow incidents --since 2h --no-follow --tag sev1 --where '.data.code == 503'
+pls fetch incidents --since 2h --tag sev1 | jq -c 'select(.data.code == 503)'
 
 # show just the last 20 messages
-pls follow incidents --tail 20 --no-follow
+pls fetch incidents --last 20
 
 # export the evidence for a postmortem
 mkdir -p tmp
-pls follow incidents --tag error --tail 100 --no-follow > tmp/errors.jsonl
+pls fetch incidents --tag error --last 100 > tmp/errors.jsonl
 ```
 
 ---
@@ -754,7 +740,7 @@ plasmite access connect https://pools.example.net:9743
 plasmite feed https://pools.example.net:9743/events '{"sensor": "temp", "value": 23.5}'
 
 # Read recent messages and watch for new ones.
-plasmite follow https://pools.example.net:9743/events --tail 20
+plasmite follow https://pools.example.net:9743/events --last 20
 ```
 
 Open the same HTTPS address in a browser to sign in with the key and browse the
@@ -765,37 +751,26 @@ for certificate trust and browser setup.
 
 ## Detect Retention Gaps
 
-A pool is a fixed-size ring buffer. If writers fill it faster than a consumer
-advances, old messages disappear. Normal SDK tails continue from the next
-retained message so existing best-effort consumers keep moving.
-
-Consumers that require a complete sequence can opt into a fail-closed check:
+A slow consumer can lose messages when writers wrap the pool. Local and HTTPS
+readers raise `RetentionGap` before returning a later message, even if a tag
+filter would have skipped the missing records.
 
 ```python
 from plasmite import RetentionGapError
 
 try:
-    for message in pool.follow(
-        start=FollowStart.sequence(checkpoint),
-        error_on_gap=True,
-        timeout_ms=30_000,
-    ):
-        process(message)
-        checkpoint = message.seq + 1
+    with pool.follow(since=last_handled + 1) as reader:
+        for message in reader:
+            process(message)
+            last_handled = message.seq
 except RetentionGapError as error:
-    print(f"first missing sequence: {error.seq}")
-    rebuild_state_before_restarting()
+    print(f"first missing sequence: {error.missing}")
+    print(f"oldest retained sequence: {error.next_seq}")
 ```
 
-The error occurs before the first message after the gap, including when tag
-filters would discard that message. The consumer remains responsible for
-choosing a new checkpoint or rebuilding state. This check detects loss; it
-does not add acknowledgements or prevent the ring buffer from overwriting old
-data.
-
-Local decoded and Lite3 tails support the option. Remote JSON tails support it;
-remote Lite3 tails do not because their wire format has no terminal error
-frame.
+If your application can rebuild its state, rebuild before resuming. If it can
+accept incomplete history, reopen at `error.next_seq`. Use `pool.info()` to
+inspect the retained range.
 
 ## MCP Agent Access
 
@@ -811,8 +786,7 @@ At initialization, the server explains the core model:
   number that most users can ignore;
 - `plasmite_pool_list` is the normal first tool when the target pool is
   unknown;
-- `plasmite_read` inspects recent or historical messages, while
-  `plasmite_wait` waits once for future messages.
+- `plasmite_fetch` reads retained messages. `plasmite_follow` waits for new messages by default.
 
 An invited key grants full access to every pool in the served directory,
 including creating and deleting pools, reading messages, and appending
@@ -861,49 +835,24 @@ for current command options.
 
 The harness stores its OAuth credentials for that server. The same tools,
 schemas, and write behavior apply to local and remote pools.
-The MCP protocol contract is versioned in
-[`spec/mcp/2025-11-25/SPEC.md`](../spec/mcp/2025-11-25/SPEC.md). See the
+See the [2.0 MCP tool contract](../spec/v2/SPEC.md#mcp). See the
 [serving guide](record/serving.md) for direct HTTP MCP setup.
 
-### Waiting and polling
+### Reading and resuming
 
-MCP tools are request/response, so each wait returns one batch or times out.
+Call `plasmite_follow` with the pool name to wait for new messages. To inspect
+retained history, call `plasmite_fetch`. Either tool accepts `since` or
+`last`, plus `tags` to require every listed tag. Use `count` to set the
+maximum messages in a response. It defaults to 20 and accepts up to 200.
 
-For tail-like use, call `plasmite_wait` with a pool and no `after_seq`. It
-snapshots the pool's current end and waits only for messages appended
-afterward. This cursor-free form is for starting a wait. In a repeated wait
-loop, pass each result's `next_after_seq` into the next call as `after_seq`;
-otherwise messages appended between calls can be skipped.
+Each result includes `next_seq`, the next sequence the tool hasn't examined,
+including when all examined messages failed the tag filter. Pass that number
+as `since` to continue. The `ended` field tells you whether fetch completed
+or the call reached a record, wait, or server limit.
 
-Sequence numbers are automatic metadata, not a normal prerequisite. For
-advanced resumable polling:
-
-1. Call `plasmite_read` with `pool` and optional filters.
-2. Save `next_after_seq` from the result.
-3. Call `plasmite_wait` with that `after_seq` cursor for an idle, bounded wait,
-   or call `plasmite_read` again for an immediate non-blocking check.
-4. Save the returned cursor and repeat. A timed-out wait returns an empty
-   message batch with `timed_out: true`.
-
-Supplying `after_seq` lets a reader catch up on messages appended while it was
-offline. Omitting it intentionally starts at the live edge.
-
-`plasmite_read` details in v1:
-- default `count` is 20, maximum is 200;
-- without `after_seq`, it returns the last `count` matching messages (ascending);
-- with `after_seq`, it returns messages where `seq > after_seq` (ascending);
-- if both `since` and `after_seq` are set, both filters apply (intersection).
-- `next_after_seq` is the highest sequence examined, not merely the last
-  matching message, so filtered polling does not repeatedly rescan messages;
-- `last_returned_seq` is the last matching message, or `null` for an empty
-  batch;
-- `oldest_available_seq` and `newest_available_seq` report current retention
-  bounds;
-- `fell_behind: true` means retention overtook the supplied cursor, so the
-  returned batch begins at the oldest message still available.
-
-v1 intentionally does not implement MCP resource subscriptions or POST-SSE
-mode. `plasmite_wait` is a bounded request/response tool, not a live stream.
+If the pool overwrote messages after your checkpoint, the tool returns a
+`RetentionGap` error. `missing` gives the first sequence you missed.
+To accept the gap, continue from the error's `next_seq`.
 
 ### Coordination conventions (experimental, recommended)
 
@@ -930,8 +879,8 @@ Important v1 limits:
 ### CI split pattern (writer outside MCP, reader via MCP)
 
 For CI status, a simple split works well:
-- CI pipeline writes with CLI/API (`plasmite feed` or HTTP `POST /v0/pools/POOL/append`).
-- Agents read with MCP (`plasmite_read`, `count: 1`, optional `after_seq` polling).
+- CI pipeline writes with CLI/API (`plasmite feed` or HTTP `POST /v2/pools/POOL/feed`).
+- Agents read with MCP (`plasmite_fetch`, `count: 1`, optional `since`).
 
 For browser access, open the server's HTTPS address and enter the access key on
 the page. See [Open the pools in a browser](record/serving.md#open-pools-in-a-browser).

@@ -23,18 +23,23 @@ pub use crate::core::pool::{
     PoolPathGuard, PoolUtilization, SeqOffsetCache,
 };
 pub use crate::core::ring_layout::{FrameSpan, RingLayout};
-pub use client::{LocalClient, PoolRef};
+pub use client::{DEFAULT_POOL_SIZE, LocalClient, PoolRef};
 pub use message::{
-    Follow, FollowOptions, GapPolicy, Lite3Follow, Message, Meta, PoolApiExt, ViewFollow,
+    Feed, FeedInput, FeedReceipt, Follow, Lite3Follow, Message, Meta, Read, ReadPoll, Since,
+    ViewFollow,
 };
+#[cfg(test)]
+pub(crate) use message::{FollowOptions, GapPolicy};
 pub(crate) use message::{
-    TailOutcome, TailState, format_ts, message_from_udp_payload, message_json_from_frame, now_ns,
+    PoolApiExt, TailOutcome, TailState, format_ts, message_from_udp_payload,
+    message_json_from_frame, now_ns, select_lite3_frame,
 };
-pub use remote::{RemoteClient, RemoteFollow, RemoteLite3Follow, RemoteLite3Frame, RemotePool};
-pub use udp::UdpStart as FollowStart;
+pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Read, RemotePool, RemoteRead};
+#[cfg(test)]
+pub(crate) use udp::UdpStart as FollowStart;
 pub use udp::{
-    UdpClient, UdpEvent, UdpFollow, UdpFollowOptions, UdpFrame, UdpPool, UdpSkipReason, UdpStart,
-    UdpStreamEvent, UdpViewEvent, UdpViewFollow,
+    UdpClient, UdpEvent, UdpFollow, UdpFrame, UdpPool, UdpSkipReason, UdpStart, UdpStreamEvent,
+    UdpViewEvent, UdpViewFollow,
 };
 pub use validation::{
     ValidationIssue, ValidationMessageStats, ValidationObservation, ValidationReport,

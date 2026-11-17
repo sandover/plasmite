@@ -160,6 +160,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.os }}-${{ matrix.target }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
       - name: Install smoke-test tooling
         if: matrix.sdk
         shell: bash

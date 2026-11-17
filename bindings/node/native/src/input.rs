@@ -64,9 +64,7 @@ type Json = unsafe extern "C" fn(
     *mut plsm_pool_t,
     *const u8,
     usize,
-    *const *const c_char,
-    usize,
-    u32,
+    *const plsm_feed_options_t,
     *mut *const views::Owner,
     *mut *mut plsm_error_t,
 ) -> i32;
@@ -96,10 +94,10 @@ fn api() -> Option<&'static Api> {
             new: load!(c"plsm_builder_new", New),
             put: load!(c"plsm_builder_put", Put),
             copy: load!(c"plsm_builder_copy_value", CopyValue),
-            commit: load!(c"plsm_pool_append_builder", Commit),
+            commit: load!(c"plsm_pool_feed_builder_view", Commit),
             free: load!(c"plsm_builder_free", Free),
-            forward: load!(c"plsm_pool_append_view", Forward),
-            json: load!(c"plsm_pool_append_view_json", Json),
+            forward: load!(c"plsm_pool_feed_view", Forward),
+            json: load!(c"plsm_pool_feed_json_view", Json),
         })
     })
     .as_ref()
@@ -634,16 +632,20 @@ impl Task for AppendTask {
                 return Err(Error::from_reason("append job already finished"));
             }
             AppendInput::Json { text, tags } => {
-                let tags_c = CStringArray::new(tags)?;
+                let spans = text_spans(tags);
+                let options = plsm_feed_options_t {
+                    struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
+                    durability: self.durability,
+                    tags: spans.as_ptr(),
+                    tags_len: spans.len(),
+                };
                 let _operation = lock()?;
                 unsafe {
                     (api().expect("prepared input ABI").json)(
                         self.handle.ptr,
                         text.as_ptr(),
                         text.len(),
-                        tags_c.as_ptr(),
-                        tags.len(),
-                        self.durability,
+                        &options,
                         &mut owner,
                         &mut error,
                     )

@@ -1,4 +1,3 @@
-const { FollowStart } = require("../follow");
 #!/usr/bin/env node
 // One isolated case per process; the coordinator alternates frozen packages.
 const fs = require('node:fs');
@@ -11,7 +10,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const { monitorEventLoopDelay } = require('node:perf_hooks');
 const assert = require('node:assert/strict');
 const root = path.resolve(process.env.PLASMITE_BENCH_BINDING || path.join(__dirname, '..'));
-const { Client, UdpClient, UdpStart } = require(root);
+const { Client, UdpClient } = require(root);
 const count = Number(process.argv[2] || 4);
 const messages = Number(process.argv[3] || 20);
 const shared = process.argv.includes('--shared-pool');
@@ -57,16 +56,19 @@ async function main() {
   const udpPools = udp ? pools.map((_,i)=>transport.openPool(`p${i}`)) : [];
   const poolNumber = i => shared ? 0 : i;
   async function open(i, limit, since) {
-    if (!udp && owned) {
-      const iterator = poolAt(i).followViews({ start: (since == null ? FollowStart.all() : FollowStart.sequence(since)), maxMessages: limit ?? undefined, timeoutMs: 5000 });
-      let closed = false;
-      return { async next() { const result = await iterator.next(); return { status: result.done ? (closed ? 3 : 2) : 1, message: result.value }; }, close() { closed = true; void iterator.return(); } };
-    }
     if (!udp) {
-      const stream = poolAt(i).openFollow((since == null ? FollowStart.all() : FollowStart.sequence(since)),limit,null);
-      return {next: ms=>stream.nextJsonWait(ms), close:()=>stream.close()};
+      const reader = await poolAt(i)[owned ? "followView" : "follow"]({ since: since ?? "oldest" });
+      let remaining = limit, closed = false;
+      return { async next(ms) {
+        if (remaining === 0) return { status: 2 };
+        const result = await reader.next(ms / 1000);
+        if (result.done) return { status: closed ? 3 : 2 };
+        if (result.value === undefined) return { status: 0 };
+        if (remaining !== null) remaining--;
+        return { status: 1, message: result.value };
+      }, close() { closed = true; reader.close(); } };
     }
-    const follow = await udpPools[poolNumber(i)][owned ? 'followViews' : 'follow']({start:UdpStart.sequence(since ?? 1n),live:true});
+    const follow = await udpPools[poolNumber(i)][owned ? 'followView' : 'follow']({ since: since ?? 1n });
     while (await follow.nextEvent(0)) {} // discard startup progress outside timing
     return {async next(ms) {
       const deadline = now()+BigInt(ms)*1000000n;
@@ -123,7 +125,7 @@ async function main() {
       });
       try {
         for (let j = 0; j < messages; j++) {
-          for (let i = 0; i < pools.length; i++) { sent[i][j] = now(); lastSeq[i] = pools[i].append({ number: j }).seq; }
+          for (let i = 0; i < pools.length; i++) { sent[i][j] = now(); lastSeq[i] = (await pools[i].feed({ number: j })).seq; }
           if (interval) await sleep(interval);
         }
         await Promise.all(readers);
@@ -142,7 +144,7 @@ async function main() {
           await sleep(25);
           const cpu = process.cpuUsage(), sentAt = now();
           const target = count-1;
-          lastSeq[target] = pools[target].append({number:trial}).seq;
+          lastSeq[target] = (await pools[target].feed({number:trial})).seq;
           const delivery = reads[target].then(value=>({value,arrived:now()}));
           const observed = await Promise.race([delivery,new Promise(resolve=>{timer=setTimeout(()=>resolve(null),250);})]);
           clearTimeout(timer);

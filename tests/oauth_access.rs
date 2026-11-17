@@ -253,7 +253,7 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         &agent,
         &resource,
         access_token,
-        "plasmite_read",
+        "plasmite_fetch",
         json!({"pool":"oauth-flow"}),
         21,
     )?;
@@ -390,7 +390,7 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         .ok_or("missing browser cookie value")?
         .to_owned();
     agent
-        .get(&format!("{issuer}/v0/pools"))
+        .get(&format!("{issuer}/v2/pools"))
         .set("Cookie", &browser_cookie)
         .call()?;
 
@@ -436,7 +436,7 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
     );
     native.list_pools()?;
     agent
-        .get(&format!("{issuer}/v0/pools"))
+        .get(&format!("{issuer}/v2/pools"))
         .set("Cookie", &browser_cookie)
         .call()?;
 
@@ -486,7 +486,7 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
     assert!(native.list_pools().is_err());
     assert!(matches!(
         agent
-            .get(&format!("{issuer}/v0/pools"))
+            .get(&format!("{issuer}/v2/pools"))
             .set("Cookie", &browser_cookie)
             .call(),
         Err(ureq::Error::Status(401, _))

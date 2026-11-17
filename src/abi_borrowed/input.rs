@@ -317,7 +317,7 @@ pub unsafe extern "C" fn plsm_go_append_nodes(
                 crate::api::AppendOptions::new(time, durability),
             )?;
             view.seq = seq;
-            view.timestamp_ns = time;
+            view.time = time;
             publish(view, out)
         })(),
         error,

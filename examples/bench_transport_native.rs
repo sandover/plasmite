@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use plasmite::api::{
-    Durability, Lite3DocRef, LocalClient, Pool, PoolApiExt, PoolInfo, PoolRef, RemoteClient,
-    RemotePool, lite3,
+    Error, ErrorKind, Feed, Lite3DocRef, LocalClient, Pool, PoolInfo, PoolRef, Read as Selection,
+    RemoteClient, RemotePool, Since, lite3,
 };
 use serde_json::{Value, json};
 
@@ -52,7 +52,7 @@ impl PoolAccess {
         let pool = match connection {
             Connection::Local { dir } => {
                 let client = LocalClient::new().with_pool_dir(dir);
-                Self::Local(client.open_pool(&pool_ref)?)
+                Self::Local(client.open_pool(&pool_ref, false)?)
             }
             Connection::Remote {
                 server,
@@ -71,7 +71,7 @@ impl PoolAccess {
                     }
                     None => RemoteClient::new(server)?,
                 };
-                Self::Remote(client.open_pool(&pool_ref)?)
+                Self::Remote(client.open_pool(&pool_ref, false)?)
             }
         };
         pool.info()?; // Warm the connection and resolve the pool before timed calls.
@@ -88,30 +88,35 @@ impl PoolAccess {
 
     fn append_json(&mut self, item: &Value) -> ApiResult<u64> {
         match self {
-            Self::Local(pool) => pool
-                .append_json_now(item, &[], Durability::Fast)
-                .map(|message| message.seq),
-            Self::Remote(pool) => pool
-                .append_json_now(item, &[], Durability::Fast)
-                .map(|message| message.seq),
+            Self::Local(pool) => pool.feed(item, Feed::default()).map(|message| message.seq),
+            Self::Remote(pool) => pool.feed(item, Feed::default()).map(|message| message.seq),
         }
         .map_err(Box::new)
     }
 
     fn append_lite3(&mut self, payload: &[u8]) -> ApiResult<u64> {
         match self {
-            Self::Local(pool) => pool.append_lite3_now(payload, Durability::Fast),
-            Self::Remote(pool) => pool.append_lite3_now(payload, Durability::Fast),
+            Self::Local(pool) => pool
+                .feed_lite3_receipt(payload, Feed::default())
+                .map(|receipt| receipt.seq),
+            Self::Remote(pool) => pool
+                .feed_lite3_receipt(payload, Feed::default())
+                .map(|receipt| receipt.seq),
         }
         .map_err(Box::new)
     }
 
     fn get_message(&self, sequence: u64) -> ApiResult<plasmite::api::Message> {
         match self {
-            Self::Local(pool) => pool.get_message(sequence),
-            Self::Remote(pool) => pool.get_message(sequence),
-        }
-        .map_err(Box::new)
+            Self::Local(pool) => pool
+                .fetch(Selection::since(Since::Seq(sequence)))?
+                .next()
+                .transpose(),
+            Self::Remote(pool) => pool
+                .fetch(Selection::since(Since::Seq(sequence)))?
+                .next_message(),
+        }?
+        .ok_or_else(|| Box::new(Error::new(ErrorKind::NotFound).with_seq(sequence)))
     }
 }
 
@@ -207,7 +212,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Encoding::Lite3 => match &pool {
                             PoolAccess::Local(pool) => {
                                 let call_started = Instant::now();
-                                let frame = pool.get_lite3(sequence)?;
+                                let frame = pool.get(sequence)?;
                                 latencies.push(call_started.elapsed().as_nanos());
                                 if frame.seq != sequence {
                                     return Err(format!(
@@ -220,7 +225,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             PoolAccess::Remote(pool) => {
                                 let call_started = Instant::now();
-                                let payload = pool.get_lite3(sequence)?;
+                                let payload = pool
+                                    .fetch_lite3(Selection::since(Since::Seq(sequence)))?
+                                    .next_frame()?
+                                    .ok_or_else(|| {
+                                        Error::new(ErrorKind::NotFound).with_seq(sequence)
+                                    })?
+                                    .payload;
                                 latencies.push(call_started.elapsed().as_nanos());
                                 verify_lite3_data(&payload, expected_data, sequence)?;
                             }

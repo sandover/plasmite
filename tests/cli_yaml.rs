@@ -279,15 +279,7 @@ fn finite_follow_emits_marked_yaml_documents() {
     let envelopes = cli_at(
         &pool_dir,
         &[
-            "follow",
-            "history",
-            "--tail",
-            "2",
-            "--no-follow",
-            "--format",
-            "yaml",
-            "--color",
-            "always",
+            "fetch", "history", "--last", "2", "--format", "yaml", "--color", "always",
         ],
     );
     assert_success(&envelopes);

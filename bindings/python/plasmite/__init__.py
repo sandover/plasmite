@@ -1,5 +1,5 @@
 """
-Purpose: Provide Python bindings for the libplasmite C ABI (v0).
+Purpose: Provide Python bindings for the libplasmite C ABI.
 Key Exports: Client, Pool, Stream, Durability, ErrorKind, PlasmiteError.
 Role: Minimal, ergonomic wrapper around include/plasmite.h for Python users.
 Invariants: JSON bytes in/out; native operations and close serialize per handle.
@@ -26,15 +26,15 @@ from ctypes import (
     sizeof,
     string_at,
 )
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import IntEnum
 from functools import wraps
 from threading import Event, Lock, RLock
 import json
 import os
 import re
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any, Generator, Iterable, Optional
 
 
@@ -104,7 +104,10 @@ class InternalError(PlasmiteError):
 
 
 class RetentionGapError(PlasmiteError):
-    pass
+    def __init__(self, *args, missing: int | None = None, next_seq: int | None = None):
+        super().__init__(*args)
+        self.missing = missing
+        self.next_seq = next_seq
 
 
 @dataclass(frozen=True)
@@ -115,8 +118,7 @@ class MessageMeta:
 @dataclass(frozen=True)
 class Message:
     seq: int
-    time: datetime
-    time_rfc3339: str
+    time: int
     data: Any
     meta: MessageMeta
     raw: bytes
@@ -124,6 +126,14 @@ class Message:
     @property
     def tags(self) -> list[str]:
         return self.meta.tags
+
+
+@dataclass(frozen=True)
+class Lite3Frame:
+    seq: int
+    time: int
+    flags: int
+    payload: bytes
 
 
 class plsm_client_t(Structure):
@@ -166,7 +176,7 @@ class plsm_udp_event_t(Structure):
         ("kind", c_uint32),
         ("reason", c_uint32),
         ("seq", c_uint64),
-        ("timestamp_ns", c_uint64),
+        ("time", c_uint64),
         ("first", c_uint64),
         ("last", c_uint64),
         ("start_seq", c_uint64),
@@ -180,14 +190,14 @@ class plsm_udp_event_t(Structure):
     ]
 
 
-class plsm_append_identity_t(Structure):
-    _fields_ = [("seq", c_uint64), ("timestamp_ns", c_uint64)]
+class plsm_feed_receipt_t(Structure):
+    _fields_ = [("seq", c_uint64), ("time", c_uint64)]
 
 
 class plsm_lite3_frame_t(Structure):
     _fields_ = [
         ("seq", c_uint64),
-        ("timestamp_ns", c_uint64),
+        ("time", c_uint64),
         ("flags", c_uint32),
         ("payload", plsm_buf_t),
     ]
@@ -202,49 +212,65 @@ class plsm_error_t(Structure):
         ("offset", c_uint64),
         ("has_seq", c_uint8),
         ("has_offset", c_uint8),
+        ("missing", c_uint64),
+        ("next_seq", c_uint64),
     ]
 
 
-class plsm_follow_options_t(Structure):
+class plsm_text_t(Structure):
+    _fields_ = [("data", c_char_p), ("len", c_size_t)]
+
+
+class plsm_read_options_t(Structure):
     _fields_ = [
         ("struct_size", c_uint32),
-        ("gap_policy", c_uint32),
-        ("start_value", c_uint64),
-        ("max_messages", c_uint64),
-        ("timeout_ms", c_uint64),
         ("start_kind", c_uint32),
-        ("has_max", c_uint32),
-        ("has_timeout", c_uint32),
-        ("finite", c_uint32),
+        ("start_value", c_uint64),
+        ("tags", POINTER(plsm_text_t)),
+        ("tags_len", c_size_t),
+    ]
+
+
+class plsm_feed_options_t(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("durability", c_uint32),
+        ("tags", POINTER(plsm_text_t)),
+        ("tags_len", c_size_t),
     ]
 
 
 def _load_lib() -> CDLL:
+    if sys.platform == "win32":
+        versioned, cargo_name = "plasmite2.dll", "plasmite.dll"
+    elif sys.platform == "darwin":
+        versioned, cargo_name = "libplasmite.2.dylib", "libplasmite.dylib"
+    else:
+        versioned, cargo_name = "libplasmite.so.2", "libplasmite.so"
     env_dir = os.environ.get("PLASMITE_LIB_DIR")
     if env_dir:
-        candidates = [
-            os.path.join(env_dir, name)
-            for name in ("plasmite.dll", "libplasmite.dylib", "libplasmite.so")
-        ]
-        for candidate in candidates:
-            if os.path.exists(candidate):
-                return CDLL(candidate)
-    native_dir = Path(__file__).resolve().parent / "_native"
-    for candidate in (
-        native_dir / "plasmite.dll",
-        native_dir / "libplasmite.dylib",
-        native_dir / "libplasmite.so",
-    ):
-        if candidate.exists():
-            return CDLL(str(candidate))
-    for name in ("plasmite.dll", "plasmite", "libplasmite"):
-        try:
-            return CDLL(name)
-        except OSError:
-            continue
-    raise OSError(
-        "libplasmite not found; set PLASMITE_LIB_DIR or build target/debug/libplasmite.*"
-    )
+        for name in (versioned, cargo_name):
+            candidate = Path(env_dir).resolve() / name
+            if candidate.is_file():
+                return _check_abi(CDLL(str(candidate)))
+        raise OSError(f"Plasmite 2 library not found in {env_dir}")
+    candidate = Path(__file__).resolve().parent / "_native" / versioned
+    if candidate.is_file():
+        return _check_abi(CDLL(str(candidate)))
+    return _check_abi(CDLL(versioned))
+
+
+def _check_abi(lib: CDLL) -> CDLL:
+    try:
+        major = lib.plsm_abi_major
+    except AttributeError as exc:
+        raise ImportError("Plasmite requires ABI major 2; library does not report its ABI") from exc
+    major.argtypes = []
+    major.restype = c_uint32
+    actual = major()
+    if actual != 2:
+        raise ImportError(f"Plasmite requires ABI major 2; found {actual}")
+    return lib
 
 
 _LIB = _load_lib()
@@ -306,70 +332,71 @@ _LIB.plsm_pool_create.argtypes = [
 ]
 _LIB.plsm_pool_create.restype = c_int
 _LIB.plsm_pool_open.argtypes = [
-    POINTER(plsm_client_t),
-    c_char_p,
-    POINTER(POINTER(plsm_pool_t)),
-    POINTER(POINTER(plsm_error_t)),
+    POINTER(plsm_client_t), c_char_p, c_uint32,
+    POINTER(POINTER(plsm_pool_t)), POINTER(POINTER(plsm_error_t)),
 ]
 _LIB.plsm_pool_open.restype = c_int
+_LIB.plsm_pool_feed_json.argtypes = [
+    POINTER(plsm_pool_t), c_char_p, c_size_t, POINTER(plsm_feed_options_t),
+    POINTER(plsm_buf_t), POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_pool_feed_json.restype = c_int
+for _open_reader in (
+    _LIB.plsm_pool_follow, _LIB.plsm_pool_fetch,
+    _LIB.plsm_pool_follow_view, _LIB.plsm_pool_fetch_view,
+):
+    _open_reader.argtypes = [
+        POINTER(plsm_pool_t), POINTER(plsm_read_options_t),
+        POINTER(POINTER(plsm_stream_t)), POINTER(POINTER(plsm_error_t)),
+    ]
+    _open_reader.restype = c_int
+
+_LIB.plsm_pool_info.argtypes = [POINTER(plsm_pool_t), POINTER(plsm_buf_t), POINTER(POINTER(plsm_error_t))]
+_LIB.plsm_pool_info.restype = c_int
+_LIB.plsm_pool_list.argtypes = [POINTER(plsm_client_t), POINTER(plsm_buf_t), POINTER(POINTER(plsm_error_t))]
+_LIB.plsm_pool_list.restype = c_int
+_LIB.plsm_pool_delete.argtypes = [POINTER(plsm_client_t), c_char_p, POINTER(POINTER(plsm_error_t))]
+_LIB.plsm_pool_delete.restype = c_int
+
 _LIB.plsm_pool_free.argtypes = [POINTER(plsm_pool_t)]
 _LIB.plsm_pool_free.restype = None
 
-_LIB.plsm_pool_append_json.argtypes = [
-    POINTER(plsm_pool_t),
-    c_char_p,
-    c_size_t,
-    POINTER(c_char_p),
-    c_size_t,
-    c_uint32,
-    POINTER(plsm_buf_t),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_pool_append_json.restype = c_int
 
-_LIB.plsm_pool_append_lite3.argtypes = [
-    POINTER(plsm_pool_t),
-    c_char_p,
-    c_size_t,
-    c_uint32,
-    POINTER(c_uint64),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_pool_append_lite3.restype = c_int
+_LIB.plsm_pool_feed_lite3.argtypes = _LIB.plsm_pool_feed_json.argtypes
+_LIB.plsm_pool_feed_lite3.restype = c_int
 
-# Older libraries keep the existing methods; identity methods require the new ABI.
-for _name, _arguments in [
-    ("plsm_pool_append_json_identity", [POINTER(plsm_pool_t), c_char_p, c_size_t,
-        POINTER(c_char_p), c_size_t, c_uint32]),
-    ("plsm_pool_append_lite3_identity", [POINTER(plsm_pool_t), c_char_p, c_size_t,
-        c_uint32]),
-]:
-    if hasattr(_LIB, _name):
-        _function = getattr(_LIB, _name)
-        _function.argtypes = [*_arguments, POINTER(plsm_append_identity_t),
-                             POINTER(POINTER(plsm_error_t))]
-        _function.restype = c_int
+for _name in ("plsm_pool_feed_json_receipt", "plsm_pool_feed_lite3_receipt"):
+    _function = getattr(_LIB, _name)
+    _function.argtypes = [
+        POINTER(plsm_pool_t), c_char_p, c_size_t, POINTER(plsm_feed_options_t),
+        POINTER(plsm_feed_receipt_t), POINTER(POINTER(plsm_error_t)),
+    ]
+    _function.restype = c_int
 
-_LIB.plsm_pool_get_json.argtypes = [
+_LIB.plsm_internal_pool_get_json.argtypes = [
     POINTER(plsm_pool_t),
     c_uint64,
     POINTER(plsm_buf_t),
     POINTER(POINTER(plsm_error_t)),
 ]
-_LIB.plsm_pool_get_json.restype = c_int
+_LIB.plsm_internal_pool_get_json.restype = c_int
 
-_LIB.plsm_pool_get_lite3.argtypes = [
+_LIB.plsm_internal_pool_get_lite3.argtypes = [
     POINTER(plsm_pool_t),
     c_uint64,
     POINTER(plsm_lite3_frame_t),
     POINTER(POINTER(plsm_error_t)),
 ]
-_LIB.plsm_pool_get_lite3.restype = c_int
+_LIB.plsm_internal_pool_get_lite3.restype = c_int
 
-for _name, _handle in (("plsm_pool_follow", plsm_stream_t), ("plsm_pool_follow_lite3", plsm_lite3_stream_t)):
+for _name in ("plsm_pool_follow_lite3", "plsm_pool_fetch_lite3"):
     _function = getattr(_LIB, _name)
-    _function.argtypes = [POINTER(plsm_pool_t), POINTER(plsm_follow_options_t), POINTER(POINTER(_handle)), POINTER(POINTER(plsm_error_t))]
+    _function.argtypes = [
+        POINTER(plsm_pool_t), POINTER(plsm_read_options_t),
+        POINTER(POINTER(plsm_lite3_stream_t)), POINTER(POINTER(plsm_error_t)),
+    ]
     _function.restype = c_int
+
 
 _LIB.plsm_stream_next.argtypes = [
     POINTER(plsm_stream_t),
@@ -426,31 +453,27 @@ _LIB.plsm_udp_client_open_pool.argtypes = [
 _LIB.plsm_udp_client_open_pool.restype = c_int
 _LIB.plsm_udp_pool_free.argtypes = [POINTER(plsm_udp_pool_t)]
 _LIB.plsm_udp_pool_free.restype = None
-_LIB.plsm_udp_pool_send_json.argtypes = [
-    POINTER(plsm_udp_pool_t),
-    c_char_p,
-    c_size_t,
-    POINTER(c_char_p),
-    c_size_t,
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_udp_pool_send_json.restype = c_int
-_LIB.plsm_udp_pool_send_lite3.argtypes = [
+_LIB.plsm_udp_pool_feed_lite3.argtypes = [
     POINTER(plsm_udp_pool_t),
     c_char_p,
     c_size_t,
     POINTER(POINTER(plsm_error_t)),
 ]
-_LIB.plsm_udp_pool_send_lite3.restype = c_int
-_LIB.plsm_udp_pool_follow.argtypes = [
-    POINTER(plsm_udp_pool_t),
-    c_uint32,
-    c_uint64,
-    c_uint32,
-    POINTER(POINTER(plsm_udp_follow_t)),
-    POINTER(POINTER(plsm_error_t)),
+_LIB.plsm_udp_pool_feed_lite3.restype = c_int
+_LIB.plsm_udp_pool_read.argtypes = [
+    POINTER(plsm_udp_pool_t), POINTER(plsm_read_options_t), c_uint32, c_uint32,
+    POINTER(POINTER(plsm_udp_follow_t)), POINTER(POINTER(plsm_error_t)),
 ]
-_LIB.plsm_udp_pool_follow.restype = c_int
+_LIB.plsm_udp_pool_read.restype = c_int
+_LIB.plsm_udp_pool_feed_json.argtypes = [
+    POINTER(plsm_udp_pool_t), c_char_p, c_size_t, POINTER(plsm_feed_options_t), POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_pool_feed_json.restype = c_int
+_LIB.plsm_udp_follow_next_view.argtypes = [
+    POINTER(plsm_udp_follow_t), c_uint64, POINTER(plsm_udp_event_t),
+    POINTER(c_void_p), POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_follow_next_view.restype = c_int
 _LIB.plsm_udp_follow_next.argtypes = [
     POINTER(plsm_udp_follow_t),
     c_uint64,
@@ -493,6 +516,8 @@ def _take_error(err_ptr: POINTER(plsm_error_t) | None) -> PlasmiteError:
     path = err.path.decode("utf-8") if err.path else None
     seq = int(err.seq) if err.has_seq else None
     offset = int(err.offset) if err.has_offset else None
+    missing = int(err.missing) or None
+    next_seq = int(err.next_seq) or None
     _LIB.plsm_error_free(err_ptr)
     try:
         kind = ErrorKind(raw_kind)
@@ -500,6 +525,8 @@ def _take_error(err_ptr: POINTER(plsm_error_t) | None) -> PlasmiteError:
         kind = ErrorKind.INTERNAL
     if not message:
         message = _default_error_message(kind)
+    if kind == ErrorKind.RETENTION_GAP:
+        return RetentionGapError(kind, message, path, seq, offset, missing=missing, next_seq=next_seq)
     error_cls = _ERROR_KIND_TO_CLASS.get(kind, PlasmiteError)
     return error_cls(kind, message, path, seq, offset)
 
@@ -528,25 +555,31 @@ def _buf_to_bytes(buf: plsm_buf_t) -> bytes:
     return out
 
 
+def _pool_info(inspect, handle):
+    buf = plsm_buf_t()
+    error = POINTER(plsm_error_t)()
+    if inspect(handle, byref(buf), byref(error)) != 0:
+        raise _take_error(error)
+    return json.loads(_buf_to_bytes(buf))
+
+
 def _frame_to_py(frame: plsm_lite3_frame_t) -> Lite3Frame:
     seq = int(frame.seq)
-    timestamp_ns = int(frame.timestamp_ns)
+    timestamp_ns = int(frame.time)
     flags = int(frame.flags)
     payload = b""
     if frame.payload.data and frame.payload.len:
         payload = string_at(frame.payload.data, frame.payload.len)
     _LIB.plsm_lite3_frame_free(byref(frame))
-    return Lite3Frame(seq=seq, timestamp_ns=timestamp_ns, flags=flags, payload=payload)
+    return Lite3Frame(seq=seq, time=timestamp_ns, flags=flags, payload=payload)
 
 
-def _tag_array(values: Iterable[str]) -> tuple[POINTER(c_char_p), list[bytes]]:
+def _tag_array(values: Iterable[str]):
     encoded = [_ensure_bytes(value.encode("utf-8"), "tag") for value in values]
     if not encoded:
-        return POINTER(c_char_p)(), encoded
-    arr = (c_char_p * len(encoded))()
-    for idx, val in enumerate(encoded):
-        arr[idx] = val
-    return arr, encoded
+        return POINTER(plsm_text_t)(), encoded
+    array = (plsm_text_t * len(encoded))(*(plsm_text_t(value, len(value)) for value in encoded))
+    return array, encoded
 
 
 def _closed_error(target: str) -> PlasmiteError:
@@ -593,22 +626,59 @@ def _optional_non_negative_int(value: Optional[int], name: str) -> Optional[int]
     return _ensure_non_negative_int(value, name)
 
 
-def _stream_options(start, max_messages, timeout_ms, error_on_gap, finite=False):
-    start = FollowStart.new() if start is None else start
-    if not isinstance(start, FollowStart) or start.kind not in (0, 1, 2, 3):
-        raise ValueError("start must be a FollowStart")
-    value = _ensure_non_negative_int(start.value, "start.value")
-    options = plsm_follow_options_t()
-    options.struct_size = sizeof(plsm_follow_options_t)
-    options.gap_policy = int(bool(error_on_gap))
-    options.start_kind = start.kind
-    options.start_value = value
-    options.max_messages = max_messages or 0
-    options.timeout_ms = timeout_ms or 0
-    options.has_max = int(max_messages is not None)
-    options.has_timeout = int(timeout_ms is not None)
-    options.finite = int(bool(finite))
-    return options
+@dataclass(frozen=True)
+class _Instant:
+    nanoseconds: int
+
+
+def at(nanoseconds: int) -> _Instant:
+    """Select a Unix nanosecond instant instead of a sequence."""
+    return _Instant(_ensure_non_negative_int(nanoseconds, "time"))
+
+
+_DURATION_UNITS = dict(ns=1, us=1000, ms=1000000, s=10**9, m=60*10**9,
+                       h=3600*10**9, d=86400*10**9)
+
+
+def _timedelta_ns(value: timedelta) -> int:
+    return ((value.days * 86400 + value.seconds) * 10**6 + value.microseconds) * 1000
+
+
+def _parse_time_ns(text: str) -> int:
+    pattern = r"(\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:\d{2})"
+    parsed = re.fullmatch(pattern, text.strip(), re.ASCII)
+    if parsed is None:
+        raise ValueError("expected an RFC 3339 timestamp")
+    seconds, fraction, zone = parsed.groups()
+    whole = datetime.fromisoformat(seconds + ("+00:00" if zone.upper() == "Z" else zone))
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return _timedelta_ns(whole - epoch) + int((fraction or "")[:9].ljust(9, "0"))
+
+
+def _read_start(since, last) -> tuple[int, int]:
+    try:
+        if last is not None:
+            if since is not None:
+                raise ValueError("since and last are mutually exclusive")
+            return 5, _ensure_non_negative_int(last, "last")
+        if since is None:
+            return 0, 0
+        if isinstance(since, _Instant):
+            return 3, since.nanoseconds
+        if isinstance(since, timedelta):
+            return 4, _ensure_non_negative_int(_timedelta_ns(since), "since")
+        if isinstance(since, int):
+            return 2, _ensure_non_negative_int(since, "since")
+        if isinstance(since, str):
+            if since == "oldest":
+                return 1, 0
+            if duration := re.fullmatch(r"([0-9]+)(ns|us|ms|s|m|h|d)", since.strip(), re.I):
+                value = int(duration[1]) * _DURATION_UNITS[duration[2].lower()]
+                return 4, min(_UINT64_MAX, value)
+            return 3, max(0, min(_UINT64_MAX, _parse_time_ns(since)))
+        raise ValueError("since must be oldest, a sequence, an instant or a duration")
+    except ValueError as exc:
+        raise UsageError(ErrorKind.USAGE, str(exc)) from exc
 
 
 class Client:
@@ -653,7 +723,7 @@ class Client:
         return Pool(out_pool)
 
     @_serialized_handle
-    def open_pool(self, pool_ref: str) -> Pool:
+    def open_pool(self, pool_ref: str, *, create: bool = False) -> Pool:
         _require_open(self._ptr, "client")
         if not pool_ref:
             raise ValueError("pool_ref is required")
@@ -664,6 +734,7 @@ class Client:
         rc = _LIB.plsm_pool_open(
             self._ptr,
             encoded_ref,
+            int(create),
             byref(out_pool),
             byref(out_err),
         )
@@ -671,15 +742,18 @@ class Client:
             raise _take_error(out_err)
         return Pool(out_pool)
 
-    def pool(
-        self,
-        pool_ref: str,
-        size_bytes: int = DEFAULT_POOL_SIZE_BYTES,
-    ) -> Pool:
-        try:
-            return self.open_pool(pool_ref)
-        except NotFoundError:
-            return self.create_pool(pool_ref, size_bytes)
+    @_serialized_handle
+    def list_pools(self) -> list[dict]:
+        _require_open(self._ptr, "client")
+        return _pool_info(_LIB.plsm_pool_list, self._ptr)
+
+    @_serialized_handle
+    def delete_pool(self, pool_ref: str) -> None:
+        _require_open(self._ptr, "client")
+        error = POINTER(plsm_error_t)()
+        encoded = _ensure_bytes(pool_ref.encode("utf-8"), "pool_ref")
+        if _LIB.plsm_pool_delete(self._ptr, encoded, byref(error)) != 0:
+            raise _take_error(error)
 
     @_serialized_handle
     def close(self) -> None:
@@ -700,25 +774,10 @@ class Client:
 
 
 @dataclass(frozen=True)
-class AppendReceipt:
-    """Identity from the successful commit; timestamp_ns is unsigned Unix nanoseconds."""
+class FeedReceipt:
+    """The committed sequence and Unix nanosecond time."""
     seq: int
-    timestamp_ns: int
-
-
-@dataclass(frozen=True)
-class Lite3Frame:
-    seq: int
-    timestamp_ns: int
-    flags: int
-    payload: bytes
-
-    @property
-    def time(self) -> datetime:
-        seconds, nanoseconds = divmod(self.timestamp_ns, 1_000_000_000)
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(
-            microsecond=nanoseconds // 1_000
-        )
+    time: int
 
 
 class Pool:
@@ -727,156 +786,99 @@ class Pool:
         self._ptr = ptr
 
     @_serialized_handle
-    def append_json(self, payload: bytes, tags: Iterable[str], durability: Durability) -> bytes:
+    def info(self) -> dict:
         _require_open(self._ptr, "pool")
-        payload = _ensure_bytes(payload, "payload")
-        if not payload:
-            raise ValueError("payload is required")
-        buf = plsm_buf_t()
-        out_err = POINTER(plsm_error_t)()
-        arr, _keep = _tag_array(tags)
-        durability_value = int(durability)
-        _require_open(self._ptr, "pool")
-        # The native call borrows these immutable bytes only until it returns.
-        rc = _LIB.plsm_pool_append_json(
-            self._ptr,
-            payload,
-            len(payload),
-            arr,
-            len(_keep),
-            durability_value,
-            byref(buf),
-            byref(out_err),
-        )
-        if rc != 0:
-            raise _take_error(out_err)
-        return _buf_to_bytes(buf)
+        return _pool_info(_LIB.plsm_pool_info, self._ptr)
 
-    def append(
-        self,
-        value,
-        tags: Optional[Iterable[str]] = None,
+    def feed(
+        self, value: dict | Message, tags: Iterable[str] | None = None,
         durability: Durability = Durability.FAST,
     ) -> Message:
-        payload = self.append_json(
-            json.dumps(value).encode("utf-8"),
-            [] if tags is None else tags,
-            durability,
-        )
-        return parse_message(payload)
+        """Store an object or forward a message with a new sequence and time."""
+        if isinstance(value, Message):
+            if tags is not None:
+                raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
+            tags = value.tags
+            value = value.data
+        payload = json.dumps(value).encode("utf-8")
+        return parse_message(self.feed_json(payload, tags, durability))
 
-    @_serialized_handle
-    def append_lite3(self, payload: bytes, durability: Durability) -> int:
-        _require_open(self._ptr, "pool")
-        payload = _ensure_bytes(payload, "payload")
-        if not payload:
-            raise ValueError("payload is required")
-        out_seq = c_uint64()
-        out_err = POINTER(plsm_error_t)()
-        durability_value = int(durability)
-        _require_open(self._ptr, "pool")
-        rc = _LIB.plsm_pool_append_lite3(
-            self._ptr,
-            payload,
-            len(payload),
-            durability_value,
-            byref(out_seq),
-            byref(out_err),
-        )
-        if rc != 0:
-            raise _take_error(out_err)
-        return int(out_seq.value)
-
-    @_serialized_handle
-    def append_json_identity(self, payload: bytes, tags: Iterable[str], durability: Durability) -> AppendReceipt:
-        _require_open(self._ptr, "pool")
-        payload = _ensure_bytes(payload, "payload")
-        if not payload:
-            raise ValueError("payload is required")
-        function = getattr(_LIB, "plsm_pool_append_json_identity", None)
-        if function is None:
-            raise NotImplementedError("append identity requires a newer libplasmite")
-        receipt = plsm_append_identity_t()
-        out_err = POINTER(plsm_error_t)()
-        arr, _keep = _tag_array(tags)
-        durability_value = int(durability)
-        _require_open(self._ptr, "pool")
-        # The native call borrows these immutable bytes only until it returns.
-        rc = function(
-            self._ptr,
-            payload,
-            len(payload),
-            arr,
-            len(_keep),
-            durability_value,
-            byref(receipt),
-            byref(out_err),
-        )
-        if rc != 0:
-            raise _take_error(out_err)
-        return AppendReceipt(int(receipt.seq), int(receipt.timestamp_ns))
-
-    def append_identity(
-        self, value, tags: Optional[Iterable[str]] = None,
+    def feed_json(
+        self, payload: bytes, tags: Iterable[str] | None = None,
         durability: Durability = Durability.FAST,
-    ) -> AppendReceipt:
-        """Append without returning or decoding the input payload."""
-        return self.append_json_identity(
-            json.dumps(value).encode("utf-8"),
-            [] if tags is None else tags, durability,
-        )
+    ) -> bytes:
+        buf = self._feed_encoded(_LIB.plsm_pool_feed_json, payload, tags, durability, plsm_buf_t())
+        return _buf_to_bytes(buf)
 
     @_serialized_handle
-    def append_lite3_identity(self, payload: bytes, durability: Durability) -> AppendReceipt:
+    def _feed_encoded(self, store, payload, tags, durability, out):
         _require_open(self._ptr, "pool")
         payload = _ensure_bytes(payload, "payload")
-        if not payload:
-            raise ValueError("payload is required")
-        function = getattr(_LIB, "plsm_pool_append_lite3_identity", None)
-        if function is None:
-            raise NotImplementedError("append identity requires a newer libplasmite")
-        receipt = plsm_append_identity_t()
-        out_err = POINTER(plsm_error_t)()
-        durability_value = int(durability)
+        tag_array, encoded_tags = _tag_array([] if tags is None else tags)
+        options = plsm_feed_options_t(sizeof(plsm_feed_options_t), int(durability),
+                                      tag_array, len(encoded_tags))
+        error = POINTER(plsm_error_t)()
         _require_open(self._ptr, "pool")
-        rc = function(
-            self._ptr,
-            payload,
-            len(payload),
-            durability_value,
-            byref(receipt),
-            byref(out_err),
-        )
-        if rc != 0:
-            raise _take_error(out_err)
-        return AppendReceipt(int(receipt.seq), int(receipt.timestamp_ns))
+        if store(self._ptr, payload, len(payload), byref(options), byref(out), byref(error)) != 0:
+            raise _take_error(error)
+        return out
+
+    def feed_lite3(self, payload: bytes, durability: Durability = Durability.FAST) -> Message:
+        buf = self._feed_encoded(_LIB.plsm_pool_feed_lite3, payload, None, durability, plsm_buf_t())
+        return parse_message(_buf_to_bytes(buf))
+
+    def feed_receipt(
+        self, value, tags: Iterable[str] | None = None,
+        durability: Durability = Durability.FAST,
+    ) -> FeedReceipt:
+        if isinstance(value, Message):
+            if tags is not None:
+                raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
+            tags, value = value.tags, value.data
+        return self.feed_json_receipt(json.dumps(value).encode("utf-8"), tags, durability)
+
+    def feed_json_receipt(
+        self, payload: bytes, tags: Iterable[str] | None = None,
+        durability: Durability = Durability.FAST,
+    ) -> FeedReceipt:
+        receipt = self._feed_encoded(_LIB.plsm_pool_feed_json_receipt, payload, tags,
+                                     durability, plsm_feed_receipt_t())
+        return FeedReceipt(int(receipt.seq), int(receipt.time))
+
+    def feed_lite3_receipt(self, payload: bytes, durability: Durability = Durability.FAST) -> FeedReceipt:
+        receipt = self._feed_encoded(_LIB.plsm_pool_feed_lite3_receipt, payload, None,
+                                     durability, plsm_feed_receipt_t())
+        return FeedReceipt(int(receipt.seq), int(receipt.time))
 
     @_serialized_handle
-    def get_json(self, seq: int) -> bytes:
+    def _get_json(self, seq: int) -> bytes:
         _require_open(self._ptr, "pool")
         seq = _ensure_non_negative_int(seq, "seq")
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         native_seq = c_uint64(seq)
         _require_open(self._ptr, "pool")
-        rc = _LIB.plsm_pool_get_json(self._ptr, native_seq, byref(buf), byref(out_err))
+        rc = _LIB.plsm_internal_pool_get_json(self._ptr, native_seq, byref(buf), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         return _buf_to_bytes(buf)
 
-    def get(self, seq: int) -> Message:
-        return parse_message(self.get_json(seq))
-
     @_serialized_handle
-    def append_view(self, value, tags=None, durability=Durability.FAST):
-        """Encode builtin input once and retain the committed immutable snapshot."""
+    def feed_view(self, value, tags=None, durability=Durability.FAST):
+        """Store an object and return an immutable view of the committed message."""
         _require_open(self._ptr, "pool")
-        from ._views import append_view
+        from ._views import MessageView, append_view
 
+        if isinstance(value, Message):
+            if tags is not None:
+                raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
+            tags, value = value.tags, value.data
+        elif isinstance(value, MessageView) and tags is not None:
+            raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
         return append_view(self, value, tags, durability)
 
     @_serialized_handle
-    def get_view(self, seq: int):
+    def _get_view(self, seq: int):
         """Return an immutable Lite3 snapshot with native container access."""
         _require_open(self._ptr, "pool")
         from ._views import get_view
@@ -884,105 +886,54 @@ class Pool:
         return get_view(self, seq)
 
     @_serialized_handle
-    def get_lite3(self, seq: int) -> Lite3Frame:
+    def _get_lite3(self, seq: int) -> Lite3Frame:
         _require_open(self._ptr, "pool")
         seq = _ensure_non_negative_int(seq, "seq")
         frame = plsm_lite3_frame_t()
         out_err = POINTER(plsm_error_t)()
         native_seq = c_uint64(seq)
         _require_open(self._ptr, "pool")
-        rc = _LIB.plsm_pool_get_lite3(self._ptr, native_seq, byref(frame), byref(out_err))
+        rc = _LIB.plsm_internal_pool_get_lite3(self._ptr, native_seq, byref(frame), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         return _frame_to_py(frame)
 
     @_serialized_handle
-    def open_follow(self, start=None, max_messages=None, timeout_ms=None, error_on_gap=False, *, finite=False) -> Stream:
+    def _open_stream(self, open_native, since, last, tags, *, lite3=False):
         _require_open(self._ptr, "pool")
-        max_messages = _optional_non_negative_int(max_messages, "max_messages")
-        timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
-        options = _stream_options(start, max_messages, timeout_ms, error_on_gap, finite)
-        out_stream = POINTER(plsm_stream_t)()
-        out_err = POINTER(plsm_error_t)()
+        kind, value = _read_start(since, last)
+        tag_array, encoded_tags = _tag_array([] if tags is None else tags)
+        options = plsm_read_options_t(sizeof(plsm_read_options_t), kind, value,
+                                      tag_array, len(encoded_tags))
+        handle, stream = (plsm_lite3_stream_t, Lite3Stream) if lite3 else (plsm_stream_t, Stream)
+        native = POINTER(handle)()
+        error = POINTER(plsm_error_t)()
         _require_open(self._ptr, "pool")
-        rc = _LIB.plsm_pool_follow(self._ptr, byref(options), byref(out_stream), byref(out_err))
-        if rc != 0:
-            raise _take_error(out_err)
-        return Stream(out_stream)
+        if open_native(self._ptr, byref(options), byref(native), byref(error)) != 0:
+            raise _take_error(error)
+        return stream(native)
 
-    @_serialized_handle
-    def open_lite3_follow(self, start=None, max_messages=None, timeout_ms=None, error_on_gap=False, *, finite=False) -> Lite3Stream:
-        _require_open(self._ptr, "pool")
-        max_messages = _optional_non_negative_int(max_messages, "max_messages")
-        timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
-        options = _stream_options(start, max_messages, timeout_ms, error_on_gap, finite)
-        out_stream = POINTER(plsm_lite3_stream_t)()
-        out_err = POINTER(plsm_error_t)()
-        _require_open(self._ptr, "pool")
-        rc = _LIB.plsm_pool_follow_lite3(self._ptr, byref(options), byref(out_stream), byref(out_err))
-        if rc != 0:
-            raise _take_error(out_err)
-        return Lite3Stream(out_stream)
+    def fetch(self, *, since=None, last=None, tags=None, cancel=None) -> Reader:
+        """Read up to the last sequence present when this call opens the reader."""
+        return Reader(self._open_stream(_LIB.plsm_pool_fetch, since, last, tags), cancel)
 
-    @_serialized_handle
-    def follow_views(
-        self, *, start=None, finite=False, max_messages=None, tags=None, timeout_ms=None,
-        cancel=None, error_on_gap=False,
-    ):
-        """Return a stream of immutable message views with explicit bounded batches."""
-        _require_open(self._ptr, "pool")
-        from ._views import follow_views
+    def fetch_lite3(self, *, since=None, last=None, tags=None, cancel=None) -> Reader:
+        return Reader(self._open_stream(_LIB.plsm_pool_fetch_lite3, since, last, tags, lite3=True), cancel)
 
-        return follow_views(
-            self, start=start, finite=finite, max_messages=max_messages, tags=tags,
-            timeout_ms=timeout_ms, cancel=cancel, error_on_gap=error_on_gap,
-        )
+    def follow_lite3(self, *, since=None, last=None, tags=None, cancel=None) -> Reader:
+        return Reader(self._open_stream(_LIB.plsm_pool_follow_lite3, since, last, tags, lite3=True), cancel)
 
-    def follow(
-        self,
-        start: FollowStart | None = None,
-        finite: bool = False,
-        max_messages: Optional[int] = None,
-        timeout_ms: Optional[int] = None,
-        tags: Optional[Iterable[str]] = None,
-        error_on_gap: bool = False,
-        cancel: Event | None = None,
-    ) -> Generator[Message, None, None]:
-        """Follow new messages by default; select retained history explicitly."""
-        if max_messages == 0:
-            return
-        required_tags = list(tags or [])
-        stream_max_messages = (
-            None if (max_messages is not None and required_tags) else max_messages
-        )
-        stream = self.open_follow(
-            start=start,
-            finite=finite,
-            max_messages=stream_max_messages,
-            timeout_ms=timeout_ms,
-            error_on_gap=error_on_gap,
-        )
-        try:
-            delivered = 0
-            filter_by_tags = bool(required_tags)
-            while cancel is None or not cancel.is_set():
-                status, msg = stream.next_wait(50)
-                if status == 0:
-                    continue
-                if status == 2 or status == 3:
-                    break
-                if cancel is not None and cancel.is_set():
-                    break
-                message = parse_message(msg)
-                if filter_by_tags:
-                    if not _message_has_tags(message, required_tags):
-                        continue
-                delivered += 1
-                yield message
-                if max_messages is not None and delivered >= max_messages:
-                    break
-        finally:
-            stream.close()
+    def fetch_view(self, *, since=None, last=None, tags=None, cancel=None):
+        from ._views import ViewStream
+        return ViewStream(self._open_stream(_LIB.plsm_pool_fetch_view, since, last, tags), cancel)
+
+    def follow_view(self, *, since=None, last=None, tags=None, cancel=None):
+        from ._views import ViewStream
+        return ViewStream(self._open_stream(_LIB.plsm_pool_follow_view, since, last, tags), cancel)
+
+    def follow(self, *, since=None, last=None, tags=None, cancel=None) -> Reader:
+        """Open a live reader now. With no selection, read new messages."""
+        return Reader(self._open_stream(_LIB.plsm_pool_follow, since, last, tags), cancel)
 
     @_serialized_handle
     def close(self) -> None:
@@ -1070,6 +1021,62 @@ class Stream:
         self.close()
 
 
+class Reader:
+    """A reader opened by fetch or follow. Close it to stop work from another thread."""
+
+    def __init__(self, stream: Stream | Lite3Stream, cancel: Event | None) -> None:
+        self._stream = stream
+        self._cancel = cancel
+        self._read = stream.next_json if isinstance(stream, Stream) else stream.next
+        self._decode = parse_message if isinstance(stream, Stream) else lambda frame: frame
+        self._closed = False
+
+    def __iter__(self) -> Reader:
+        return self
+
+    def __next__(self) -> Message | Lite3Frame:
+        return self.next()
+
+    def next(self, wait: timedelta | None = None) -> Message | Lite3Frame | None:
+        """Return the next message, or None if the per-call wait expires."""
+        remaining = None if wait is None else _timedelta_ns(wait)
+        if remaining is not None and remaining < 0:
+            raise UsageError(ErrorKind.USAGE, "wait must be non-negative")
+        if self._closed:
+            raise StopIteration
+        if self._cancel is None and remaining is None:
+            payload = self._read()
+            if payload is not None:
+                return self._decode(payload)
+        else:
+            from time import monotonic_ns
+
+            deadline = None if remaining is None else monotonic_ns() + remaining
+            while self._cancel is None or not self._cancel.is_set():
+                wait_ms = 50
+                if deadline is not None:
+                    wait_ms = min(wait_ms, max(0, (deadline - monotonic_ns() + 999999) // 1000000))
+                status, payload = self._stream.next_wait(wait_ms)
+                if status == 1:
+                    return self._decode(payload)
+                if status in (2, 3):
+                    break
+                if deadline is not None and monotonic_ns() >= deadline:
+                    return None
+        self.close()
+        raise StopIteration
+
+    def close(self) -> None:
+        self._closed = True
+        self._stream.close()
+
+    def __enter__(self) -> Reader:
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
+
 class Lite3Stream:
     def __init__(self, ptr: POINTER(plsm_lite3_stream_t)) -> None:
         self._lock = RLock()
@@ -1139,58 +1146,17 @@ class Lite3Stream:
 
 
 @dataclass(frozen=True)
-class FollowStart:
-    """A UDP follow start position. Use the named constructors."""
-
-    kind: int
-    value: int = 0
-
-    @classmethod
-    def new(cls) -> FollowStart:
-        return cls(0)
-
-    @classmethod
-    def last(cls, count: int) -> FollowStart:
-        return cls(1, _ensure_non_negative_int(count, "count"))
-
-    @classmethod
-    def since_ns(cls, timestamp_ns: int) -> FollowStart:
-        return cls(2, _ensure_non_negative_int(timestamp_ns, "timestamp_ns"))
-
-    @classmethod
-    def sequence(cls, seq: int) -> FollowStart:
-        return cls(3, _ensure_non_negative_int(seq, "seq"))
-
-    @classmethod
-    def all(cls):
-        return cls.sequence(0)
-
-
-@dataclass(frozen=True)
-class UdpFollowOptions:
-    start: FollowStart = FollowStart(0)
-    finite: bool = False
-
-
-@dataclass(frozen=True)
 class UdpFrame:
     seq: int
-    timestamp_ns: int
+    time: int
     payload: bytes
-
-    @property
-    def time(self) -> datetime:
-        seconds, nanoseconds = divmod(self.timestamp_ns, 1_000_000_000)
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(
-            microsecond=nanoseconds // 1_000
-        )
 
     def message(self) -> Message:
         payload = _ensure_bytes(self.payload, "payload")
         event = plsm_udp_event_t()
         event.kind = 1
         event.seq = self.seq
-        event.timestamp_ns = self.timestamp_ns
+        event.time = self.time
         # Keep the immutable snapshot alive through the GIL-releasing CDLL call.
         event.payload.data = cast(c_char_p(payload), c_void_p) if payload else None
         event.payload.len = len(payload)
@@ -1283,32 +1249,14 @@ class UdpPool:
         self._ptr = ptr
 
     @_serialized_handle
-    def send_json(self, value: Any, tags: Iterable[str] = ()) -> None:
-        _require_open(self._ptr, "UDP pool")
-        payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
-        tag_arr, keepalive = _tag_array(tags)
-        out_err = POINTER(plsm_error_t)()
-        _require_open(self._ptr, "UDP pool")
-        rc = _LIB.plsm_udp_pool_send_json(
-            self._ptr,
-            payload,
-            c_size_t(len(payload)),
-            tag_arr,
-            c_size_t(len(keepalive)),
-            byref(out_err),
-        )
-        if rc != 0:
-            raise _take_error(out_err)
-
-    @_serialized_handle
-    def send_lite3(self, payload: bytes | bytearray | memoryview) -> None:
+    def feed_lite3(self, payload: bytes | bytearray | memoryview) -> None:
         _require_open(self._ptr, "UDP pool")
         payload = _ensure_bytes(payload, "payload")
         if not payload:
             raise ValueError("payload is required")
         out_err = POINTER(plsm_error_t)()
         _require_open(self._ptr, "UDP pool")
-        rc = _LIB.plsm_udp_pool_send_lite3(
+        rc = _LIB.plsm_udp_pool_feed_lite3(
             self._ptr,
             payload,
             c_size_t(len(payload)),
@@ -1317,53 +1265,45 @@ class UdpPool:
         if rc != 0:
             raise _take_error(out_err)
 
-    def follow(self, options: UdpFollowOptions | None = None) -> UdpFollow:
-        return self._follow(options, False)
+    @_serialized_handle
+    def feed(self, value, tags=None, durability=Durability.FAST) -> None:
+        _require_open(self._ptr, "UDP pool")
+        if isinstance(value, Message):
+            if tags is not None:
+                raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
+            tags, value = value.tags, value.data
+        payload = json.dumps(value).encode("utf-8")
+        encoded, values = _tag_array([] if tags is None else tags)
+        options = plsm_feed_options_t(sizeof(plsm_feed_options_t), int(durability), encoded, len(values))
+        error = POINTER(plsm_error_t)()
+        _require_open(self._ptr, "UDP pool")
+        if _LIB.plsm_udp_pool_feed_json(self._ptr, payload, len(payload), byref(options), byref(error)) != 0:
+            raise _take_error(error)
 
-    def follow_views(self, options: UdpFollowOptions | None = None) -> UdpFollow:
-        """Receive MessageViews and the existing gap/progress events."""
-        return self._follow(options, True)
+    def follow(self, *, since=None, last=None, tags=None) -> UdpFollow:
+        return self._read(True, False, since, last, tags)
+
+    def fetch(self, *, since=None, last=None, tags=None) -> UdpFollow:
+        return self._read(False, False, since, last, tags)
+
+    def follow_view(self, *, since=None, last=None, tags=None) -> UdpFollow:
+        return self._read(True, True, since, last, tags)
+
+    def fetch_view(self, *, since=None, last=None, tags=None) -> UdpFollow:
+        return self._read(False, True, since, last, tags)
 
     @_serialized_handle
-    def _follow(self, options, views):
+    def _read(self, live, views, since, last, tags) -> UdpFollow:
         _require_open(self._ptr, "UDP pool")
-        options = options or UdpFollowOptions()
-        if not isinstance(options, UdpFollowOptions):
-            raise TypeError("options must be UdpFollowOptions")
-        start = options.start
-        if not isinstance(start, FollowStart):
-            raise ValueError("invalid UDP follow start")
-        start_kind = start.kind
-        if start_kind not in (0, 1, 2, 3):
-            raise ValueError("invalid UDP follow start")
-        start_value = _ensure_non_negative_int(start.value, "start.value")
-        out_follow = POINTER(plsm_udp_follow_t)()
-        out_err = POINTER(plsm_error_t)()
-        native_kind = c_uint32(start_kind)
-        native_value = c_uint64(start_value)
-        native_live = c_uint32(1 if not options.finite else 0)
+        kind, value = _read_start(since, last)
+        encoded, values = _tag_array([] if tags is None else tags)
+        options = plsm_read_options_t(sizeof(plsm_read_options_t), kind, value, encoded, len(values))
+        native = POINTER(plsm_udp_follow_t)()
+        error = POINTER(plsm_error_t)()
         _require_open(self._ptr, "UDP pool")
-        open_follow = _LIB.plsm_udp_pool_follow
-        if views:
-            open_follow = _LIB.plsm_udp_pool_follow_views
-            open_follow.argtypes = _LIB.plsm_udp_pool_follow.argtypes
-            open_follow.restype = c_int
-            next_view = _LIB.plsm_udp_follow_next_view
-            next_view.argtypes = [POINTER(plsm_udp_follow_t), c_uint64,
-                                  POINTER(plsm_udp_event_t), POINTER(c_void_p),
-                                  POINTER(POINTER(plsm_error_t))]
-            next_view.restype = c_int
-        rc = open_follow(
-            self._ptr,
-            native_kind,
-            native_value,
-            native_live,
-            byref(out_follow),
-            byref(out_err),
-        )
-        if rc != 0:
-            raise _take_error(out_err)
-        return UdpFollow(out_follow, views=views)
+        if _LIB.plsm_udp_pool_read(self._ptr, byref(options), live, views, byref(native), byref(error)) != 0:
+            raise _take_error(error)
+        return UdpFollow(native, views=views)
 
     @_serialized_handle
     def close(self) -> None:
@@ -1495,7 +1435,7 @@ def _udp_event_to_python(event: plsm_udp_event_t) -> UdpEvent:
             payload = b""
             if event.payload.data and event.payload.len:
                 payload = string_at(event.payload.data, event.payload.len)
-            return UdpFrame(int(event.seq), int(event.timestamp_ns), payload)
+            return UdpFrame(int(event.seq), int(event.time), payload)
         if event.kind == 2:
             reasons = {0: "unknown", 1: "oversized", 2: "retention", 3: "pressure"}
             return UdpGap(int(event.first), int(event.last), reasons.get(int(event.reason), "unknown"))
@@ -1510,18 +1450,6 @@ def _udp_event_to_python(event: plsm_udp_event_t) -> UdpEvent:
         raise PlasmiteError(ErrorKind.INTERNAL, f"plasmite: unknown UDP event kind {event.kind}")
     finally:
         _LIB.plsm_udp_event_free(byref(event))
-
-
-def _parse_rfc3339_utc(raw_time: str) -> datetime:
-    # Python 3.10 accepts only 3 or 6 fractional digits. datetime keeps
-    # microseconds; the original nanosecond timestamp remains in Message.raw.
-    if sys.version_info < (3, 11):
-        raw_time = re.sub(r"\.(\d+)", lambda match: "." + match[1][:6].ljust(6, "0"), raw_time)
-        raw_time = raw_time.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(raw_time)
-    if parsed.tzinfo is None:
-        raise ValueError("message time must include timezone")
-    return parsed.astimezone(timezone.utc)
 
 
 def parse_message(payload: bytes) -> Message:
@@ -1542,34 +1470,51 @@ def parse_message(payload: bytes) -> Message:
         raise ValueError("message seq must be an int")
     return Message(
         seq=seq,
-        time=_parse_rfc3339_utc(raw_time),
-        time_rfc3339=raw_time,
+        time=_parse_time_ns(raw_time),
         data=parsed.get("data"),
         meta=MessageMeta(tags=tag_list),
         raw=raw,
     )
 
 
-def _message_has_tags(message: Message, required_tags: list[str]) -> bool:
-    if not required_tags:
-        return True
-    return all(tag in message.tags for tag in required_tags)
+def create_pool(pool_ref: str, size_bytes: int = DEFAULT_POOL_SIZE_BYTES) -> Pool:
+    with Client() as client:
+        return client.create_pool(pool_ref, size_bytes)
+
+
+def open_pool(pool_ref: str, *, create: bool = False) -> Pool:
+    with Client() as client:
+        return client.open_pool(pool_ref, create=create)
+
+
+def list_pools() -> list[dict]:
+    with Client() as client:
+        return client.list_pools()
+
+
+def delete_pool(pool_ref: str) -> None:
+    with Client() as client:
+        client.delete_pool(pool_ref)
 
 
 __all__ = [
-    "AppendReceipt",
+    "FeedReceipt",
     "Client",
     "Pool",
     "Message",
     "MessageMeta",
     "Stream",
+    "Reader",
+    "at",
+    "create_pool",
+    "open_pool",
+    "list_pools",
+    "delete_pool",
     "Lite3Frame",
     "Lite3Stream",
     "UdpClient",
     "UdpPool",
     "UdpFollow",
-    "FollowStart",
-    "UdpFollowOptions",
     "UdpFrame",
     "UdpGap",
     "UdpProgress",
@@ -1612,10 +1557,10 @@ def to_json(value):
     return convert(value)
 
 
-def view_from_lite3(payload, seq=0, timestamp_ns=0):
+def view_from_lite3(payload, seq=0, time=0):
     from ._views import from_lite3
 
-    return from_lite3(payload, seq, timestamp_ns)
+    return from_lite3(payload, seq, time)
 
 
 def __getattr__(name):

@@ -23,6 +23,15 @@ import (
 	"github.com/sandover/plasmite/bindings/go/local"
 )
 
+func fetchStored(pool *local.Pool, seq uint64) (*api.Message, error) {
+	reader, err := pool.Fetch(api.Since(seq))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return reader.Next(context.Background())
+}
+
 const testPoolSizeBytes uint64 = 1024 * 1024
 
 // Next calls Err after it holds the read lock and takes the native pointer.
@@ -70,11 +79,11 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 		t.Fatalf("create test pool: %v", err)
 	}
 	t.Cleanup(localPool.Close)
-	original, err := localPool.Append(map[string]any{"origin": "lite3", "value": 7}, []string{"source"})
+	original, err := localPool.Feed(map[string]any{"origin": "lite3", "value": 7}, []string{"source"})
 	if err != nil {
 		t.Fatalf("append original message: %v", err)
 	}
-	originalLite3, err := localPool.GetLite3(original.Seq)
+	originalLite3, err := fetchLocalFrame(localPool, original.Seq)
 	if err != nil {
 		t.Fatalf("read original Lite3: %v", err)
 	}
@@ -143,25 +152,24 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 		t.Fatalf("open UDP pool: %v", err)
 	}
 	t.Cleanup(udpPool.Close)
-	options := NewFollowOptions()
-	options.Start = Sequence(original.Seq + 1)
-	follow, err := udpPool.Follow(options)
+	since := Since(original.Seq + 1)
+	follow, err := udpPool.Follow(since)
 	if err != nil {
 		t.Fatalf("open UDP follow: %v", err)
 	}
 	t.Cleanup(follow.Close)
-	rawFollow, err := udpPool.FollowRaw(options)
+	rawFollow, err := udpPool.FollowLite3(since)
 	if err != nil {
 		t.Fatalf("open raw UDP follow: %v", err)
 	}
 	t.Cleanup(rawFollow.Close)
 
-	if err := udpPool.SendJSON(map[string]any{"origin": "json", "value": 8}, []string{"sensor"}); err != nil {
+	if err := udpPool.Feed(map[string]any{"origin": "json", "value": 8}, []string{"sensor"}); err != nil {
 		t.Fatalf("send JSON: %v", err)
 	}
 	jsonFrame := nextFrame(t, follow)
 	rawJSON := nextFrame(t, rawFollow)
-	if rawJSON.Message != nil || rawJSON.Seq != jsonFrame.Seq || rawJSON.TimestampNs != jsonFrame.TimestampNs || !bytes.Equal(rawJSON.Payload, jsonFrame.Payload) {
+	if rawJSON.Message != nil || rawJSON.Seq != jsonFrame.Seq || rawJSON.Time != jsonFrame.Time || !bytes.Equal(rawJSON.Payload, jsonFrame.Payload) {
 		t.Fatalf("raw follow must retain exact frame bytes/identity without a decoded message")
 	}
 	var jsonData map[string]any
@@ -174,14 +182,14 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	if got := jsonFrame.Message.Tags(); len(got) != 1 || got[0] != "sensor" {
 		t.Fatalf("unexpected JSON tags: %#v", got)
 	}
-	jsonTime, err := localPool.GetLite3(jsonFrame.Seq)
+	jsonTime, err := fetchLocalFrame(localPool, jsonFrame.Seq)
 	if err != nil {
 		t.Fatalf("read JSON timestamp: %v", err)
 	}
-	if jsonFrame.TimestampNs != jsonTime.TimestampNs || jsonFrame.TimestampNs <= 1<<53 {
-		t.Fatalf("timestamp lost uint64 precision: followed=%d stored=%d", jsonFrame.TimestampNs, jsonTime.TimestampNs)
+	if jsonFrame.Time != jsonTime.Time || jsonFrame.Time <= 1<<53 {
+		t.Fatalf("timestamp lost uint64 precision: followed=%d stored=%d", jsonFrame.Time, jsonTime.Time)
 	}
-	storedJSON, err := localPool.Get(jsonFrame.Seq)
+	storedJSON, err := fetchStored(localPool, jsonFrame.Seq)
 	if err != nil {
 		t.Fatalf("read stored JSON message: %v", err)
 	}
@@ -189,7 +197,7 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 		t.Fatalf("followed JSON differs from stored message")
 	}
 
-	if err := udpPool.SendLite3(originalLite3.Payload); err != nil {
+	if err := udpPool.FeedLite3(originalLite3.Payload); err != nil {
 		t.Fatalf("send Lite3: %v", err)
 	}
 	lite3Frame := nextFrame(t, follow)
@@ -207,7 +215,7 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	if !bytes.Equal(lite3Frame.Message.Data, original.Data) {
 		t.Fatalf("followed Lite3 message differs from source message")
 	}
-	storedLite3, err := localPool.Get(lite3Frame.Seq)
+	storedLite3, err := fetchStored(localPool, lite3Frame.Seq)
 	if err != nil {
 		t.Fatalf("read stored Lite3 message: %v", err)
 	}
@@ -218,23 +226,13 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	largeStart := (uint64(1) << 53) + 1
-	largeFollow, err := udpPool.Follow(FollowOptions{Start: Sequence(largeStart), Finite: true})
-	if err != nil {
-		t.Fatalf("open follow above JavaScript's safe integer range: %v", err)
-	}
-	defer largeFollow.Close()
-	progressEvent, err := largeFollow.Next(ctx)
-	if err != nil {
-		t.Fatalf("read large-sequence progress: %v", err)
-	}
-	progress, ok := progressEvent.(*api.UDPProgress)
-	if !ok || progress.StartSeq != largeStart {
-		t.Fatalf("large sequence changed in binding: got %#v, want %d", progressEvent, largeStart)
+	_, err = udpPool.Fetch(Since(largeStart))
+	var usage *Error
+	if !errors.As(err, &usage) || usage.Kind != api.ErrorUsage {
+		t.Fatalf("future sequence must report Usage, got %v", err)
 	}
 
-	// A canceled wait must return promptly, while a live context still follows
-	// progress and messages through the same native handle.
-	cancelFollow, err := udpPool.Follow(NewFollowOptions())
+	cancelFollow, err := udpPool.Follow()
 	if err != nil {
 		t.Fatalf("open cancellation follow: %v", err)
 	}
@@ -266,7 +264,7 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	}
 
 	t.Run("concurrent close cancels a read and leaves the handle closed", func(t *testing.T) {
-		follow, err := udpPool.Follow(NewFollowOptions())
+		follow, err := udpPool.Follow()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -373,16 +371,16 @@ func checkNativeFramesRetainArrivalOrder(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	defer localPool.Close()
-	original, err := localPool.Append(map[string]any{"value": 17}, []string{"tag"})
+	original, err := localPool.Feed(map[string]any{"value": 17}, []string{"tag"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored, err := localPool.GetLite3(original.Seq)
+	stored, err := fetchLocalFrame(localPool, original.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mode == "views" {
-		native, e := localPool.(*local.Pool).AppendView(map[string]any{"value": 17, "exact": int64(math.MaxInt64), "negative": math.Copysign(0, -1), "blob": []byte{0, 255}}, nil)
+		native, e := localPool.FeedView(map[string]any{"value": 17, "exact": int64(math.MaxInt64), "negative": math.Copysign(0, -1), "blob": []byte{0, 255}}, nil)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -454,15 +452,15 @@ func checkNativeFramesRetainArrivalOrder(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	options := FollowOptions{Start: Last(4), Finite: true}
+	last := Last(4)
 	var follow *Follow
 	switch mode {
 	case "raw":
-		follow, err = pool.FollowRaw(options)
+		follow, err = pool.FetchLite3(last)
 	case "views":
-		follow, err = pool.FollowViews(options)
+		follow, err = pool.FetchView(last)
 	default:
-		follow, err = pool.Follow(options)
+		follow, err = pool.Fetch(last)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +483,7 @@ func checkNativeFramesRetainArrivalOrder(t *testing.T, mode string) {
 		switch event := event.(type) {
 		case *Frame:
 			sequences = append(sequences, event.Seq)
-			if event.TimestampNs != timestamp || !bytes.Equal(event.Payload, stored.Payload) {
+			if event.Time != timestamp || !bytes.Equal(event.Payload, stored.Payload) {
 				t.Fatal("frame bytes or timestamp changed")
 			}
 			if mode == "raw" {
@@ -497,7 +495,7 @@ func checkNativeFramesRetainArrivalOrder(t *testing.T, mode string) {
 			}
 		case *ViewFrame:
 			sequences = append(sequences, event.Seq)
-			if event.View.Seq() != event.Seq || event.TimestampNs != timestamp || event.View.TimestampNs() != timestamp || !bytes.Equal(event.View.Lite3(), stored.Payload) {
+			if event.View.Seq() != event.Seq || event.Time != timestamp || event.View.Time() != timestamp || !bytes.Equal(event.View.Lite3(), stored.Payload) {
 				t.Fatal("view identity/bytes changed")
 			}
 			retained = append(retained, event.View)
@@ -568,7 +566,7 @@ func TestViewFollowCancelsAndClosesWhileIdle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	follow, err := pool.FollowViews(NewFollowOptions())
+	follow, err := pool.FollowView()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,4 +598,22 @@ func TestViewFollowCancelsAndClosesWhileIdle(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("close blocked")
 	}
+}
+
+func fetchLocalFrame(pool *local.Pool, seq uint64) (*local.Lite3Frame, error) {
+	reader, err := pool.FetchLite3(local.Since(seq))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return reader.Next(context.Background())
+}
+
+func fetchLocalView(pool *local.Pool, seq uint64) (*local.MessageView, error) {
+	reader, err := pool.FetchView(local.Since(seq))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return reader.Next(context.Background())
 }

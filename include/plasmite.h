@@ -55,9 +55,13 @@ Notes: Remote pool refs are not supported by this ABI; use CLI or HTTP API inste
 #include <stdbool.h>
 #include <stddef.h>
 
+#define PLSM_ABI_MAJOR 2
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+uint32_t plsm_abi_major(void);
 
 typedef struct plsm_client plsm_client_t;
 typedef struct plsm_pool plsm_pool_t;
@@ -79,65 +83,10 @@ typedef enum plsm_error_kind {
     PLSM_ERROR_RETENTION_GAP = 9
 } plsm_error_kind_t;
 
-typedef enum plsm_gap_policy {
-    PLSM_GAP_CONTINUE = 0,
-    PLSM_GAP_ERROR = 1
-} plsm_gap_policy_t;
-
-/*
- * Options for plsm_stream_open_ex and plsm_lite3_stream_open_ex.
- *
- * Zero-initialize this structure, set struct_size to sizeof(plsm_stream_options_t),
- * then set desired fields.  A newer caller may pass a larger structure to an older
- * library; the library reads only this v1 prefix.  reserved must remain zero.
- */
-typedef struct plsm_stream_options {
-    uint32_t struct_size;
-    uint32_t gap_policy;
-    uint64_t since_seq;
-    uint64_t max_messages;
-    uint64_t timeout_ms;
-    uint32_t has_since;
-    uint32_t has_max;
-    uint32_t has_timeout;
-    uint32_t reserved;
-} plsm_stream_options_t;
-
-/* Follow starts at new messages by default. start_kind: 0 new, 1 last N,
- * 2 since Unix nanoseconds, 3 inclusive sequence (0 = all retained).
- * Zero-initialize, set struct_size; finite=1 stops at the opening upper bound.
- * max_messages counts accepted messages after filtering. Legacy stream-open
- * symbols retain their original history-first behavior for ABI compatibility.
- */
-typedef enum plsm_follow_start_kind {
-    PLSM_FOLLOW_NEW = 0,
-    PLSM_FOLLOW_LAST = 1,
-    PLSM_FOLLOW_SINCE = 2,
-    PLSM_FOLLOW_SEQUENCE = 3
-} plsm_follow_start_kind_t;
-typedef struct plsm_follow_options {
-    uint32_t struct_size;
-    uint32_t gap_policy;
-    uint64_t start_value;
-    uint64_t max_messages;
-    uint64_t timeout_ms;
-    uint32_t start_kind;
-    uint32_t has_max;
-    uint32_t has_timeout;
-    uint32_t finite;
-} plsm_follow_options_t;
-
 typedef struct plsm_buf {
     uint8_t *data;
     size_t len;
 } plsm_buf_t;
-
-typedef enum plsm_udp_start_kind {
-    PLSM_UDP_START_NEW = 0,
-    PLSM_UDP_START_LAST = 1,
-    PLSM_UDP_START_SINCE = 2,
-    PLSM_UDP_START_SEQUENCE = 3
-} plsm_udp_start_kind_t;
 
 typedef enum plsm_udp_event_kind {
     PLSM_UDP_EVENT_FRAME = 1,
@@ -157,7 +106,7 @@ typedef struct plsm_udp_event {
     uint32_t kind;
     uint32_t reason;
     uint64_t seq;
-    uint64_t timestamp_ns;
+    uint64_t time;
     uint64_t first;
     uint64_t last;
     uint64_t start_seq;
@@ -170,18 +119,16 @@ typedef struct plsm_udp_event {
     plsm_buf_t payload;
 } plsm_udp_event_t;
 
-/* Numeric identity from the successful append itself. No allocation or free.
- * timestamp_ns is unsigned Unix time in nanoseconds, not a formatted date.
- * Output remains untouched on error. Use matching SDK/library versions.
- */
-typedef struct plsm_append_identity {
+/* A caller-owned receipt from a successful feed. Time counts Unix nanoseconds.
+ * A failed call leaves the output untouched. */
+typedef struct plsm_feed_receipt {
     uint64_t seq;
-    uint64_t timestamp_ns;
-} plsm_append_identity_t;
+    uint64_t time;
+} plsm_feed_receipt_t;
 
 typedef struct plsm_lite3_frame {
     uint64_t seq;
-    uint64_t timestamp_ns;
+    uint64_t time;
     uint32_t flags;
     plsm_buf_t payload;
 } plsm_lite3_frame_t;
@@ -194,7 +141,65 @@ typedef struct plsm_error {
     uint64_t offset;
     uint8_t has_seq;
     uint8_t has_offset;
+    uint64_t missing;  /* For a retention gap. Zero otherwise. */
+    uint64_t next_seq; /* Oldest retained at gap detection. Zero otherwise. */
 } plsm_error_t;
+
+typedef struct { const uint8_t *data; size_t len; } plsm_text_t;
+
+/* A null options pointer selects defaults. Otherwise initialize struct_size
+ * to sizeof the struct. The caller retains the array and strings through
+ * the call. The stream retains its own copy. */
+typedef enum plsm_read_start_kind {
+    PLSM_READ_DEFAULT = 0,
+    PLSM_READ_OLDEST = 1,
+    PLSM_READ_SEQUENCE = 2,
+    PLSM_READ_TIME = 3,
+    PLSM_READ_AGO = 4,
+    PLSM_READ_LAST = 5
+} plsm_read_start_kind_t;
+
+typedef struct plsm_read_options {
+    uint32_t struct_size;
+    uint32_t start_kind;
+    uint64_t start_value; /* Time and duration are in nanoseconds. */
+    const plsm_text_t *tags;
+    size_t tags_len;
+} plsm_read_options_t;
+
+typedef struct plsm_feed_options {
+    uint32_t struct_size;
+    uint32_t durability; /* 0=fast, 1=flush */
+    const plsm_text_t *tags;
+    size_t tags_len;
+} plsm_feed_options_t;
+
+/* Inspect one pool or list the client's pools as a JSON object or array.
+ * Free successful results with plsm_buf_free. Retained bounds can go stale
+ * immediately after these calls return. */
+int plsm_pool_info(plsm_pool_t *, plsm_buf_t *, plsm_error_t **);
+int plsm_pool_list(plsm_client_t *, plsm_buf_t *, plsm_error_t **);
+int plsm_pool_delete(plsm_client_t *, const char *, plsm_error_t **);
+
+int plsm_pool_feed_json(plsm_pool_t *, const uint8_t *, size_t,
+    const plsm_feed_options_t *, plsm_buf_t *, plsm_error_t **);
+int plsm_pool_feed_lite3(plsm_pool_t *, const uint8_t *, size_t,
+    const plsm_feed_options_t *, plsm_buf_t *, plsm_error_t **);
+int plsm_pool_feed_json_receipt(plsm_pool_t *, const uint8_t *, size_t,
+    const plsm_feed_options_t *, plsm_feed_receipt_t *, plsm_error_t **);
+int plsm_pool_feed_lite3_receipt(plsm_pool_t *, const uint8_t *, size_t,
+    const plsm_feed_options_t *, plsm_feed_receipt_t *, plsm_error_t **);
+int plsm_pool_fetch(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
+int plsm_pool_fetch_lite3(plsm_pool_t *, const plsm_read_options_t *, plsm_lite3_stream_t **, plsm_error_t **);
+int plsm_pool_open(plsm_client_t *, const char *, uint32_t create, plsm_pool_t **, plsm_error_t **);
+int plsm_pool_follow(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
+int plsm_pool_follow_lite3(plsm_pool_t *, const plsm_read_options_t *, plsm_lite3_stream_t **, plsm_error_t **);
+
+/* View readers return immutable message snapshots through plsm_view_stream_next
+ * or plsm_view_stream_next_batch. Each caller owns the returned view. Cancel
+ * and free the reader with plsm_stream_cancel and plsm_stream_free. */
+int plsm_pool_follow_view(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
+int plsm_pool_fetch_view(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
 
 int plsm_client_new(const char *pool_dir, plsm_client_t **out_client, plsm_error_t **out_err);
 void plsm_client_free(plsm_client_t *client);
@@ -202,89 +207,12 @@ void plsm_client_free(plsm_client_t *client);
 /* pool_ref names resolve in the client's directory. Native path separators
  * select a file path; use ./bare.plasmite (or .\bare.plasmite on Windows)
  * for an explicit bare file. Windows drive-relative forms are unsupported. */
-int plsm_pool_follow(plsm_pool_t *, const plsm_follow_options_t *, plsm_stream_t **, plsm_error_t **);
-int plsm_pool_follow_lite3(plsm_pool_t *, const plsm_follow_options_t *, plsm_lite3_stream_t **, plsm_error_t **);
 int plsm_pool_create(plsm_client_t *client, const char *pool_ref, uint64_t size_bytes, plsm_pool_t **out_pool, plsm_error_t **out_err);
-int plsm_pool_open(plsm_client_t *client, const char *pool_ref, plsm_pool_t **out_pool, plsm_error_t **out_err);
 void plsm_pool_free(plsm_pool_t *pool);
-
-int plsm_pool_append_json(
-    plsm_pool_t *pool,
-    const uint8_t *json_bytes,
-    size_t json_len,
-    const char **tags,
-    size_t tags_len,
-    uint32_t durability,
-    plsm_buf_t *out_message,
-    plsm_error_t **out_err);
-
-int plsm_pool_append_lite3(
-    plsm_pool_t *pool,
-    const uint8_t *payload,
-    size_t payload_len,
-    uint32_t durability,
-    uint64_t *out_seq,
-    plsm_error_t **out_err);
-
-/* Identity-only variants preserve validation, durability and commit ordering.
- * They avoid constructing a full message receipt and never reread the ring.
- */
-int plsm_pool_append_json_identity(plsm_pool_t *pool, const uint8_t *json_bytes,
-    size_t json_len, const char *const *tags, size_t tags_len, uint32_t durability,
-    plsm_append_identity_t *out_identity, plsm_error_t **out_err);
-int plsm_pool_append_lite3_identity(plsm_pool_t *pool, const uint8_t *payload,
-    size_t payload_len, uint32_t durability, plsm_append_identity_t *out_identity,
-    plsm_error_t **out_err);
-
-int plsm_pool_get_json(
-    plsm_pool_t *pool,
-    uint64_t seq,
-    plsm_buf_t *out_message,
-    plsm_error_t **out_err);
-
-int plsm_pool_get_lite3(
-    plsm_pool_t *pool,
-    uint64_t seq,
-    plsm_lite3_frame_t *out_frame,
-    plsm_error_t **out_err);
-
-int plsm_stream_open(
-    plsm_pool_t *pool,
-    uint64_t since_seq,
-    uint32_t has_since,
-    uint64_t max_messages,
-    uint32_t has_max,
-    uint64_t timeout_ms,
-    uint32_t has_timeout,
-    plsm_stream_t **out_stream,
-    plsm_error_t **out_err);
-
-int plsm_stream_open_ex(
-    plsm_pool_t *pool,
-    const plsm_stream_options_t *options,
-    plsm_stream_t **out_stream,
-    plsm_error_t **out_err);
 
 int plsm_stream_next(
     plsm_stream_t *stream,
     plsm_buf_t *out_message,
-    plsm_error_t **out_err);
-
-int plsm_lite3_stream_open(
-    plsm_pool_t *pool,
-    uint64_t since_seq,
-    uint32_t has_since,
-    uint64_t max_messages,
-    uint32_t has_max,
-    uint64_t timeout_ms,
-    uint32_t has_timeout,
-    plsm_lite3_stream_t **out_stream,
-    plsm_error_t **out_err);
-
-int plsm_lite3_stream_open_ex(
-    plsm_pool_t *pool,
-    const plsm_stream_options_t *options,
-    plsm_lite3_stream_t **out_stream,
     plsm_error_t **out_err);
 
 int plsm_lite3_stream_next(
@@ -320,26 +248,18 @@ int plsm_udp_client_open_pool(
     plsm_udp_pool_t **out_pool,
     plsm_error_t **out_err);
 void plsm_udp_pool_free(plsm_udp_pool_t *pool);
-int plsm_udp_pool_send_json(
-    plsm_udp_pool_t *pool,
-    const uint8_t *json_bytes,
-    size_t json_len,
-    const char **tags,
-    size_t tags_len,
-    plsm_error_t **out_err);
-int plsm_udp_pool_send_lite3(
+/* UDP feed confirms local socket admission. It has no storage receipt. */
+int plsm_udp_pool_feed_json(plsm_udp_pool_t *, const uint8_t *, size_t,
+    const plsm_feed_options_t *, plsm_error_t **);
+/* Pass live=1 for follow or zero for fetch. Pass views=1 to receive owned
+ * views through plsm_udp_follow_next_view. The same cancel/close rules apply. */
+int plsm_udp_pool_read(plsm_udp_pool_t *, const plsm_read_options_t *, uint32_t live,
+    uint32_t views, plsm_udp_follow_t **, plsm_error_t **);
+int plsm_udp_pool_feed_lite3(
     plsm_udp_pool_t *pool,
     const uint8_t *payload,
     size_t payload_len,
     plsm_error_t **out_err);
-int plsm_udp_pool_follow(
-    plsm_udp_pool_t *pool,
-    uint32_t start_kind,
-    uint64_t start_value,
-    uint32_t live,
-    plsm_udp_follow_t **out_follow,
-    plsm_error_t **out_err);
-
 /*
  * plsm_udp_follow_next returns 1 for an event, 0 when `timeout_ms` expires,
  * 2 when a finite follow ends, 3 after a concurrent cancel, and -1 on error.
@@ -404,25 +324,14 @@ typedef struct plsm_field_value {
     size_t offset;
     size_t len;
 } plsm_field_value_t;
-typedef struct plsm_selected_frame {
-    uint64_t seq;
-    uint64_t timestamp_ns;
-    uint32_t flags;
-    uint32_t reserved;
-} plsm_selected_frame_t;
 int plsm_lite3_select(const uint8_t *payload, size_t len,
     const char *const *paths, size_t count, plsm_field_value_t *out_values,
     plsm_buf_t *out_bytes, plsm_error_t **out_err);
-/* Fetch and select in one call: only requested bytes cross the language boundary. */
-int plsm_pool_get_fields(plsm_pool_t *pool, uint64_t seq,
-    const char *const *paths, size_t count, plsm_field_value_t *out_values,
-    plsm_buf_t *out_bytes, plsm_selected_frame_t *out_frame, plsm_error_t **out_err);
-
 /* Additive immutable snapshot API. Owners retain four-byte-aligned private
  * bytes independently of pool/stream lifetime. Retain/release and immutable
  * reads may run concurrently on independently held references. Keep an owner
  * alive through every borrowed access; never alter or forge a value_ref.
- * from_lite3 copies caller bytes. get_view moves the one pool snapshot.
+ * from_lite3 copies caller bytes. View readers return owned snapshots.
  * Value references and borrowed key/string/byte spans need no individual free.
  * Mutation requires copying. A zero owner represents an absent value.
  */
@@ -445,13 +354,10 @@ typedef struct plsm_view_entry {
 } plsm_view_entry_t;
 int plsm_view_from_lite3(const uint8_t *bytes, size_t len, uint64_t seq,
     uint64_t timestamp_ns, const plsm_message_view_t **out, plsm_error_t **err);
-int plsm_pool_get_view(plsm_pool_t *pool, uint64_t seq,
-    const plsm_message_view_t **out, plsm_error_t **err);
 /* New view API: exact integer tokens must fit i64; rejects before publication. */
-int plsm_pool_append_view_json(plsm_pool_t *pool, const uint8_t *json, size_t len,
-    const char *const *tags, size_t tags_len, uint32_t durability,
-    const plsm_message_view_t **out, plsm_error_t **err);
-int plsm_pool_append_view(plsm_pool_t *pool, const plsm_message_view_t *source,
+int plsm_pool_feed_json_view(plsm_pool_t *pool, const uint8_t *json, size_t len,
+    const plsm_feed_options_t *options, const plsm_message_view_t **out, plsm_error_t **err);
+int plsm_pool_feed_view(plsm_pool_t *pool, const plsm_message_view_t *source,
     uint32_t durability, const plsm_message_view_t **out, plsm_error_t **err);
 void plsm_view_retain(const plsm_message_view_t *view);
 void plsm_view_release(const plsm_message_view_t *view);
@@ -461,15 +367,8 @@ const uint8_t *plsm_view_bytes(const plsm_message_view_t *view, size_t *len);
 /* Conservative whole-owner property: finite numbers, exact binary64 integers,
  * and no native bytes. False for NULL or an owner whose builder did not track it. */
 bool plsm_view_json_native_safe(const plsm_message_view_t *view);
-/* Four-aligned caller storage, borrowed only during this call. If capacity is
- * insufficient, success reports required size without writing any payload.
- * A retry may return NotFound after retention; no cursor advances here.
- * The copied bytes require validation before becoming an immutable view. */
-int plsm_pool_get_into(plsm_pool_t *pool, uint64_t seq, uint8_t *destination,
-    size_t capacity, size_t *required, uint64_t *timestamp_ns,
-    uint32_t *flags, plsm_error_t **err);
 uint64_t plsm_view_seq(const plsm_message_view_t *view);
-uint64_t plsm_view_timestamp_ns(const plsm_message_view_t *view);
+uint64_t plsm_view_time(const plsm_message_view_t *view);
 /* Reserved payload storage capacity, excluding owner/index metadata. Shared
  * children/forwarded owners retain the same storage; NULL returns zero. */
 size_t plsm_view_retained_bytes(const plsm_message_view_t *view);
@@ -516,7 +415,6 @@ int plsm_view_to_json(const plsm_message_view_t *view, plsm_buf_t *out, plsm_err
  * guards; free the handle once afterward. No publication occurs on build errors.
  * A flush error can follow publication, as for other appends. */
 typedef struct plsm_builder plsm_builder_t;
-typedef struct { const uint8_t *data; size_t len; } plsm_text_t;
 /* Independent immutable owners from the existing tail state machine. Tags use
  * UTF-8 spans and count accepted messages toward max_messages. Cancel/free use
  * plsm_stream_cancel/free. Serialized reads only; cancel may run concurrently.
@@ -527,21 +425,15 @@ typedef struct { const uint8_t *data; size_t len; } plsm_text_t;
  * UINT64_MAX timeout waits under the open-time deadline; zero polls.
  * Status: 0=wait expired, 1=items, 2=finished, 3=cancelled, -1=error.
  * out has max_count slots; count always reports initialized owners. */
-int plsm_pool_follow_views(plsm_pool_t *, const plsm_follow_options_t *, const plsm_text_t *, size_t, plsm_stream_t **, plsm_error_t **);
-int plsm_view_stream_open(plsm_pool_t *pool, const plsm_stream_options_t *options,
-    const plsm_text_t *tags, size_t tag_count, plsm_stream_t **out, plsm_error_t **err);
 int plsm_view_stream_next(plsm_stream_t *stream, uint64_t timeout_ms,
     size_t max_count, size_t max_bytes, const plsm_message_view_t **out,
     size_t *count, plsm_error_t **err);
 
 /* UDP views reuse cancel/close and 1/event, 0/timeout, 2/end, 3/cancelled
- * statuses. Use next_view with follow_views handles. Initialize event to zero
+ * statuses. Use next_view with view readers. Initialize event to zero
  * and free it normally; payload stays empty. DATA returns an independent owner
  * (release with plsm_view_release); controls return NULL. Other statuses leave
  * outputs untouched. Close only after active calls return. */
-int plsm_udp_pool_follow_views(plsm_udp_pool_t *pool, uint32_t start_kind,
-    uint64_t start_value, uint32_t live, plsm_udp_follow_t **out_follow,
-    plsm_error_t **err);
 int plsm_udp_follow_next_view(plsm_udp_follow_t *follow, uint64_t timeout_ms,
     plsm_udp_event_t *out_event, const plsm_message_view_t **out_owner,
     plsm_error_t **err);
@@ -551,7 +443,7 @@ int plsm_builder_new(const plsm_text_t *tags, size_t count,
 int plsm_builder_put(plsm_builder_t *builder, size_t parent,
     const uint8_t *key, size_t key_len, const plsm_view_value_t *value,
     size_t *child_node, plsm_error_t **err);
-int plsm_pool_append_builder(plsm_pool_t *pool, plsm_builder_t *builder,
+int plsm_pool_feed_builder_view(plsm_pool_t *pool, plsm_builder_t *builder,
     uint32_t durability, const plsm_message_view_t **out, plsm_error_t **err);
 /* Copy a checked subtree while the source owner remains alive. SIZE_MAX parent
  * fills an empty data object from a source object and requires NULL key/zero

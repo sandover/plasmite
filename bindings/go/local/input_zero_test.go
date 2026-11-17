@@ -12,7 +12,7 @@ type inputZeroValue struct{ Value int }
 
 func (value inputZeroValue) IsZero() bool { return value.Value == 7 }
 func TestNativeAppendOmitZeroMatchesCurrentGo(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "zero-input").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "zero-input")
 	value := struct {
 		A inputZeroValue `json:"a,omitzero"`
 		B int            `json:"b,omitzero"`
@@ -22,7 +22,7 @@ func TestNativeAppendOmitZeroMatchesCurrentGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := pool.AppendView(value, nil)
+	view, err := pool.FeedView(value, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

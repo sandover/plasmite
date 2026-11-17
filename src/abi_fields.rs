@@ -1,6 +1,6 @@
 //! Select requested values from an owned frame without building a data tree.
 #![allow(clippy::result_large_err)]
-use crate::abi::{borrow_pool, fail, plsm_buf, plsm_error, plsm_pool, write_json_buf};
+use crate::abi::{fail, plsm_buf, plsm_error, write_json_buf};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{Lite3DocRef, sys};
 use std::ffi::CStr;
@@ -15,15 +15,6 @@ pub struct plsm_field_value {
     real: f64,
     offset: usize,
     len: usize,
-}
-
-#[repr(C)]
-#[derive(Default)]
-pub struct plsm_selected_frame {
-    seq: u64,
-    timestamp_ns: u64,
-    flags: u32,
-    reserved: u32,
 }
 
 fn usage(message: &str) -> Error {
@@ -239,47 +230,6 @@ pub extern "C" fn plsm_lite3_select(
         let payload = unsafe { std::slice::from_raw_parts(payload, len) };
         let (values, bytes) = project(payload, &paths)?;
         output(values, bytes, out_values, out_bytes)
-    })();
-    match result {
-        Ok(()) => 0,
-        Err(error) => fail(out_err, error),
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn plsm_pool_get_fields(
-    pool: *mut plsm_pool,
-    seq: u64,
-    input_paths: *const *const c_char,
-    count: usize,
-    out_values: *mut plsm_field_value,
-    out_bytes: *mut plsm_buf,
-    out_frame: *mut plsm_selected_frame,
-    out_err: *mut *mut plsm_error,
-) -> i32 {
-    let pool = match borrow_pool(pool, out_err) {
-        Ok(pool) => pool,
-        Err(code) => return code,
-    };
-    let result = (|| {
-        if out_bytes.is_null() || out_frame.is_null() || (count > 0 && out_values.is_null()) {
-            return Err(usage(
-                "output buffer, frame and requested slots must be non-null",
-            ));
-        }
-        let paths = unsafe { paths(input_paths, count)? };
-        let frame = pool.pool.get(seq)?;
-        let (values, bytes) = project(&frame.payload, &paths)?;
-        output(values, bytes, out_values, out_bytes)?;
-        unsafe {
-            *out_frame = plsm_selected_frame {
-                seq: frame.seq,
-                timestamp_ns: frame.timestamp_ns,
-                flags: frame.flags,
-                reserved: 0,
-            }
-        };
-        Ok(())
     })();
     match result {
         Ok(()) => 0,

@@ -595,7 +595,8 @@ mod windows_upgrade {
 
     fn check_remote(row: &Value, key: &str) -> TestResult<()> {
         let client = RemoteClient::with_access_key(row["remote_url"].as_str().unwrap(), key)?;
-        let message = client.open_pool(&PoolRef::name("events"))?.get_message(1)?;
+        let frame = client.open_pool(&PoolRef::name("events"))?.get(1)?;
+        let message = plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload)?;
         assert_eq!(message.data, serde_json::json!({"probe": "retained"}));
         Ok(())
     }

@@ -20,7 +20,6 @@ mod server;
 mod stream;
 pub(crate) mod stream_support;
 pub(crate) mod support;
-mod tap;
 mod utility;
 
 pub(super) use context::CliContext;
@@ -40,12 +39,8 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             pool,
             tag,
             data,
-            file,
             durability,
             create,
-            create_size,
-            retry,
-            retry_delay,
             input,
             ..
         } => feed::run(
@@ -53,52 +48,41 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 pool,
                 tags: tag,
                 data,
-                file,
                 durability,
                 create,
-                create_size,
-                retry,
-                retry_delay,
                 input,
             },
             &context,
         ),
-        Command::Fetch { pool, seq, .. } => feed::fetch(&pool, seq, &context),
+        Command::Fetch {
+            pool,
+            seq,
+            since,
+            last,
+            tags,
+        } => feed::fetch(&pool, seq, since.as_deref(), last, tags, &context),
         Command::Follow {
             pool,
             create,
-            tail,
+            last,
             one,
-            timeout,
             since,
-            where_expr,
             tags,
-            quiet_drops,
-            no_notify,
-            replay,
-            no_follow,
-            ..
         } => stream::follow(
             stream::FollowArgs {
                 pool,
                 create,
-                tail,
+                last,
                 one,
-                timeout,
                 since,
-                where_expr,
                 tags,
-                quiet_drops,
-                no_notify,
-                replay,
-                no_follow,
             },
             &context,
         ),
         Command::Duplex {
             pool,
             create,
-            tail,
+            last,
             timeout,
             since,
             ..
@@ -106,29 +90,9 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             stream::DuplexArgs {
                 pool,
                 create,
-                tail,
+                last,
                 timeout,
                 since,
-            },
-            &context,
-        ),
-        Command::Tap {
-            pool,
-            create,
-            create_size,
-            tag,
-            quiet,
-            durability,
-            command,
-        } => tap::run(
-            tap::TapArgs {
-                pool,
-                create,
-                create_size,
-                tags: tag,
-                quiet,
-                durability,
-                command,
             },
             &context,
         ),

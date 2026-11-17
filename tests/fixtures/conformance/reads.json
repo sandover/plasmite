@@ -1,0 +1,56 @@
+{
+  "seed": [
+    {"data":{"point":[0,0]},"tags":["gfx","scope:sharedCanvas"]},
+    {"data":{"ready":true},"tags":["system"]},
+    {"data":{"point":[10,20]},"tags":["gfx","scope:sharedCanvas"]}
+  ],
+  "fetch": [
+    {"name":"default retained history","expect":[1,2,3]},
+    {"name":"oldest","since":"oldest","expect":[1,2,3]},
+    {"name":"inclusive sequence","since":2,"expect":[2,3]},
+    {"name":"absolute time","since":"2000-01-01T00:00:00Z","expect":[1,2,3]},
+    {"name":"relative time","since":"24h","expect":[1,2,3]},
+    {"name":"last before filtering","last":2,"tags":["gfx","scope:sharedCanvas"],"expect":[3]},
+    {"name":"every tag must match","tags":["gfx","system"],"expect":[]},
+    {"name":"last zero","last":0,"expect":[]},
+    {"name":"next sequence currently unwritten","since":4,"expect":[]},
+    {"name":"past next sequence","since":5,"error":"Usage"},
+    {"name":"mutually exclusive starts","since":"oldest","last":1,"error":"Usage"}
+  ],
+  "single_fetch": [
+    {"name":"retained record","since":2,"expect":[2]},
+    {"name":"next sequence currently unwritten","since":4,"expect":[],"cli_error":"NotFound"},
+    {"name":"past next sequence","since":5,"error":"Usage"}
+  ],
+  "follow": [
+    {"name":"Brygg starts live before first pull","tags":["gfx","scope:sharedCanvas"],"after_open":[{"data":{"point":[8,9]},"tags":["gfx","scope:sharedCanvas"]}],"expect":[4]},
+    {"name":"Brygg resumes from checkpoint 1","since":2,"tags":["gfx","scope:sharedCanvas"],"expect":[3]},
+    {"name":"oldest is explicit history","since":"oldest","expect":[1,2,3]},
+    {"name":"last includes retained history","last":2,"expect":[2,3]}
+  ],
+  "fetch_snapshot": {
+    "name":"writes after open stay outside fetch",
+    "after_open":[{"data":{"point":[8,9]},"tags":["gfx","scope:sharedCanvas"]}],
+    "expect":[1,2,3]
+  },
+  "retention": {
+    "size":16384,
+    "inserts":64,
+    "padding_bytes":1024,
+    "since":1,
+    "tags":["gfx","scope:sharedCanvas"],
+    "error":"RetentionGap"
+  },
+  "pools": {
+    "missing":"NotFound",
+    "existing":"AlreadyExists",
+    "non_object_feed":"Usage"
+  },
+  "previous_release": {
+    "fixture":"tests/fixtures/pool-v1.3.0.plasmite",
+    "messages":[
+      {"data":{"point":[10,20],"tool":"pen"},"tags":["gfx","scope:sharedCanvas"]},
+      {"data":{"ready":true},"tags":["system"]}
+    ]
+  }
+}

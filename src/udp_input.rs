@@ -3,7 +3,7 @@
 use crate::udp_wire as wire;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use plasmite::api::{Cursor, CursorResult, FrameRef, Pool, PoolPathGuard};
-use plasmite::api::{Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolRef};
+use plasmite::api::{Error, ErrorKind, Feed, LocalClient, PoolRef};
 use ring::hmac;
 use serde::Deserialize;
 use serde_json::Value;
@@ -84,15 +84,15 @@ fn append(client: &LocalClient, mut packet: Vec<u8>) -> Result<(), Error> {
         let body_len = body.len();
         packet.copy_within(separator + 1.., 0);
         packet.truncate(body_len);
-        let mut pool = client.open_pool(&PoolRef::name(name))?;
-        pool.append_lite3_now(&packet, Durability::Fast)?;
+        let mut pool = client.open_pool(&PoolRef::name(name), false)?;
+        pool.feed_lite3_receipt(&packet, Feed::default())?;
     } else {
         let input: JsonInput = serde_json::from_slice(body).map_err(|_| invalid())?;
         if !input.data.is_object() {
             return Err(invalid());
         }
-        let mut pool = client.open_pool(&PoolRef::name(name))?;
-        pool.append_json_now(&input.data, &input.tags, Durability::Fast)?;
+        let mut pool = client.open_pool(&PoolRef::name(name), false)?;
+        pool.feed(&input.data, Feed::default().tags(input.tags))?;
     }
     Ok(())
 }
@@ -205,6 +205,8 @@ fn failure(socket: &std::net::UdpSocket, key: Key, error: &Error) {
         &wire::Failure {
             kind: format!("{:?}", error.kind()),
             message: error.message().unwrap_or("UDP stream failed").to_string(),
+            missing: error.missing(),
+            next_seq: error.next_seq(),
         },
     );
 }
@@ -233,9 +235,18 @@ fn select_start(
             Ok((after.saturating_sub(*n).max(oldest), upper, cursor, None))
         }
         wire::Start::Sequence(seq) => {
+            if *seq > after {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("since is after the next unwritten message"));
+            }
             Ok((if *seq == 0 { oldest } else { *seq }, upper, cursor, None))
         }
-        wire::Start::Since(timestamp) => {
+        wire::Start::Since(_) | wire::Start::Ago(_) => {
+            let timestamp = match start {
+                wire::Start::Since(time) => *time,
+                wire::Start::Ago(nanos) => crate::cli::support::now_ns()?.saturating_sub(*nanos),
+                _ => unreachable!(),
+            };
             let deadline = Instant::now() + Duration::from_millis(wire::STARTUP_MS);
             loop {
                 if !sub.active() || Instant::now() >= deadline {
@@ -246,7 +257,7 @@ fn select_start(
                 pool.check_current_path()?;
                 match cursor.next(pool)? {
                     CursorResult::Message(frame) if frame.seq <= upper => {
-                        if frame.timestamp_ns >= *timestamp {
+                        if frame.time >= timestamp {
                             return Ok((frame.seq, upper, cursor, Some(frame)));
                         }
                     }
@@ -254,8 +265,8 @@ fn select_start(
                     // Keep that frame for live delivery instead of consuming it.
                     CursorResult::Message(frame) => return Ok((after, upper, cursor, Some(frame))),
                     CursorResult::FellBehind => {
-                        return Err(Error::new(ErrorKind::RetentionGap)
-                            .with_message("selected UDP history is no longer retained"));
+                        let current = pool.header_from_mmap()?;
+                        cursor.seek_to(current.tail_off as usize);
                     }
                     _ => return Ok((after, upper, cursor, None)),
                 }
@@ -305,7 +316,7 @@ fn follow_pool(
     key: Key,
     sub: &Arc<Subscription>,
 ) -> Result<Option<Completed>, Error> {
-    let pool = client.open_pool(&PoolRef::name(&sub.selection.pool))?;
+    let pool = client.open_pool(&PoolRef::name(&sub.selection.pool), false)?;
     let (start_seq, upper, mut cursor, mut pending) =
         select_start(&pool, &sub.selection.start, sub)?;
     let mut progress = wire::Progress {
@@ -361,12 +372,10 @@ fn follow_pool(
                         },
                     );
                     if !sub.selection.live {
-                        return Err(Error::new(ErrorKind::RetentionGap)
-                            .with_message("selected UDP history is no longer retained"));
+                        return Err(Error::retention_gap(progress.next_seq, frame.seq));
                     }
                 }
-                let reason = match wire::data(key.1, frame.seq, frame.timestamp_ns, &frame.payload)
-                {
+                let reason = match wire::data(key.1, frame.seq, frame.time, &frame.payload) {
                     Some(packet) => match socket.send_to(&packet, key.0) {
                         Ok(_) => None,
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -402,8 +411,8 @@ fn follow_pool(
             CursorResult::FellBehind => {
                 progress.retention_gap = true;
                 if !sub.selection.live {
-                    return Err(Error::new(ErrorKind::RetentionGap)
-                        .with_message("selected UDP history is no longer retained"));
+                    let oldest = pool.bounds()?.oldest_seq.unwrap_or(progress.next_seq);
+                    return Err(Error::retention_gap(progress.next_seq, oldest));
                 }
             }
             CursorResult::WouldBlock => {

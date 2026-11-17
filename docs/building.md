@@ -208,7 +208,8 @@ Each release tarball now follows the SDK layout contract:
 bin/plasmite
 bin/pls
 include/plasmite.h
-lib/libplasmite.(dylib|so)
+lib/libplasmite.so.2          # Linux
+lib/libplasmite.2.dylib       # macOS
 lib/libplasmite.a               # optional
 lib/pkgconfig/plasmite.pc
 ```

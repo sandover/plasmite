@@ -43,19 +43,24 @@ if [[ ! -f "$addon_path" ]]; then
 fi
 
 if [[ "$platform" == darwin-* ]]; then
-  lib_name="libplasmite.dylib"
+  lib_name="libplasmite.2.dylib"
+  cargo_lib_name="libplasmite.dylib"
   cli_name="plasmite"
 elif [[ "$platform" == win32-* ]]; then
-  lib_name="plasmite.dll"
+  lib_name="plasmite2.dll"
+  cargo_lib_name="plasmite.dll"
   cli_name="plasmite.exe"
 else
-  lib_name="libplasmite.so"
+  lib_name="libplasmite.so.2"
+  cargo_lib_name="libplasmite.so"
   cli_name="plasmite"
 fi
 
 lib_candidates=(
   "$sdk_dir/lib/$lib_name"
   "$sdk_dir/$lib_name"
+  "$sdk_dir/lib/$cargo_lib_name"
+  "$sdk_dir/$cargo_lib_name"
 )
 cli_candidates=(
   "$sdk_dir/bin/plasmite.exe"

@@ -256,7 +256,7 @@ pub(crate) fn error_issue(err: &Error) -> ValidationIssue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plasmite::api::{Durability, PoolApiExt, PoolOptions};
+    use plasmite::api::{Feed, PoolOptions};
 
     #[test]
     fn diagnostic_facts_survive_append_replacement_and_removal() {
@@ -266,15 +266,13 @@ mod tests {
         client
             .create_pool(&reference, PoolOptions::new(65536))
             .unwrap();
-        let mut pool = client.open_pool(&reference).unwrap();
+        let mut pool = client.open_pool(&reference, false).unwrap();
         for _ in 0..2 {
-            pool.append_json_now(&json!({"x": 1}), &[], Durability::Fast)
-                .unwrap();
+            pool.feed(&json!({"x": 1}), Feed::default()).unwrap();
         }
         let observation = client.validate_pool_observation(&reference).unwrap();
         let json_before = report_json(&observation.report);
-        pool.append_json_now(&json!({"x": 2}), &[], Durability::Fast)
-            .unwrap();
+        pool.feed(&json!({"x": 2}), Feed::default()).unwrap();
         assert_eq!(doctor_messages_summary(&observation), "2 (seq 1..2)");
         drop(pool);
         client.delete_pool(&reference).unwrap();

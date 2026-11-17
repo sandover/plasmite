@@ -1,4 +1,4 @@
-const { FollowStart, followStart } = require("./follow");
+const { at, readStart, normalizeWait } = require("./follow");
 /*
 Purpose: JavaScript entry point for the Plasmite Node binding.
 Key Exports: Client, Pool, Message, Stream, Durability, ErrorKind.
@@ -8,7 +8,7 @@ Notes: Requires libplasmite to be discoverable at runtime.
 */
 
 const { RemoteClient, RemoteError, RemotePool } = require("./remote");
-const { Message, parseMessage, parseNativeMessage } = require("./message");
+const { Message, parseMessage, parseNativeMessage, parsePoolInfo } = require("./message");
 const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
 const { createNativeMessage: ownedMessage, toNative, toJson, toLite3, messageReference, valueReference } = require("./views");
@@ -101,6 +101,8 @@ class PlasmiteNativeError extends Error {
     this.path = details.path;
     this.seq = details.seq;
     this.offset = details.offset;
+    this.missing = details.missing;
+    this.nextSeq = details.nextSeq;
     this.cause = cause;
   }
 }
@@ -114,18 +116,13 @@ function parseNativeError(err) {
     path: err.path,
     seq: err.seq,
     offset: err.offset,
+    missing: err.missing,
+    nextSeq: err.nextSeq,
   }, err);
 }
 
 function wrapNativeError(err) {
   return parseNativeError(err) ?? err;
-}
-
-function isNativeNotFoundError(err) {
-  if (!(err instanceof PlasmiteNativeError)) {
-    return false;
-  }
-  return err.kind === ErrorKind.NotFound;
 }
 
 class Client {
@@ -160,28 +157,27 @@ class Client {
    * @param {string} poolRef
    * @returns {Pool}
    */
-  openPool(poolRef) {
+  openPool(poolRef, { create = false } = {}) {
     try {
-      return new Pool(this._inner.openPool(poolRef));
+      return new Pool(this._inner.openPool(poolRef, create));
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
-  /**
-   * Open a pool if it exists, otherwise create it.
-   * @param {string} poolRef
-   * @param {number|bigint} [sizeBytes]
-   * @returns {Pool}
-   */
-  pool(poolRef, sizeBytes = DEFAULT_POOL_SIZE_BYTES) {
+  listPools() {
     try {
-      return this.openPool(poolRef);
+      return parsePoolInfo(this._inner.listPoolsJson());
     } catch (err) {
-      if (isNativeNotFoundError(err)) {
-        return this.createPool(poolRef, sizeBytes);
-      }
-      throw err;
+      throw wrapNativeError(err);
+    }
+  }
+
+  deletePool(poolRef) {
+    try {
+      this._inner.deletePool(poolRef);
+    } catch (err) {
+      throw wrapNativeError(err);
     }
   }
 
@@ -210,65 +206,30 @@ class Pool {
     this._inner = inner;
   }
 
-  /**
-   * Append JSON bytes and return raw message bytes.
-   * @param {unknown} payload
-   * @param {string[]} [tags]
-   * @param {number} [durability]
-   * @returns {Buffer}
-   */
-  appendJson(payload, tags, durability) {
-    const input = Buffer.isBuffer(payload)
-      ? payload
-      : Buffer.from(JSON.stringify(payload));
+  async feedLite3(payload, { durability = Durability.Fast } = {}) {
     try {
-      return this._inner.appendJson(input, tags ?? [], durability ?? Durability.Fast);
+      return parseNativeMessage(this._inner.feedLite3(payload, durability));
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
-  /**
-   * Append payload and return parsed Message.
-   * @param {unknown} payload
-   * @param {string[]} [tags]
-   * @param {number} [durability]
-   * @returns {Message}
-   */
-  append(payload, tags, durability) {
-    return parseNativeMessage(this.appendJson(payload, tags, durability));
+  async feedReceipt(value, { tags, durability = Durability.Fast } = {}) {
+    const [data, labels] = feedInput(value, tags);
+    return this.feedJsonReceipt(Buffer.from(JSON.stringify(data)), { tags: labels, durability });
   }
 
-  /**
-   * Append a Lite3 frame payload.
-   * @param {Buffer} payload
-   * @param {number} [durability]
-   * @returns {bigint}
-   */
-  appendLite3(payload, durability) {
+  feedJsonReceipt(payload, { tags = [], durability = Durability.Fast } = {}) {
     try {
-      return this._inner.appendLite3(payload, durability ?? Durability.Fast);
+      return this._inner.feedJsonReceipt(payload, tags, durability);
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
-  /** Return the committed sequence and Unix timestamp in nanoseconds. */
-  appendIdentity(payload, tags, durability) {
-    const input = Buffer.isBuffer(payload)
-      ? payload
-      : Buffer.from(JSON.stringify(payload));
+  feedLite3Receipt(payload, { durability = Durability.Fast } = {}) {
     try {
-      return this._inner.appendJsonIdentity(input, tags ?? [], durability ?? Durability.Fast);
-    } catch (err) {
-      throw wrapNativeError(err);
-    }
-  }
-
-  /** Append binary data and return its committed numeric identity. */
-  appendLite3Identity(payload, durability) {
-    try {
-      return this._inner.appendLite3Identity(payload, durability ?? Durability.Fast);
+      return this._inner.feedLite3Receipt(payload, durability);
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -279,7 +240,7 @@ class Pool {
    * @param {number|bigint} seq
    * @returns {Buffer}
    */
-  getJson(seq) {
+  _getJson(seq) {
     try {
       return this._inner.getJson(seq);
     } catch (err) {
@@ -288,39 +249,40 @@ class Pool {
   }
 
   /** Encode native input once and return its immutable committed view. */
-  async appendView(data, tags, durability) {
+  async feedView(data, { tags, durability = Durability.Fast } = {}) {
+    if (data instanceof Message) {
+      if (tags !== undefined) throw usageError("cannot supply tags when forwarding a message");
+      tags = data.tags;
+      data = data.data;
+    }
+    const message = messageReference(data);
+    if (message && tags !== undefined) {
+      throw usageError("cannot supply tags when forwarding a message");
+    }
     let target;
-    try { target = this._inner.prepareAppend(durability ?? Durability.Fast); }
+    try { target = this._inner.prepareAppend(durability); }
     catch (error) { throw wrapNativeError(error); }
-    // Keep this target separate from Pool before invoking any input hooks.
+    // Keep the target alive when input hooks close the Pool.
     let pending;
     try {
-      const tagSnapshot = snapshotTags(tags);
-      const message = messageReference(data);
-      if (message && tags === undefined) pending = target.forward(nativeOwner(message.backend));
+      if (message) pending = target.forward(nativeOwner(message.backend));
       else {
-        const payload = message ? data.data : data;
-        const ref = valueReference(payload);
-        if (ref) pending = target.copy(nativeOwner(ref.backend), ref.node, tagSnapshot);
-        else pending = captureNativeInput(target, payload, tagSnapshot);
+        const labels = snapshotTags(tags);
+        const ref = valueReference(data);
+        if (ref) pending = target.copy(nativeOwner(ref.backend), ref.node, labels);
+        else pending = captureNativeInput(target, data, labels);
       }
     } catch (error) { target.discard(); throw error; }
-    let owner;
-    try { owner = await pending; }
+    try { return ownedMessage(await pending); }
     catch (error) { throw wrapNativeError(error); }
-    return ownedMessage(owner);
   }
 
   /** Acquire an immutable snapshot by sequence. */
-  async getView(seq) {
+  async _getView(seq) {
     try {
       const owner = await this._inner.getView(normalizeUint64(seq, "seq"));
       return ownedMessage(owner);
     } catch (err) { throw wrapNativeError(err); }
-  }
-
-  get(seq) {
-    return parseNativeMessage(this.getJson(seq));
   }
 
   /**
@@ -328,125 +290,74 @@ class Pool {
    * @param {number|bigint} seq
    * @returns {import("./types").Lite3Frame}
    */
-  getLite3(seq) {
+  _getLite3(seq) {
     try {
-      return decorateLite3Frame(this._inner.getLite3(seq));
+      return this._inner.getLite3(seq);
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
-  /**
-   * Open a raw JSON stream.
-   * @param {number|bigint|null} sinceSeq
-   * @param {number|bigint|null} maxMessages
-   * @param {number|bigint|null} timeoutMs
-   * @param {boolean} [errorOnGap]
-   * @returns {Stream}
-   */
-  openFollow(start, maxMessages, timeoutMs, errorOnGap = false, finite = false) {
-    const [kind, sinceSeq] = followStart(start);
-    try {
-      return new Stream(
-        this._inner.openFollow(sinceSeq, maxMessages, timeoutMs, errorOnGap, kind, finite),
-      );
-    } catch (err) {
-      throw wrapNativeError(err);
-    }
+  follow(options = {}) {
+    return this._read(false, options);
   }
 
-  /**
-   * Open a raw Lite3 stream.
-   * @param {number|bigint|null} sinceSeq
-   * @param {number|bigint|null} maxMessages
-   * @param {number|bigint|null} timeoutMs
-   * @param {boolean} [errorOnGap]
-   * @returns {Lite3Stream}
-   */
-  openLite3Follow(start, maxMessages, timeoutMs, errorOnGap = false, finite = false) {
-    const [kind, sinceSeq] = followStart(start);
-    try {
-      return new Lite3Stream(
-        this._inner.openLite3Follow(
-          sinceSeq,
-          maxMessages,
-          timeoutMs,
-          errorOnGap, kind, finite,
-        ),
-      );
-    } catch (err) {
-      throw wrapNativeError(err);
-    }
+  fetch(options = {}) {
+    return this._read(true, options);
   }
 
-  /**
-   * Tail parsed messages with optional filtering.
-   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[], errorOnGap?: boolean, signal?: AbortSignal}} [options]
-   * @returns {AsyncGenerator<Message, void, unknown>}
-   */
-  async *follow(options = {}) {
-    if (options.sinceSeq !== undefined) throw new TypeError("use start: FollowStart.sequence(seq)");
-    const { start, finite = false, maxMessages, timeoutMs, tags, errorOnGap = false, signal } = options;
-    const requiredTags = normalizeTagFilter(tags);
-    const limit = normalizeOptionalCount(maxMessages, "maxMessages");
-    const waitMs = BigInt(Math.floor(normalizePollingTimeout(timeoutMs)));
-    if (limit === 0 || signal?.aborted) return;
-    const stream = this.openFollow(start, requiredTags.length ? null : limit, null, errorOnGap, finite);
-    const abort = () => stream.cancel();
-    signal?.addEventListener("abort", abort, { once: true });
-    let delivered = 0;
+  followView(options = {}) {
+    return this._read(false, options, "view");
+  }
+
+  fetchView(options = {}) {
+    return this._read(true, options, "view");
+  }
+
+  followLite3(options = {}) { return this._read(false, options, "lite3"); }
+
+  fetchLite3(options = {}) { return this._read(true, options, "lite3"); }
+
+  async _read(finite, options = {}, representation) {
+    const { since, last, tags, signal, ...extra } = options;
+    if (Object.keys(extra).length) throw usageError("read options are since, last, tags and signal");
+    let start;
+    try { start = readStart(since, last); } catch (err) { throw usageError(err.message); }
+    const [kind, value] = start;
+    if (signal?.aborted) return new Reader(null, signal);
     try {
-      while (!signal?.aborted) {
-        const result = await stream.nextJsonWait(waitMs);
-        if (signal?.aborted || result.status === 2 || result.status === 3) return;
-        if (result.status === 0) {
-          if (limit !== null) return;
-          continue;
-        }
-        const message = parseNativeMessage(result.message);
-        if (messageHasTags(message, requiredTags)) {
-          delivered++;
-          yield message;
-          if (limit !== null && delivered >= limit) return;
-        }
+      const labels = normalizeTagFilter(tags);
+      if (representation === "lite3") {
+        const stream = new Lite3Stream(this._inner.openLite3Read(finite, kind, value, labels));
+        return new Reader(stream, signal, result => result.frame);
       }
-    } finally {
-      signal?.removeEventListener("abort", abort);
-      stream.close();
+      const view = representation === "view";
+      return new Reader(new Stream(this._inner.openRead(finite, kind, value,
+        labels, view)), signal, view ? result => ownedMessage(result.view) : undefined);
+    } catch (err) {
+      throw wrapNativeError(err);
     }
   }
 
-  /** Pull independent immutable snapshots; no next item starts until demand. */
-  followViews(options = {}) {
-    if (options.sinceSeq !== undefined) throw new TypeError("use start: FollowStart.sequence(seq)");
-    const pool = this;
-    let stream;
-    let stopped = false;
-    async function* read() {
-      const { start, finite = false, maxMessages, timeoutMs, errorOnGap = false, signal } = options;
-      const [kind, sinceSeq] = followStart(start);
-      const limit = normalizeOptionalCount(maxMessages, "maxMessages");
-      const finiteWait = BigInt(Math.floor(normalizePollingTimeout(timeoutMs)));
-      // An unlimited tail keeps one native read pending across quiet periods.
-      const waitMs = limit === null ? 18446744073709551615n : finiteWait;
-      if (signal?.aborted || stopped || limit === 0) return;
-      const tags = snapshotTags(options.tags);
-      try { stream = pool._inner.openViewFollow(sinceSeq ?? null, maxMessages ?? null, null, errorOnGap, tags, kind, finite); }
-      catch (error) { throw wrapNativeError(error); }
-      const abort = () => stream.cancel();
-      signal?.addEventListener("abort", abort, { once: true });
-      try {
-        while (!signal?.aborted && !stopped) {
-          let result;
-          try { result = await stream.nextJsonWait(waitMs); }
-          catch (error) { throw wrapNativeError(error); }
-          if (stopped || signal?.aborted || result.status === 2 || result.status === 3) return;
-          if (result.status === 0) { if (limit !== null) return; continue; }
-          if (result.status === 1) yield ownedMessage(result.view);
-        }
-      } finally { signal?.removeEventListener("abort", abort); stream.close(); }
+  info() {
+    try {
+      return parsePoolInfo(this._inner.infoJson());
+    } catch (err) {
+      throw wrapNativeError(err);
     }
-    return cancelOnReturn(read(), () => { stopped = true; stream?.cancel(); });
+  }
+
+  async feed(value, { tags, durability = Durability.Fast } = {}) {
+    const [data, labels] = feedInput(value, tags);
+    return parseNativeMessage(this.feedJson(Buffer.from(JSON.stringify(data)), { tags: labels, durability }));
+  }
+
+  feedJson(payload, { tags = [], durability = Durability.Fast } = {}) {
+    try {
+      return this._inner.feedJson(payload, tags, durability);
+    } catch (err) {
+      throw wrapNativeError(err);
+    }
   }
 
   /**
@@ -462,75 +373,84 @@ class Pool {
   }
 }
 
+function feedInput(value, tags) {
+  if (value instanceof Message) {
+    if (tags !== undefined) throw usageError("cannot supply tags when forwarding a message");
+    tags = value.tags;
+    value = value.data;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw usageError("feed requires an object");
+  }
+  return [value, tags ?? []];
+}
+
+function usageError(message) {
+  return new PlasmiteNativeError(message, { kind: ErrorKind.Usage });
+}
+
+class Reader {
+  constructor(stream, signal, decode = result => parseNativeMessage(result.message)) {
+    this._stream = stream;
+    this._decode = decode;
+    this._signal = signal;
+    this._poll = stream instanceof Lite3Stream ? timeout => stream.nextWait(timeout)
+      : timeout => stream.nextJsonWait(timeout);
+    this._abort = () => this.close();
+    if (signal?.aborted) this.close();
+    else signal?.addEventListener("abort", this._abort, { once: true });
+  }
+
+  async next(wait) {
+    const stream = this._stream;
+    if (!stream) return { done: true, value: undefined };
+    let waitMs;
+    if (wait !== undefined) {
+      try { waitMs = normalizeWait(wait); } catch (err) { throw usageError(err.message); }
+    }
+    try {
+      if (wait !== undefined) {
+        const result = await this._poll(BigInt(waitMs));
+        if (result.status === 0 && this._stream) return { done: false, value: undefined };
+        if (result.status === 1 && this._stream) {
+          return { done: false, value: this._decode(result) };
+        }
+      } else {
+        while (this._stream) {
+          const result = await this._poll(18446744073709551615n);
+          if (!this._stream || result.status === 2 || result.status === 3) break;
+          if (result.status === 1) return { done: false, value: this._decode(result) };
+        }
+      }
+    } catch (err) {
+      this.close();
+      throw err;
+    }
+    return this.return();
+  }
+
+  close() {
+    this._signal?.removeEventListener("abort", this._abort);
+    const stream = this._stream;
+    this._stream = null;
+    stream?.close();
+  }
+
+  async return() {
+    this.close();
+    return { done: true, value: undefined };
+  }
+
+  [Symbol.asyncIterator]() {
+    return this;
+  }
+}
+
 function normalizeTagFilter(tags) {
   if (tags === undefined || tags === null) {
     return [];
   }
   return Array.isArray(tags) ? tags : [tags];
-}
-
-function messageHasTags(message, requiredTags) {
-  if (!requiredTags.length) {
-    return true;
-  }
-  const messageTags = message && message.meta && Array.isArray(message.meta.tags)
-    ? message.meta.tags
-    : null;
-  if (!messageTags) {
-    return false;
-  }
-  return requiredTags.every((tag) => messageTags.includes(tag));
-}
-
-function decorateLite3Frame(frame) {
-  if (!frame || typeof frame !== "object") {
-    return frame;
-  }
-  if (!Object.prototype.hasOwnProperty.call(frame, "time")) {
-    Object.defineProperty(frame, "time", {
-      configurable: false,
-      enumerable: true,
-      get() {
-        return new Date(Number(this.timestampNs) / 1_000_000);
-      },
-    });
-  }
-  return frame;
-}
-
-function normalizeOptionalCount(value, fieldName) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value === "bigint") {
-    if (value < 0n) {
-      throw new TypeError(`${fieldName} must be non-negative`);
-    }
-    return Number(value);
-  }
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new TypeError(`${fieldName} must be non-negative`);
-  }
-  return Math.floor(value);
-}
-
-function normalizePollingTimeout(timeoutMs) {
-  if (timeoutMs === undefined || timeoutMs === null) {
-    return 1000;
-  }
-  if (typeof timeoutMs === "bigint") {
-    if (timeoutMs <= 0n) {
-      return 1000;
-    }
-    return Number(timeoutMs);
-  }
-  if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) {
-    throw new TypeError("timeoutMs must be numeric");
-  }
-  if (timeoutMs <= 0) {
-    return 1000;
-  }
-  return timeoutMs;
 }
 
 class Stream {
@@ -609,7 +529,7 @@ class Lite3Stream {
    */
   next() {
     try {
-      return decorateLite3Frame(this._inner.next());
+      return this._inner.next();
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -630,7 +550,6 @@ class Lite3Stream {
   async nextWait(timeoutMs) {
     try {
       const result = await this._inner.nextWait(normalizeUint64(timeoutMs, "timeoutMs"));
-      if (result.frame) decorateLite3Frame(result.frame);
       return result;
     } catch (err) {
       throw wrapNativeError(err);
@@ -650,7 +569,6 @@ class Lite3Stream {
   }
 }
 
-const UdpStart = FollowStart;
 
 class UdpClient {
   constructor(endpoint) {
@@ -689,64 +607,49 @@ class UdpPool {
     this._inner = inner;
   }
 
-  sendJson(payload, tags = []) {
-    const encoded = JSON.stringify(payload);
-    if (encoded === undefined) {
-      throw new TypeError("payload must be JSON serializable");
-    }
-    try {
-      this._inner.sendJson(Buffer.from(encoded), tags);
-    } catch (err) {
-      throw wrapNativeError(err);
-    }
-  }
-
-  sendLite3(payload) {
+  feedLite3(payload) {
     if (!Buffer.isBuffer(payload)) {
       throw new TypeError("payload must be a Buffer containing a complete Lite3 document");
     }
     try {
-      this._inner.sendLite3(payload);
+      this._inner.feedLite3(payload);
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
-  follow(options = {}) { return this._follow(options, false); }
-
-  followViews(options = {}) { return this._follow(options, true); }
-
-  _follow(options, views) {
-    if (options.live !== undefined) throw new TypeError("use finite instead of live");
-    const start = options.start ?? UdpStart.new();
-    const live = !(options.finite ?? false);
-    let startKind;
-    let startValue = 0n;
-    switch (start.kind) {
-      case "new":
-        startKind = 0;
-        break;
-      case "last":
-        startKind = 1;
-        startValue = normalizeUint64(start.count, "start.count");
-        break;
-      case "since":
-        startKind = 2;
-        startValue = normalizeUint64(start.timestampNs, "start.timestampNs");
-        break;
-      case "sequence":
-        startKind = 3;
-        startValue = normalizeUint64(start.seq, "start.seq");
-        break;
-      default:
-        throw new TypeError("start must come from UdpStart.new, last, since, or sequence");
-    }
+  feed(value, { tags, durability = Durability.Fast } = {}) {
+    const [data, labels] = feedInput(value, tags);
     try {
-      return this._inner
-        .follow(startKind, BigInt(startValue), Boolean(live), views)
-        .then((inner) => new UdpFollow(inner, views), (err) => {
-          throw wrapNativeError(err);
-        });
+      this._inner.feedJson(Buffer.from(JSON.stringify(data)), labels, durability);
+    } catch (err) {
+      throw wrapNativeError(err);
+    }
+  }
+
+  follow(options = {}) { return this._read(options, true, false); }
+
+  fetch(options = {}) { return this._read(options, false, false); }
+
+  followView(options = {}) { return this._read(options, true, true); }
+
+  fetchView(options = {}) { return this._read(options, false, true); }
+
+  async _read(options, live, view) {
+    const { since, last, tags, signal, ...extra } = options;
+    if (Object.keys(extra).length) throw usageError("read options are since, last, tags and signal");
+    let start;
+    try { start = readStart(since, last); } catch (err) { throw usageError(err.message); }
+    const [kind, value] = start;
+    if (signal?.aborted) throw abortError(signal);
+    try {
+      const reader = new UdpFollow(await this._inner.follow(kind, value, live, view,
+        normalizeTagFilter(tags)), view, signal);
+      if (signal?.aborted) {
+        reader.close();
+        throw abortError(signal);
+      }
+      return reader;
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -762,14 +665,15 @@ class UdpPool {
 }
 
 class UdpFollow {
-  constructor(inner, views = false) {
+  constructor(inner, views = false, signal) {
     this._inner = inner;
     this._views = views;
+    this._signal = signal;
     this._closed = false;
     this._cancelled = false;
   }
 
-  async nextEvent(timeoutMs = 1000, { signal } = {}) {
+  async nextEvent(timeoutMs = 1000, { signal = this._signal } = {}) {
     const timeout = normalizeUint64(timeoutMs, "timeoutMs");
     if (signal?.aborted) throw abortError(signal);
     if (this._closed || this.finished) return null;
@@ -781,7 +685,7 @@ class UdpFollow {
       if (result.status !== 1) return null;
       if (this._views && result.view) {
         const message = ownedMessage(result.view);
-        return { kind: "frame", seq: message.seq, timestampNs: message.timestampNs, message };
+        return { kind: "frame", seq: message.seq, time: message.time, message };
       }
       return decorateUdpEvent(result.event);
     } catch (err) {
@@ -864,7 +768,7 @@ function decorateUdpEvent(event) {
     return Object.freeze({
       kind: "frame",
       seq: event.seq,
-      timestampNs: event.timestampNs,
+      time: event.time,
       payload: event.payload,
       message: parseMessage(event.message),
     });
@@ -902,8 +806,22 @@ function normalizeUint64(value, name) {
   return integer;
 }
 
+function withClient(action) {
+  const client = new Client();
+  try {
+    return action(client);
+  } finally {
+    client.close();
+  }
+}
+
+const createPool = (ref, size) => withClient(c => c.createPool(ref, size));
+const openPool = (ref, opts) => withClient(c => c.openPool(ref, opts));
+const listPools = () => withClient(c => c.listPools());
+const deletePool = ref => withClient(c => c.deletePool(ref));
+
 module.exports = {
-  FollowStart,
+  at, createPool, openPool, listPools, deletePool,
   toNative, toJson, toLite3,
   Client,
   Pool,
@@ -912,7 +830,6 @@ module.exports = {
   UdpClient,
   UdpPool,
   UdpFollow,
-  UdpStart,
   Message,
   DEFAULT_POOL_DIR,
   DEFAULT_POOL_SIZE,

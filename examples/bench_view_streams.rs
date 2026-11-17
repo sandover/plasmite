@@ -1,8 +1,8 @@
 //! Run one lane per process. Setup/encoding stays outside the timed consumer.
 //! Usage: bench_view_streams local|udp raw|raw_forward|view_selected|view_full|view_forward|json FIXTURE COUNT
 use plasmite::api::{
-    AppendOptions, Durability, FollowOptions, Pool, PoolApiExt, PoolOptions, PoolRef, UdpClient,
-    UdpEvent, UdpFollowOptions, UdpStart, UdpViewEvent,
+    AppendOptions, Durability, Pool, PoolOptions, PoolRef, Read, Since, UdpClient, UdpEvent,
+    UdpViewEvent,
 };
 use plasmite::view::MessageView;
 use serde::Deserialize;
@@ -20,7 +20,7 @@ struct Input {
 fn consume(view: &MessageView, lane: &str, destination: &mut Pool) -> i64 {
     if lane == "view_forward" {
         destination
-            .append_view(view, AppendOptions::new(456, Durability::Fast))
+            .feed_view(view, plasmite::api::Feed::default())
             .unwrap();
         return 7;
     }
@@ -90,15 +90,9 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
     )
     .unwrap();
     for _ in 0..count {
-        pool.append_view(source, AppendOptions::new(123, Durability::Fast))
+        pool.feed_view(source, plasmite::api::Feed::default())
             .unwrap();
     }
-    let options = FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(1),
-        max_messages: Some(count),
-        notify: false,
-        ..FollowOptions::new()
-    };
     let mut destination = Pool::create(
         dir.path().join("forward.plasmite"),
         PoolOptions::new(capacity as u64),
@@ -108,11 +102,14 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
     let mut sum = 0;
     match lane {
         "raw" | "raw_forward" => {
-            let mut tail = pool.follow_lite3(options);
+            let mut tail = pool.fetch_lite3(Read::default()).unwrap();
             while let Some(frame) = tail.next_frame().unwrap() {
                 if lane == "raw_forward" {
                     destination
-                        .append_lite3(&frame.payload, AppendOptions::new(456, Durability::Fast))
+                        .append_with_options(
+                            &frame.payload,
+                            AppendOptions::new(456, Durability::Fast),
+                        )
                         .unwrap();
                 }
                 black_box(frame.payload);
@@ -120,14 +117,14 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
             }
         }
         "json" => {
-            let mut tail = pool.follow(options);
+            let mut tail = pool.fetch(Read::default()).unwrap();
             while let Some(message) = tail.next_message().unwrap() {
                 sum += message.data["value"].as_i64().unwrap();
                 black_box(message);
             }
         }
         _ => {
-            for view in pool.follow_views(options) {
+            for view in pool.fetch_view(Read::default()).unwrap() {
                 let view = view.unwrap();
                 sum += consume(&view, lane, &mut destination);
                 black_box(view);
@@ -137,7 +134,7 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
     let elapsed = start.elapsed();
     if lane.ends_with("forward") {
         assert_eq!(
-            destination.get_lite3(count as u64).unwrap().payload,
+            destination.get(count as u64).unwrap().payload,
             source.bytes()
         );
     }
@@ -189,13 +186,10 @@ fn udp(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
         .unwrap()
         .open_pool(&PoolRef::name("bench"))
         .unwrap();
-    let options = UdpFollowOptions {
-        start: UdpStart::Sequence(1),
-        live: true,
-    };
+    let options = Read::since(Since::Seq(1));
     let mut sum = 0;
     let elapsed = if lane.starts_with("view_") {
-        let mut follow = pool.follow_views(options).unwrap();
+        let mut follow = pool.follow_view(options.clone()).unwrap();
         assert!(matches!(
             follow.next_event().unwrap(),
             Some(UdpViewEvent::Progress { .. })
@@ -235,7 +229,10 @@ fn udp(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
                 sum += 7;
                 if lane == "raw_forward" {
                     destination
-                        .append_lite3(&frame.payload, AppendOptions::new(456, Durability::Fast))
+                        .append_with_options(
+                            &frame.payload,
+                            AppendOptions::new(456, Durability::Fast),
+                        )
                         .unwrap();
                 }
                 black_box(frame.payload);
@@ -247,7 +244,7 @@ fn udp(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
     sender.join().unwrap();
     if lane.ends_with("forward") {
         assert_eq!(
-            destination.get_lite3(count as u64).unwrap().payload,
+            destination.get(count as u64).unwrap().payload,
             source.bytes()
         );
     }

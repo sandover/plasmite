@@ -37,13 +37,13 @@ def main():
         "runs": [],
     }
     with TemporaryDirectory() as directory, plasmite.Client(directory) as client:
-        with client.pool("udp", 1024 * 1024) as pool:
+        with client.open_pool("udp", create=True) as pool:
             for shape, data in [
                 ("small", {"value": 7}),
                 ("long_string", {"value": "x" * 65536}),
             ]:
-                sent = pool.append(data)
-                payload = pool.get_lite3(sent.seq).payload
+                sent = pool.feed(data)
+                payload = pool._get_lite3(sent.seq).payload
                 frame = plasmite.UdpFrame(sent.seq, 1, payload)
                 assert frame.message().data == data
                 for repeat in range(7):

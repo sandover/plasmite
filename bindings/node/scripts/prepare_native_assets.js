@@ -30,15 +30,17 @@ if (!platformDir) {
 }
 
 const libNameByPlatform = {
-  linux: "libplasmite.so",
-  darwin: "libplasmite.dylib",
-  win32: "plasmite.dll",
+  linux: ["libplasmite.so.2", "libplasmite.so"],
+  darwin: ["libplasmite.2.dylib", "libplasmite.dylib"],
+  win32: ["plasmite2.dll", "plasmite.dll"],
 };
-const libName = libNameByPlatform[process.platform];
+const [libName, cargoLibName] = libNameByPlatform[process.platform];
 const cliName = runtimeKey === "win32-x64" ? "plasmite.exe" : "plasmite";
 const libCandidates = [
   path.join(sdkRoot, "lib", libName),
   path.join(sdkRoot, libName),
+  path.join(sdkRoot, "lib", cargoLibName),
+  path.join(sdkRoot, cargoLibName),
 ];
 const cliCandidates = [
   path.join(sdkRoot, "bin", cliName),

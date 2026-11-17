@@ -14,7 +14,7 @@ use axum::http::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use bytes::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
@@ -53,15 +53,17 @@ use activity::{ActivityRegistry, RequestActivity};
 #[path = "browser_session.rs"]
 mod browser_session;
 use crate::interface_error_kind;
-use crate::interface_wire::{LITE3_FRAME_HEADER_LEN, Lite3FrameHeader, MessageWire, error_policy};
+use crate::interface_wire::{MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
 use browser_session::{BrowserSessions, COOKIE_NAME, LIFETIME};
+#[path = "http_v2.rs"]
+mod http_v2;
 #[path = "oauth.rs"]
 mod oauth;
 use oauth::OauthService;
 use plasmite::api::{
-    Durability, Error, ErrorKind, FollowOptions, GapPolicy, LocalClient, Pool, PoolApiExt,
-    PoolInfo, PoolOptions, PoolRef, lite3,
+    Durability, Error, ErrorKind, Feed, LocalClient, Message, Pool, PoolInfo, PoolOptions, PoolRef,
+    Read, ReadPoll, Since,
 };
 use plasmite::mcp::{
     DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION, McpDispatcher,
@@ -474,21 +476,17 @@ async fn prepare_server_with_access(
         .route("/ui/assets/common.js", get(ui_common_js))
         .route("/ui/pools/:pool", get(ui_pool))
         .route("/access", get(ui_access))
-        .route("/v0/pools", post(create_pool).get(list_pools))
-        .route("/v0/pools/open", post(open_pool))
-        .route("/v0/pools/:pool/info", get(pool_info))
-        .route("/v0/pools/:pool", delete(delete_pool))
-        .route("/v0/pools/:pool/append", post(append_message))
-        .route("/v0/pools/:pool/append_lite3", post(append_lite3))
-        .route("/v0/pools/:pool/messages/:seq", get(get_message))
-        .route("/v0/pools/:pool/messages/:seq/lite3", get(get_lite3))
-        .route("/v0/pools/:pool/follow", get(tail_messages))
-        .route("/v0/pools/:pool/follow_lite3", get(follow_lite3))
+        .route("/v0/pools", axum::routing::any(upgrade_pool_protocol))
+        .route(
+            "/v0/pools/*legacy",
+            axum::routing::any(upgrade_pool_protocol),
+        )
         .route("/v0/ui/pools", get(ui_list_pools))
         .route("/v0/ui/pools/stream", get(ui_pool_stream))
         .route("/v0/ui/pools/:pool/info", get(ui_pool_info))
         .route("/v0/ui/pools/:pool/events", get(ui_events))
         .route("/v0/ui/activity", get(ui_activity))
+        .merge(http_v2::routes())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             observe_activity,
@@ -569,8 +567,7 @@ async fn observe_activity(
 }
 
 fn observes_pool_route(route: &str) -> bool {
-    (route.starts_with("/v0/pools/:pool") && !route.ends_with("/info"))
-        || route == "/v0/ui/pools/:pool/events"
+    route.starts_with("/v2/pools/:pool/") || route == "/v0/ui/pools/:pool/events"
 }
 
 async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
@@ -634,6 +631,8 @@ async fn remote_browser_guard(
     let path = request.uri().path();
     let protected_pool = path == "/v0/pools"
         || path.starts_with("/v0/pools/")
+        || path == "/v2/pools"
+        || path.starts_with("/v2/pools/")
         || path == "/v0/ui/pools"
         || path.starts_with("/v0/ui/pools/");
     if protected_pool && let Err(err) = authorize(request.headers(), &state) {
@@ -1229,11 +1228,6 @@ struct CreatePoolRequest {
 }
 
 #[derive(Debug, Deserialize)]
-struct PoolRequest {
-    pool: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct AppendRequest {
     data: serde_json::Value,
     tags: Option<Vec<String>>,
@@ -1251,16 +1245,13 @@ struct TailQuery {
     gap_policy: Option<String>,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum TailStreamEncoding {
-    Jsonl,
-    Lite3,
-    Sse,
-}
-
 struct TailRuntime {
     permit: OwnedSemaphorePermit,
-    options: FollowOptions,
+    selection: Read,
+    tags: Vec<String>,
+    live: bool,
+    limit: u64,
+    continue_on_gap: bool,
     deadline: Instant,
 }
 
@@ -1405,11 +1396,7 @@ fn mcp_activity_pool(payload: &Value) -> Option<(String, String)> {
             let name = payload.pointer("/params/name")?.as_str()?;
             if !matches!(
                 name,
-                "plasmite_pool_delete"
-                    | "plasmite_feed"
-                    | "plasmite_fetch"
-                    | "plasmite_read"
-                    | "plasmite_wait"
+                "plasmite_pool_delete" | "plasmite_feed" | "plasmite_fetch" | "plasmite_follow"
             ) {
                 return None;
             }
@@ -1464,7 +1451,7 @@ impl McpHandler for ServeMcpHandler {
         if self.revoked() {
             return Ok(mcp_revoked_tool_result());
         }
-        let _wait_permit = if request.name == "plasmite_wait" {
+        let _wait_permit = if request.name == "plasmite_follow" {
             match self.wait_semaphore.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
                 Err(_) => return Ok(mcp_wait_busy_tool_result()),
@@ -1525,7 +1512,7 @@ fn mcp_wait_busy_tool_result() -> ToolCallResult {
         "busy: too many concurrent tail or MCP wait requests",
         Some(json!({
             "error_kind": "Busy",
-            "tool": "plasmite_wait",
+            "tool": "plasmite_follow",
             "hint": "Try again later or reduce long-lived read concurrency.",
         })),
     )
@@ -1689,6 +1676,10 @@ struct ErrorBody {
     seq: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     offset: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    missing: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_seq: Option<u64>,
 }
 
 async fn create_pool(
@@ -1703,7 +1694,9 @@ async fn create_pool(
     let info = state
         .storage_executor
         .run_authorized(grant, move || {
-            client.create_pool(&pool_ref, PoolOptions::new(size_bytes))
+            client
+                .create_pool(&pool_ref, PoolOptions::new(size_bytes))?
+                .info()
         })
         .await?;
     Ok(json_response(
@@ -1711,21 +1704,13 @@ async fn create_pool(
     ))
 }
 
-async fn open_pool(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(payload): Json<PoolRequest>,
-) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
-    let pool_ref = pool_ref_from_request(&payload.pool)?;
-    let client = state.client.clone();
-    let info = state
-        .storage_executor
-        .run_authorized(grant, move || client.pool_info(&pool_ref))
-        .await?;
-    Ok(json_response(
-        json!({ "pool": pool_info_json(&payload.pool, &info) }),
-    ))
+async fn upgrade_pool_protocol() -> Response {
+    error_response_with_status(
+        Error::new(ErrorKind::Usage)
+            .with_message("This server requires Plasmite HTTP API v2")
+            .with_hint("Upgrade to a Plasmite 2 client."),
+        StatusCode::UPGRADE_REQUIRED,
+    )
 }
 
 async fn pool_info(
@@ -1824,7 +1809,7 @@ async fn ui_pool_info(
     let info = state
         .storage_executor
         .run_authorized(grant, move || {
-            ui_pool_info_json(&name, &client.open_pool(&pool_ref)?)
+            ui_pool_info_json(&name, &client.open_pool(&pool_ref, false)?)
         })
         .await?;
     Ok(json_response(json!({ "pool": info })))
@@ -2008,7 +1993,7 @@ async fn ui_pool_stream(State(state): State<Arc<AppState>>, headers: HeaderMap) 
     let mut response = Response::new(Body::from_stream(
         ReceiverStream::new(body_rx).map(Ok::<_, std::io::Error>),
     ));
-    apply_tail_response_headers(&mut response, TailStreamEncoding::Sse);
+    apply_sse_headers(&mut response);
     response
 }
 
@@ -2080,9 +2065,9 @@ async fn append_message(
     let message = state
         .storage_executor
         .run_authorized(grant, move || {
-            client
-                .open_pool(&pool_ref)
-                .and_then(|mut pool| pool.append_json_now(&data, &tags, durability))
+            client.open_pool(&pool_ref, false).and_then(|mut pool| {
+                pool.feed(&data, Feed::default().tags(tags).durability(durability))
+            })
         })
         .await?;
     Ok(json_response(Value::from_iter([(
@@ -2128,9 +2113,9 @@ async fn append_lite3(
                 // body slice. Reuse its proof when appending, including duplicate
                 // key semantics and validation of the complete envelope.
                 let view = plasmite::view::MessageView::from_bytes(&payload, 0, 0)?;
-                client
-                    .open_pool(&pool_ref)
-                    .and_then(|mut pool| pool.append_view_now(&view, durability))
+                client.open_pool(&pool_ref, false).and_then(|mut pool| {
+                    pool.feed_view(&view, Feed::default().durability(durability))
+                })
             })
             .await?;
         let mut response = Response::new(Body::empty());
@@ -2141,7 +2126,7 @@ async fn append_lite3(
         );
         response.headers_mut().insert(
             "plasmite-timestamp-ns",
-            HeaderValue::from_str(&receipt.timestamp_ns.to_string())
+            HeaderValue::from_str(&receipt.time.to_string())
                 .expect("decimal u64 is a valid header"),
         );
         response
@@ -2154,135 +2139,15 @@ async fn append_lite3(
     let message = state
         .storage_executor
         .run_authorized(grant, move || {
-            client
-                .open_pool(&pool_ref)
-                .and_then(|mut pool| pool.append_lite3_with_receipt_now(&payload, durability))
-        })
-        .await?;
-    Ok(json_response(Value::from_iter([(
-        "message",
-        message_json(message),
-    )])))
-}
-
-async fn get_message(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    AxumPath((pool, seq)): AxumPath<(String, u64)>,
-) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
-    let pool_ref = pool_ref_from_request(&pool)?;
-    let client = state.client.clone();
-    let message = state
-        .storage_executor
-        .run_authorized(grant, move || {
-            client
-                .open_pool(&pool_ref)
-                .and_then(|pool| pool.get_message(seq))
-        })
-        .await?;
-    Ok(json_response(Value::from_iter([(
-        "message",
-        message_json(message),
-    )])))
-}
-
-async fn get_lite3(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    AxumPath((pool, seq)): AxumPath<(String, u64)>,
-) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
-    let pool_ref = pool_ref_from_request(&pool)?;
-    let client = state.client.clone();
-    let frame = state
-        .storage_executor
-        .run_authorized(grant, move || {
-            client.open_pool(&pool_ref).and_then(|pool| {
-                let frame = pool.get_lite3(seq)?;
-                lite3::validate_bytes(&frame.payload)?;
-                Ok(frame)
+            client.open_pool(&pool_ref, false).and_then(|mut pool| {
+                pool.feed_lite3(&payload, Feed::default().durability(durability))
             })
         })
         .await?;
-    Ok({
-        let mut response = Response::new(Body::from(frame.payload));
-        response.headers_mut().insert(
-            "content-type",
-            HeaderValue::from_static("application/x-plasmite-lite3"),
-        );
-        response.headers_mut().insert(
-            "plasmite-seq",
-            HeaderValue::from_str(&frame.seq.to_string()).expect("decimal u64 is a valid header"),
-        );
-        response.headers_mut().insert(
-            "plasmite-timestamp-ns",
-            HeaderValue::from_str(&frame.timestamp_ns.to_string())
-                .expect("decimal u64 is a valid header"),
-        );
-        response
-            .headers_mut()
-            .insert("plasmite-version", HeaderValue::from_static("0"));
-        response
-    })
-}
-
-async fn tail_messages(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    AxumPath(pool): AxumPath<String>,
-    Query(query): Query<TailQuery>,
-    RawQuery(raw_query): RawQuery,
-) -> Response {
-    let (pool_ref, grant) = match tail_pool_ref_from_request(&state, &headers, &pool) {
-        Ok(value) => value,
-        Err(err) => return error_response(err),
-    };
-    let runtime = match prepare_tail_runtime(
-        &state,
-        &query,
-        raw_query.as_deref(),
-        TailStreamEncoding::Jsonl,
-    ) {
-        Ok(runtime) => runtime,
-        Err(err) => return error_response(err),
-    };
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Jsonl, grant).await
-}
-
-async fn follow_lite3(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    AxumPath(pool): AxumPath<String>,
-    Query(query): Query<TailQuery>,
-    RawQuery(raw_query): RawQuery,
-) -> Response {
-    let (pool_ref, grant) = match tail_pool_ref_from_request(&state, &headers, &pool) {
-        Ok(value) => value,
-        Err(err) => return error_response(err),
-    };
-    let runtime = match prepare_tail_runtime(
-        &state,
-        &query,
-        raw_query.as_deref(),
-        TailStreamEncoding::Lite3,
-    ) {
-        Ok(runtime) => runtime,
-        Err(err) => return error_response(err),
-    };
-    if let Err(err) = precheck_lite3_since_seq(
-        &state,
-        &pool_ref,
-        match runtime.options.start {
-            plasmite::api::FollowStart::Sequence(seq) if seq != 0 => Some(seq),
-            _ => None,
-        },
-    )
-    .await
-    {
-        return error_response(err);
-    }
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Lite3, grant).await
+    Ok(json_response(Value::from_iter([(
+        "message",
+        message_json(message),
+    )])))
 }
 
 async fn ui_events(
@@ -2296,16 +2161,11 @@ async fn ui_events(
         Ok(value) => value,
         Err(err) => return error_response(err),
     };
-    let runtime = match prepare_tail_runtime(
-        &state,
-        &query,
-        raw_query.as_deref(),
-        TailStreamEncoding::Sse,
-    ) {
+    let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Sse, grant).await
+    spawn_tail_stream_response(&state, pool_ref, runtime, grant).await
 }
 
 fn tail_pool_ref_from_request(
@@ -2317,53 +2177,20 @@ fn tail_pool_ref_from_request(
     Ok((pool_ref_from_request(pool)?, grant))
 }
 
-async fn precheck_lite3_since_seq(
-    state: &Arc<AppState>,
-    pool_ref: &PoolRef,
-    since_seq: Option<u64>,
-) -> Result<(), Error> {
-    let Some(since_seq) = since_seq else {
-        return Ok(());
-    };
-    let client = state.client.clone();
-    let pool_ref = pool_ref.clone();
-    let precheck = state
-        .storage_executor
-        .run(move || {
-            client.open_pool(&pool_ref).and_then(|pool| {
-                let frame = pool.get_lite3(since_seq)?;
-                lite3::validate_bytes(&frame.payload)?;
-                Ok(())
-            })
-        })
-        .await;
-    match precheck {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
-}
-
 fn prepare_tail_runtime(
     state: &Arc<AppState>,
     query: &TailQuery,
     raw_query: Option<&str>,
-    encoding: TailStreamEncoding,
 ) -> Result<TailRuntime, Error> {
-    let gap_policy = match query.gap_policy.as_deref() {
-        None | Some("continue") => GapPolicy::Continue,
-        Some("error") => GapPolicy::Error,
+    let continue_on_gap = match query.gap_policy.as_deref() {
+        None | Some("continue") => true,
+        Some("error") => false,
         Some(_) => {
             return Err(Error::new(ErrorKind::Usage)
                 .with_message("invalid tail gap policy")
                 .with_hint("Use gap_policy=continue or gap_policy=error."));
         }
     };
-    if encoding == TailStreamEncoding::Lite3 && gap_policy == GapPolicy::Error {
-        return Err(Error::new(ErrorKind::Usage).with_message(
-            "remote Lite3 tails do not support gap_policy=error because the stream has no error frame",
-        ));
-    }
     let permit = acquire_tail_permit(state)?;
     let timeout_ms = query
         .timeout_ms
@@ -2373,18 +2200,13 @@ fn prepare_tail_runtime(
     let deadline = Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("tail timeout is out of range"))?;
-    let options = FollowOptions {
-        start: follow_query_start(query)?,
-        live: !query.finite.unwrap_or(false),
-        max_messages: query.max.map(|value| value as usize),
-        tags: parse_tags_from_query(raw_query),
-        timeout: Some(timeout),
-        gap_policy,
-        ..FollowOptions::default()
-    };
     Ok(TailRuntime {
         permit,
-        options,
+        selection: follow_query_start(query)?,
+        tags: parse_tags_from_query(raw_query),
+        live: !query.finite.unwrap_or(false),
+        limit: query.max.unwrap_or(u64::MAX),
+        continue_on_gap,
         deadline,
     })
 }
@@ -2407,36 +2229,21 @@ async fn spawn_tail_stream_response(
     state: &Arc<AppState>,
     pool_ref: PoolRef,
     runtime: TailRuntime,
-    encoding: TailStreamEncoding,
     grant: Option<AccessGrant>,
 ) -> Response {
     let client = state.client.clone();
-    let TailRuntime {
-        permit,
-        mut options,
-        deadline,
-    } = runtime;
-    options.cancel = grant.as_ref().map(AccessGrant::cancellation_flag);
+    let deadline = runtime.deadline;
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     let producer_grant = grant.clone();
     let (ready, opening) = tokio::sync::oneshot::channel();
     tokio::task::spawn_blocking(move || {
-        let _permit = permit;
         if Instant::now() >= deadline
             || producer_grant.as_ref().is_some_and(AccessGrant::is_revoked)
         {
             return;
         }
-        let result = client.open_pool(&pool_ref).and_then(|pool| {
-            stream_tail_bytes(
-                &pool,
-                options,
-                encoding,
-                &tx,
-                producer_grant.as_ref(),
-                deadline,
-                ready,
-            )
+        let result = client.open_pool(&pool_ref, false).and_then(|pool| {
+            stream_tail_bytes(&pool, runtime, &tx, producer_grant.as_ref(), ready)
         });
         if let Err(err) = result
             && !producer_grant.as_ref().is_some_and(AccessGrant::is_revoked)
@@ -2451,13 +2258,10 @@ async fn spawn_tail_stream_response(
         .take_while(move |_| !grant.as_ref().is_some_and(AccessGrant::is_revoked))
         .map(move |result| match result {
             Ok(bytes) => Ok(bytes),
-            Err(err) => match encode_tail_terminal_error(&err, encoding) {
-                Some(bytes) => Ok(bytes),
-                None => Err(std::io::Error::other(error_json_string(&err))),
-            },
+            Err(err) => Ok::<_, std::io::Error>(encode_sse_error(&err)),
         });
     let mut response = Response::new(Body::from_stream(stream));
-    apply_tail_response_headers(&mut response, encoding);
+    apply_sse_headers(&mut response);
     response
         .headers_mut()
         .insert("plasmite-version", HeaderValue::from_static("0"));
@@ -2466,57 +2270,75 @@ async fn spawn_tail_stream_response(
 
 fn stream_tail_bytes(
     pool: &plasmite::api::Pool,
-    mut options: FollowOptions,
-    encoding: TailStreamEncoding,
+    runtime: TailRuntime,
     tx: &mpsc::Sender<Result<Bytes, Error>>,
     grant: Option<&AccessGrant>,
-    deadline: Instant,
     ready: tokio::sync::oneshot::Sender<()>,
 ) -> Result<(), Error> {
-    if encoding == TailStreamEncoding::Sse {
-        // Private UI streams identify the actual file opened for this reader.
-        let info = ui_pool_info_json(&pool_file_name(&pool.info()?.path), pool)?;
-        let encoded = Bytes::from(format!("event: pool\ndata: {}\n\n", info));
-        if !send_tail_result(tx, Ok(encoded), grant, deadline) {
-            return Ok(());
-        }
+    let TailRuntime {
+        permit: _permit,
+        selection,
+        tags,
+        live,
+        mut limit,
+        continue_on_gap,
+        deadline,
+    } = runtime;
+    let pool_info = pool.info()?;
+    let info = ui_pool_info_json(&pool_file_name(&pool_info.path), pool)?;
+    let encoded = Bytes::from(format!("event: pool\ndata: {}\n\n", info));
+    if !send_tail_result(tx, Ok(encoded), grant, deadline) {
+        return Ok(());
     }
-    // Admission, producer scheduling, reads, and backpressure share one budget.
-    options.timeout = Some(deadline.saturating_duration_since(Instant::now()));
-    match encoding {
-        TailStreamEncoding::Jsonl | TailStreamEncoding::Sse => {
-            let mut tail = pool.follow(options);
-            let _ = ready.send(());
-            while let Some(message) = tail.next_message()? {
-                if grant.is_some_and(AccessGrant::is_revoked) {
-                    break;
-                }
-                let encoded = match encoding {
-                    TailStreamEncoding::Jsonl => encode_jsonl_message(message)?,
-                    TailStreamEncoding::Sse => encode_sse_message(message)?,
-                    TailStreamEncoding::Lite3 => unreachable!("handled in separate branch"),
-                };
-                if !send_tail_result(tx, Ok(encoded), grant, deadline) {
-                    break;
-                }
-            }
+    let open = |selection: Read| {
+        let mut selection = selection.tags(tags.iter().cloned());
+        if let Some(grant) = grant {
+            selection = selection.cancel(grant.cancellation_flag());
         }
-        TailStreamEncoding::Lite3 => {
-            let mut tail = pool.follow_lite3(options);
-            let _ = ready.send(());
-            while let Some(frame) = tail.next_frame()? {
-                if grant.is_some_and(AccessGrant::is_revoked) {
-                    break;
-                }
-                lite3::validate_bytes(&frame.payload)?;
-                let encoded = encode_lite3_stream_frame(&frame)?;
-                if !send_tail_result(tx, Ok(encoded), grant, deadline) {
-                    break;
-                }
-            }
+        if live {
+            pool.follow_lite3(selection)
+        } else {
+            pool.fetch_lite3(selection.until(pool_info.bounds.newest_seq.unwrap_or(0)))
         }
+    };
+    let mut selection = selection;
+    let mut ready = Some(ready);
+    loop {
+        let opened = open(selection);
+        if let Some(ready) = ready.take() {
+            let _ = ready.send(());
+        }
+        let error = match opened {
+            Err(error) => error,
+            Ok(mut reader) => loop {
+                if limit == 0 || tx.is_closed() || Instant::now() >= deadline {
+                    return Ok(());
+                }
+                let wait = Duration::from_millis(50)
+                    .min(deadline.saturating_duration_since(Instant::now()));
+                match reader.poll(wait) {
+                    Ok(ReadPoll::Message(frame)) => {
+                        let message = Message::from_lite3(frame.seq, frame.time, &frame.payload)?;
+                        if !send_tail_result(tx, Ok(encode_sse_message(message)?), grant, deadline)
+                        {
+                            return Ok(());
+                        }
+                        limit -= 1;
+                    }
+                    Ok(ReadPoll::Waiting) => {}
+                    Ok(ReadPoll::Complete | ReadPoll::Cancelled) => return Ok(()),
+                    Err(error) => break error,
+                }
+            },
+        };
+        if !(continue_on_gap && error.kind() == ErrorKind::RetentionGap) {
+            return Err(error);
+        }
+        let Some(next) = error.next_seq() else {
+            return Err(error);
+        };
+        selection = Read::since(Since::Seq(next));
     }
-    Ok(())
 }
 
 fn send_tail_result(
@@ -2566,52 +2388,25 @@ fn encode_sse_message(message: plasmite::api::Message) -> Result<Bytes, Error> {
     Ok(Bytes::from(frame))
 }
 
-fn encode_tail_terminal_error(err: &Error, encoding: TailStreamEncoding) -> Option<Bytes> {
-    match encoding {
-        TailStreamEncoding::Jsonl => {
-            let mut payload = error_json_string(err).into_bytes();
-            payload.push(b'\n');
-            Some(Bytes::from(payload))
-        }
-        TailStreamEncoding::Sse => {
-            // SSE terminal error frame keeps machine-readable error semantics after streaming starts.
-            let mut frame = b"event: error\ndata: ".to_vec();
-            frame.extend_from_slice(error_json_string(err).as_bytes());
-            frame.extend_from_slice(b"\n\n");
-            Some(Bytes::from(frame))
-        }
-        TailStreamEncoding::Lite3 => None,
-    }
+fn encode_sse_error(err: &Error) -> Bytes {
+    Bytes::from(format!(
+        "event: error\ndata: {}\n\n",
+        error_json_string(err)
+    ))
 }
 
-fn apply_tail_response_headers(response: &mut Response, encoding: TailStreamEncoding) {
-    match encoding {
-        TailStreamEncoding::Jsonl => {
-            response.headers_mut().insert(
-                "content-type",
-                HeaderValue::from_static("application/jsonl"),
-            );
-        }
-        TailStreamEncoding::Lite3 => {
-            response.headers_mut().insert(
-                "content-type",
-                HeaderValue::from_static("application/x-plasmite-lite3-stream"),
-            );
-        }
-        TailStreamEncoding::Sse => {
-            response.headers_mut().insert(
-                "content-type",
-                HeaderValue::from_static("text/event-stream"),
-            );
-            response.headers_mut().insert(
-                "cache-control",
-                HeaderValue::from_static("no-cache, no-transform"),
-            );
-            response
-                .headers_mut()
-                .insert("connection", HeaderValue::from_static("keep-alive"));
-        }
-    }
+fn apply_sse_headers(response: &mut Response) {
+    response.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_static("text/event-stream"),
+    );
+    response.headers_mut().insert(
+        "cache-control",
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    response
+        .headers_mut()
+        .insert("connection", HeaderValue::from_static("keep-alive"));
 }
 
 fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
@@ -2624,7 +2419,13 @@ fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
 }
 
 fn message_json(message: plasmite::api::Message) -> Value {
-    MessageWire::new(message.seq, message.time, message.meta.tags, message.data).into_json()
+    MessageWire::new(
+        message.seq,
+        message.time_rfc3339(),
+        message.meta.tags,
+        message.data,
+    )
+    .into_json()
 }
 
 fn normalize_tags(raw: Vec<String>) -> Vec<String> {
@@ -2678,21 +2479,6 @@ fn html_response(body: &str) -> Response {
     response
 }
 
-fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef) -> Result<Bytes, Error> {
-    let payload_len: u32 = frame.payload.len().try_into().map_err(|_| {
-        Error::new(ErrorKind::Usage).with_message("lite3 payload exceeds max frame length")
-    })?;
-    let header = Lite3FrameHeader {
-        seq: frame.seq,
-        timestamp_ns: frame.timestamp_ns,
-        payload_len,
-    };
-    let mut buf = Vec::with_capacity(LITE3_FRAME_HEADER_LEN + payload_len as usize);
-    buf.extend_from_slice(&header.encode());
-    buf.extend_from_slice(&frame.payload);
-    Ok(Bytes::from(buf))
-}
-
 fn error_json_string(err: &Error) -> String {
     serde_json::to_string(&json!({ "error": error_body(err) }))
         .unwrap_or_else(|_| "{\"error\":{\"kind\":\"Internal\",\"message\":\"error\"}}".to_string())
@@ -2731,6 +2517,8 @@ fn error_body(err: &Error) -> ErrorBody {
         path: err.path().map(|path| path.to_string_lossy().to_string()),
         seq: err.seq(),
         offset: err.offset(),
+        missing: err.missing(),
+        next_seq: err.next_seq(),
     }
 }
 
@@ -2761,7 +2549,6 @@ mod tests {
     use axum::extract::State;
     use axum::http::{HeaderMap, HeaderValue, Uri, header};
     use axum::response::IntoResponse;
-    use plasmite::api::PoolApiExt;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
     use tokio::sync::Semaphore;
@@ -2827,9 +2614,13 @@ mod tests {
                     .unwrap()
                     .parse()
                     .unwrap();
-                let frame = client.open_pool(&pool_ref).unwrap().get_lite3(seq).unwrap();
+                let frame = client
+                    .open_pool(&pool_ref, false)
+                    .unwrap()
+                    .get(seq)
+                    .unwrap();
                 assert_eq!(frame.payload, view.bytes());
-                assert_eq!(frame.timestamp_ns, timestamp);
+                assert_eq!(frame.time, timestamp);
                 assert!(
                     axum::body::to_bytes(response.into_body(), 65536)
                         .await
@@ -2878,7 +2669,14 @@ mod tests {
             .unwrap()
             .parse()
             .unwrap();
-        let retained = client.open_pool(&pool_ref).unwrap().get_view(seq).unwrap();
+        let retained = client
+            .open_pool(&pool_ref, false)
+            .unwrap()
+            .fetch_view(super::Read::since(super::Since::Seq(seq)))
+            .unwrap()
+            .next_view()
+            .unwrap()
+            .unwrap();
         assert_eq!(
             retained
                 .root()
@@ -2967,21 +2765,21 @@ mod tests {
     #[test]
     fn activity_ignores_map_reads_and_identifies_mcp_pool_use() {
         assert!(super::observes_pool_route("/v0/ui/pools/:pool/events"));
-        assert!(super::observes_pool_route("/v0/pools/:pool/follow"));
+        assert!(super::observes_pool_route("/v2/pools/:pool/follow"));
         for route in [
             "/v0/ui/activity",
             "/v0/ui/pools",
             "/v0/ui/pools/stream",
             "/v0/ui/pools/:pool/info",
-            "/v0/pools/:pool/info",
+            "/v2/pools/:pool",
         ] {
             assert!(!super::observes_pool_route(route));
         }
         assert_eq!(
             super::mcp_activity_pool(
-                &json!({"method":"tools/call","params":{"name":"plasmite_wait","arguments":{"pool":"events"}}})
+                &json!({"method":"tools/call","params":{"name":"plasmite_follow","arguments":{"pool":"events"}}})
             ),
-            Some(("events".to_owned(), "plasmite_wait".to_owned()))
+            Some(("events".to_owned(), "plasmite_follow".to_owned()))
         );
         assert_eq!(
             super::mcp_activity_pool(
@@ -3099,7 +2897,7 @@ mod tests {
 
     #[test]
     fn pool_snapshot_invalidates_equal_summary_layout_on_replacement() {
-        use plasmite::api::{AppendOptions, Durability, Pool, PoolApiExt, PoolOptions, PoolRef};
+        use plasmite::api::{AppendOptions, Durability, Pool, PoolOptions, PoolRef};
         let dir = tempfile::tempdir().unwrap();
         let client = LocalClient::new().with_pool_dir(dir.path());
         let name = PoolRef::name("same");
@@ -3108,9 +2906,13 @@ mod tests {
         let write = |large_first: bool| {
             let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024)).unwrap();
             for large in [large_first, !large_first] {
-                pool.append_json(
+                let view = plasmite::view::MessageView::encode(
                     &json!({"body": if large { "x".repeat(2000) } else { "x".into() }}),
                     &[],
+                )
+                .unwrap();
+                pool.append_with_options(
+                    view.bytes(),
                     AppendOptions::new(1_000_000_000, Durability::Fast),
                 )
                 .unwrap();
@@ -3334,13 +3136,9 @@ mod tests {
                     .run_authorized(Some(grant), move || {
                         started_tx.send(()).unwrap();
                         release_rx.recv().unwrap();
-                        let mut pool = client.open_pool(&pool_ref)?;
-                        pool.append_json_now(
-                            &json!({"admitted": true}),
-                            &[],
-                            plasmite::api::Durability::Fast,
-                        )
-                        .map(|message| message.seq)
+                        let mut pool = client.open_pool(&pool_ref, false)?;
+                        pool.feed(&json!({"admitted": true}), super::Feed::default())
+                            .map(|message| message.seq)
                     })
                     .await
             })
@@ -3360,9 +3158,12 @@ mod tests {
         let seq = admitted.await.unwrap().unwrap();
         assert_eq!(
             client
-                .open_pool(&pool_ref)
+                .open_pool(&pool_ref, false)
                 .unwrap()
-                .get_message(seq)
+                .fetch(super::Read::since(super::Since::Seq(seq)))
+                .unwrap()
+                .next_message()
+                .unwrap()
                 .unwrap()
                 .data,
             json!({"admitted": true})
@@ -3522,8 +3323,8 @@ mod tests {
             ServeMcpHandler::new(LocalClient::new().with_pool_dir(temp.path()), semaphore);
         let result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_wait".to_string(),
-                arguments: json!({"pool":"events","after_seq":0,"timeout_ms":10})
+                name: "plasmite_follow".to_string(),
+                arguments: json!({"pool":"events","timeout_ms":10})
                     .as_object()
                     .unwrap()
                     .clone(),
@@ -3562,8 +3363,8 @@ mod tests {
             let mut handler =
                 ServeMcpHandler::new(client, thread_semaphore).with_grant(Some(grant));
             let result = handler.call_tool(ToolCallRequest {
-                name: "plasmite_wait".into(),
-                arguments: json!({"pool":"events","after_seq":0,"timeout_ms":60_000})
+                name: "plasmite_follow".into(),
+                arguments: json!({"pool":"events","timeout_ms":60_000})
                     .as_object()
                     .unwrap()
                     .clone(),
@@ -3628,21 +3429,28 @@ mod tests {
     }
 }
 
-fn follow_query_start(query: &TailQuery) -> Result<plasmite::api::FollowStart, Error> {
-    use plasmite::api::FollowStart;
+fn follow_query_start(query: &TailQuery) -> Result<Read, Error> {
     if query.since_seq.is_some() && (query.start.is_some() || query.start_value.is_some()) {
         return Err(Error::new(ErrorKind::Usage).with_message("choose one follow start"));
     }
     if let Some(seq) = query.since_seq {
-        return Ok(FollowStart::Sequence(seq));
+        return Ok(Read::since(if seq == 0 {
+            Since::Oldest
+        } else {
+            Since::Seq(seq)
+        }));
     }
     let value = query.start_value.unwrap_or(0);
     match query.start.as_deref().unwrap_or("new") {
-        "new" if value == 0 => Ok(FollowStart::New),
-        "all" if value == 0 => Ok(FollowStart::all()),
-        "last" if query.start_value.is_some() => Ok(FollowStart::Last(value)),
-        "since" if query.start_value.is_some() => Ok(FollowStart::Since(value)),
-        "sequence" if query.start_value.is_some() => Ok(FollowStart::Sequence(value)),
+        "new" if value == 0 => Ok(Read::default()),
+        "all" if value == 0 => Ok(Read::since(Since::Oldest)),
+        "last" if query.start_value.is_some() => Ok(Read::last(value)),
+        "since" if query.start_value.is_some() => Ok(Read::since(Since::At(value))),
+        "sequence" if query.start_value.is_some() => Ok(Read::since(if value == 0 {
+            Since::Oldest
+        } else {
+            Since::Seq(value)
+        })),
         _ => Err(Error::new(ErrorKind::Usage)
             .with_message("invalid follow start or missing start_value")),
     }

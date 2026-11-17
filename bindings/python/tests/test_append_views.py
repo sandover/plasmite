@@ -26,7 +26,7 @@ class AppendViews(unittest.TestCase):
             "unicode": "é\0😀",
             "nested": [shared, shared],
         }
-        message = self.pool.append_view(data, ["tag", "nul\0tag"])
+        message = self.pool.feed_view(data, ["tag", "nul\0tag"])
         data["nested"][0]["value"] = 9
         self.assertEqual(message.data["nested"][0]["value"], 7)
         self.assertEqual(message.data["nested"][1]["value"], 7)
@@ -35,7 +35,7 @@ class AppendViews(unittest.TestCase):
         self.assertEqual(message.data["values"][4], (1 << 63) - 1)
         self.assertEqual(math.copysign(1, message.data["values"][-1]), -1)
         self.assertEqual(list(message.tags), ["tag", "nul\0tag"])
-        self.assertEqual(self.pool.get_view(message.seq).data, message.data)
+        self.assertEqual(self.pool._get_view(message.seq).data, message.data)
         child = message.data["nested"]
         del message
         self.pool.close()
@@ -46,7 +46,7 @@ class AppendViews(unittest.TestCase):
     def test_binary_inputs_are_snapshots(self):
         mutable = bytearray(b"mutable")
         buffer = memoryview(mutable)
-        message = self.pool.append_view({"a": b"immutable", "b": mutable, "c": buffer})
+        message = self.pool.feed_view({"a": b"immutable", "b": mutable, "c": buffer})
         mutable[:] = b"changed"
         self.assertEqual(
             plasmite.to_native(message.data),
@@ -55,13 +55,13 @@ class AppendViews(unittest.TestCase):
         self.assertTrue(message.data["b"].readonly)
         self.assertEqual(
             bytes(
-                self.pool.append_view({"slice": memoryview(b"abcd")[::2]}).data["slice"]
+                self.pool.feed_view({"slice": memoryview(b"abcd")[::2]}).data["slice"]
             ),
             b"ac",
         )
 
     def test_forwarding_and_logical_slices(self):
-        original = self.pool.append_view(
+        original = self.pool.feed_view(
             {
                 "nested": {"integer": (1 << 63) - 1, "text": "é"},
                 "array": [0, {"x": 1}, 2, {"x": 3}],
@@ -69,19 +69,19 @@ class AppendViews(unittest.TestCase):
             },
             ["original", "nul\0tag"],
         )
-        forwarded = self.pool.append_view(original)
+        forwarded = self.pool.feed_view(original)
         self.assertEqual(list(forwarded.tags), ["original", "nul\0tag"])
         self.assertEqual(bytes(memoryview(forwarded)), bytes(memoryview(original)))
-        retagged = self.pool.append_view(original, [])
+        retagged = self.pool.feed_view(original.data, [])
         self.assertEqual(list(retagged.tags), [])
         self.assertEqual(
             plasmite.to_native(retagged.data), plasmite.to_native(original.data)
         )
-        subtree = self.pool.append_view(original.data["nested"], ["subtree"])
+        subtree = self.pool.feed_view(original.data["nested"], ["subtree"])
         self.assertEqual(
             plasmite.to_native(subtree.data), {"integer": (1 << 63) - 1, "text": "é"}
         )
-        nested = self.pool.append_view(
+        nested = self.pool.feed_view(
             {
                 "object": original.data["nested"],
                 "array": original.data["array"],
@@ -108,7 +108,7 @@ class AppendViews(unittest.TestCase):
         self.assertEqual(plasmite.to_native(child), [{"x": 3}, {"x": 1}])
 
     def test_cycles_and_invalid_values_do_not_publish(self):
-        first = self.pool.append_view({}).seq
+        first = self.pool.feed_view({}).seq
         cycle = []
         cycle.append(cycle)
         for value in [
@@ -124,8 +124,8 @@ class AppendViews(unittest.TestCase):
             with self.assertRaises(
                 (ValueError, OverflowError, TypeError, plasmite.PlasmiteError)
             ):
-                self.pool.append_view(value)
-        self.assertEqual(self.pool.append_view({}).seq, first + 1)
+                self.pool.feed_view(value)
+        self.assertEqual(self.pool.feed_view({}).seq, first + 1)
 
     def test_subclasses_reject_without_running_hooks(self):
         calls = []
@@ -147,12 +147,12 @@ class AppendViews(unittest.TestCase):
 
         for value in [CustomList([1]), CustomInt(2), CustomString("text"), object()]:
             with self.assertRaises(TypeError):
-                self.pool.append_view({"custom": value})
+                self.pool.feed_view({"custom": value})
         with self.assertRaises(TypeError):
-            self.pool.append_view({CustomString("key"): 1})
+            self.pool.feed_view({CustomString("key"): 1})
         self.assertEqual(calls, [])
         # Existing JSON behavior stays available explicitly.
-        self.assertEqual(self.pool.append({"custom": CustomInt(2)}).data["custom"], 2)
+        self.assertEqual(self.pool.feed({"custom": CustomInt(2)}).data["custom"], 2)
 
     def test_tag_iterator_can_close_handle_before_native_use(self):
         def tags():
@@ -165,7 +165,7 @@ class AppendViews(unittest.TestCase):
 
         with patch.object(_views.backend, "append") as native_append:
             with self.assertRaises(plasmite.PlasmiteError) as caught:
-                self.pool.append_view({"value": 1}, tags())
+                self.pool.feed_view({"value": 1}, tags())
             native_append.assert_not_called()
         self.assertEqual(caught.exception.kind, plasmite.ErrorKind.USAGE)
         self.assertIn("pool is closed", str(caught.exception))
@@ -184,7 +184,7 @@ class AppendViews(unittest.TestCase):
 
         with patch.object(_views.backend, "append") as native_append:
             with self.assertRaises(plasmite.PlasmiteError) as caught:
-                self.pool.append_view({"value": 1}, durability=ClosePool())
+                self.pool.feed_view({"value": 1}, durability=ClosePool())
             native_append.assert_not_called()
         self.assertEqual(caught.exception.kind, plasmite.ErrorKind.USAGE)
         self.assertIn("pool is closed", str(caught.exception))
@@ -196,7 +196,7 @@ class AppendViews(unittest.TestCase):
             calls.append("tags")
             yield "large"
 
-        message = self.pool.append_view({"large": "x" * (1024 * 1024)}, tags())
+        message = self.pool.feed_view({"large": "x" * (1024 * 1024)}, tags())
         self.assertEqual(calls, ["tags"])
         self.assertEqual(len(message.data["large"]), 1024 * 1024)
         self.assertEqual(list(message.tags), ["large"])
@@ -215,11 +215,11 @@ import time
 import plasmite
 
 with TemporaryDirectory() as directory, plasmite.Client(directory) as client:
-    with client.pool("blocked", 1048576) as pool:
+    with client.open_pool("blocked", create=True) as pool:
         with (Path(directory) / "blocked.plasmite").open("r+b") as file:
             fcntl.flock(file, fcntl.LOCK_EX)
             output = []
-            worker = threading.Thread(target=lambda: output.append(pool.append_view({"value": 1})))
+            worker = threading.Thread(target=lambda: output.append(pool.feed_view({"value": 1})))
             worker.start()
             # The main Python thread must run while native append waits on flock.
             time.sleep(.05)
@@ -231,7 +231,7 @@ with TemporaryDirectory() as directory, plasmite.Client(directory) as client:
         subprocess.run([sys.executable, "-c", code], check=True, timeout=5)
 
     def test_udp_conversion_snapshots_mutable_bytes(self):
-        owner = self.pool.append_view({"value": 7})
+        owner = self.pool.feed_view({"value": 7})
         payload = bytearray(memoryview(owner))
         message = plasmite.UdpFrame(owner.seq, 1, memoryview(payload)).message()
         payload[:] = b"\0" * len(payload)
@@ -240,11 +240,11 @@ with TemporaryDirectory() as directory, plasmite.Client(directory) as client:
         self.assertEqual(message.seq, owner.seq)
 
     def test_legacy_dataclass_stays_editable(self):
-        legacy = self.pool.append({"value": 7})
+        legacy = self.pool.feed({"value": 7})
         self.assertIsInstance(legacy, plasmite.Message)
         legacy.data["value"] = 9
         self.assertEqual(legacy.data["value"], 9)
-        self.assertEqual(self.pool.get(legacy.seq).data["value"], 7)
+        self.assertEqual(plasmite.parse_message(self.pool._get_json(legacy.seq)).data["value"], 7)
 
 
 if __name__ == "__main__":

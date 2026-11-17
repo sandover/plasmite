@@ -5,7 +5,9 @@ package udp
 /*
 #cgo pkg-config: plasmite
 #cgo CFLAGS: -I${SRCDIR}/../../include
-#cgo LDFLAGS: -lplasmite
+#cgo darwin LDFLAGS: -lplasmite.2
+#cgo linux LDFLAGS: -l:libplasmite.so.2
+#cgo windows LDFLAGS: -lplasmite2
 #include "events.h"
 #include <stdlib.h>
 */
@@ -28,9 +30,6 @@ import (
 )
 
 type Error = api.Error
-type Start = api.UDPStart
-type StartKind = api.UDPStartKind
-type FollowOptions = api.UDPFollowOptions
 type Event = api.UDPEvent
 type Frame = api.UDPFrame
 
@@ -41,18 +40,10 @@ type ViewFrame = api.UDPViewFrame[*local.MessageView]
 type Gap = api.UDPGap
 type Progress = api.UDPProgress
 
-const (
-	StartNew      = api.UDPStartNew
-	StartLast     = api.UDPStartLast
-	StartSince    = api.UDPStartSince
-	StartSequence = api.UDPStartSequence
-)
-
-func NewFollowOptions() FollowOptions { return api.NewUDPFollowOptions() }
-func NewPosition() Start              { return api.UDPStartNewPosition() }
-func Last(count uint64) Start         { return api.UDPStartLastCount(count) }
-func Since(timestampNs uint64) Start  { return api.UDPStartSinceNs(timestampNs) }
-func Sequence(seq uint64) Start       { return api.UDPStartAtSequence(seq) }
+func Since(selection any) api.ReadOption { return api.Since(selection) }
+func At(timeNS uint64) api.Instant       { return api.At(timeNS) }
+func Last(count uint64) api.ReadOption   { return api.Last(count) }
+func Tags(tags ...string) api.ReadOption { return api.Tags(tags...) }
 
 var (
 	ErrClosed          = api.ErrClosed
@@ -79,6 +70,9 @@ type Follow struct {
 }
 
 func NewClient(endpoint string) (*Client, error) {
+	if major := C.plsm_abi_major(); major != 2 {
+		return nil, &Error{Kind: api.ErrorUsage, Message: fmt.Sprintf("Plasmite requires ABI major 2; found %d", major)}
+	}
 	if endpoint == "" || strings.ContainsRune(endpoint, '\x00') {
 		return nil, invalidArgument("endpoint is required and cannot contain NUL")
 	}
@@ -126,43 +120,7 @@ func (c *Client) Close() {
 	}
 }
 
-// SendJSON reports local validation and operating-system send errors only.
-// A nil error does not confirm that the server stored the message.
-func (p *Pool) SendJSON(value any, tags []string) error {
-	if p == nil {
-		return closedError("UDP pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return closedError("UDP pool")
-	}
-	for _, tag := range tags {
-		if strings.ContainsRune(tag, '\x00') {
-			return invalidArgument("tag cannot contain NUL")
-		}
-	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("plasmite: encode UDP payload: %w", err)
-	}
-	var data *C.uint8_t
-	if len(payload) > 0 {
-		data = (*C.uint8_t)(unsafe.Pointer(&payload[0]))
-	}
-	cTags, cleanup := cStringArray(tags)
-	defer cleanup()
-	var cErr *C.plsm_error_t
-	rc := C.plsm_udp_pool_send_json(p.ptr, data, C.size_t(len(payload)), cTags, C.size_t(len(tags)), &cErr)
-	runtime.KeepAlive(payload)
-	runtime.KeepAlive(tags)
-	if rc != 0 {
-		return fromCError(cErr)
-	}
-	return nil
-}
-
-func (p *Pool) SendLite3(payload []byte) error {
+func (p *Pool) FeedLite3(payload []byte) error {
 	if p == nil {
 		return closedError("UDP pool")
 	}
@@ -175,7 +133,7 @@ func (p *Pool) SendLite3(payload []byte) error {
 		return invalidArgument("Lite3 payload is required")
 	}
 	var cErr *C.plsm_error_t
-	rc := C.plsm_udp_pool_send_lite3(
+	rc := C.plsm_udp_pool_feed_lite3(
 		p.ptr,
 		(*C.uint8_t)(unsafe.Pointer(&payload[0])),
 		C.size_t(len(payload)),
@@ -188,23 +146,64 @@ func (p *Pool) SendLite3(payload []byte) error {
 	return nil
 }
 
-func (p *Pool) Follow(options FollowOptions) (*Follow, error) {
-	return p.follow(options, false, false)
+func (p *Pool) Feed(value any, tags []string, opts ...api.FeedOption) error {
+	if p == nil {
+		return closedError("UDP pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
+		return closedError("UDP pool")
+	}
+	var payload []byte
+	if message, ok := value.(*api.Message); ok && message != nil {
+		if tags != nil {
+			return &api.Error{Kind: api.ErrorUsage, Message: "cannot supply tags when forwarding a message"}
+		}
+		tags, payload = message.Tags(), message.Data
+	} else {
+		var err error
+		payload, err = json.Marshal(value)
+		if err != nil {
+			return &api.Error{Kind: api.ErrorUsage, Message: fmt.Sprintf("cannot encode feed value: %v", err)}
+		}
+	}
+	cTags, free := nativeview.TagSpans(tags)
+	defer free()
+	options := C.plsm_feed_options_t{
+		struct_size: C.uint32_t(C.sizeof_plsm_feed_options_t),
+		durability:  C.uint32_t(api.ApplyFeedOptions(opts...).Durability),
+		tags:        (*C.plsm_text_t)(cTags),
+		tags_len:    C.size_t(len(tags)),
+	}
+	var nativeErr *C.plsm_error_t
+	if C.plsm_udp_pool_feed_json(p.ptr, (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(payload))),
+		C.size_t(len(payload)), &options, &nativeErr) != 0 {
+		return fromCError(nativeErr)
+	}
+	return nil
 }
 
-// FollowRaw returns owned payloads and exact frame identity without decoding
-// Message. Progress, server skips, arrival order and cancellation match Follow.
-func (p *Pool) FollowRaw(options FollowOptions) (*Follow, error) {
-	return p.follow(options, true, false)
+func (p *Pool) Follow(opts ...api.ReadOption) (*Follow, error) {
+	return p.read(true, false, false, opts)
+}
+func (p *Pool) Fetch(opts ...api.ReadOption) (*Follow, error) {
+	return p.read(false, false, false, opts)
+}
+func (p *Pool) FollowView(opts ...api.ReadOption) (*Follow, error) {
+	return p.read(true, true, false, opts)
+}
+func (p *Pool) FetchView(opts ...api.ReadOption) (*Follow, error) {
+	return p.read(false, true, false, opts)
+}
+func (p *Pool) FollowLite3(opts ...api.ReadOption) (*Follow, error) {
+	return p.read(true, false, true, opts)
+}
+func (p *Pool) FetchLite3(opts ...api.ReadOption) (*Follow, error) {
+	return p.read(false, false, true, opts)
 }
 
-// FollowViews receives owned immutable DATA without JSON conversion. Its
-// controls, context cancellation and arrival-order policy match FollowRaw.
-func (p *Pool) FollowViews(options FollowOptions) (*Follow, error) {
-	return p.follow(options, false, true)
-}
-
-func (p *Pool) follow(options FollowOptions, raw bool, views bool) (*Follow, error) {
+func (p *Pool) read(live, views, raw bool, opts []api.ReadOption) (*Follow, error) {
 	if p == nil {
 		return nil, closedError("UDP pool")
 	}
@@ -213,27 +212,25 @@ func (p *Pool) follow(options FollowOptions, raw bool, views bool) (*Follow, err
 	if p.ptr == nil {
 		return nil, closedError("UDP pool")
 	}
-	if options.Start.Kind > api.UDPStartSequence {
-		return nil, invalidArgument("invalid UDP follow start kind")
+	var cfg api.ReadConfig
+	for _, opt := range opts {
+		if err := opt(&cfg); err != nil {
+			return nil, err
+		}
+	}
+	tags, free := nativeview.TagSpans(cfg.Tags)
+	defer free()
+	options := C.plsm_read_options_t{
+		struct_size: C.uint32_t(C.sizeof_plsm_read_options_t),
+		start_kind:  C.uint32_t(cfg.Kind),
+		start_value: C.uint64_t(cfg.Value),
+		tags:        (*C.plsm_text_t)(tags),
+		tags_len:    C.size_t(len(cfg.Tags)),
 	}
 	var out *C.plsm_udp_follow_t
-	var cErr *C.plsm_error_t
-	var rc C.int
-	if views {
-		rc = C.plsm_udp_pool_follow_views(p.ptr, C.uint32_t(options.Start.Kind), C.uint64_t(options.Start.Value), boolToUint32(!options.Finite), &out, &cErr)
-	} else {
-		rc = C.plsm_udp_pool_follow(
-			p.ptr,
-			C.uint32_t(options.Start.Kind),
-			C.uint64_t(options.Start.Value),
-			boolToUint32(!options.Finite),
-			&out,
-			&cErr,
-		)
-	}
-
-	if rc != 0 {
-		return nil, fromCError(cErr)
+	var nativeErr *C.plsm_error_t
+	if C.plsm_udp_pool_read(p.ptr, &options, boolToUint32(live), boolToUint32(views), &out, &nativeErr) != 0 {
+		return nil, fromCError(nativeErr)
 	}
 	return &Follow{ptr: out, raw: raw, views: views}, nil
 }
@@ -304,7 +301,7 @@ func (f *Follow) Next(ctx context.Context) (api.UDPEvent, error) {
 					return nil, err
 				}
 				view := local.AdoptSnapshot(snapshot)
-				return &ViewFrame{Seq: view.Seq(), TimestampNs: view.TimestampNs(), View: view}, nil
+				return &ViewFrame{Seq: view.Seq(), Time: view.Time(), View: view}, nil
 			}
 			return eventFromC(event, f.raw)
 		case 2:
@@ -362,7 +359,7 @@ func eventFromC(event C.plsm_udp_event_t, raw bool) (api.UDPEvent, error) {
 		if event.payload.data != nil && event.payload.len != 0 {
 			payload = C.GoBytes(unsafe.Pointer(event.payload.data), C.int(event.payload.len))
 		}
-		frame := &api.UDPFrame{Seq: uint64(event.seq), TimestampNs: uint64(event.timestamp_ns), Payload: payload}
+		frame := &api.UDPFrame{Seq: uint64(event.seq), Time: uint64(event.time), Payload: payload}
 		if raw {
 			return frame, nil
 		}
@@ -409,34 +406,12 @@ func copyAndFreeBuf(buf C.plsm_buf_t) []byte {
 	return data
 }
 
-func cStringArray(values []string) (**C.char, func()) {
-	if len(values) == 0 {
-		return nil, func() {}
-	}
-	// One C allocation owns all tag bytes. The pointer array contains only C
-	// pointers and remains pinned for the duration of the native call.
-	var data []byte
-	for _, value := range values {
-		data = append(data, value...)
-		data = append(data, 0)
-	}
-	base := C.CBytes(data)
-	cValues := make([]*C.char, len(values))
-	offset := 0
-	for i, value := range values {
-		cValues[i] = (*C.char)(unsafe.Add(base, offset))
-		offset += len(value) + 1
-	}
-	cleanup := func() { C.free(base) }
-	return (**C.char)(unsafe.Pointer(&cValues[0])), cleanup
-}
-
 func fromCError(cErr *C.plsm_error_t) *api.Error {
 	if cErr == nil {
 		return &api.Error{Kind: api.ErrorInternal, Message: "unknown error"}
 	}
 	defer C.plsm_error_free(cErr)
-	out := &api.Error{Kind: api.ErrorKind(cErr.kind)}
+	out := &api.Error{Kind: api.ErrorKind(cErr.kind), Missing: uint64(cErr.missing), NextSeq: uint64(cErr.next_seq)}
 	if cErr.message != nil {
 		out.Message = C.GoString(cErr.message)
 	}
@@ -478,5 +453,3 @@ func durationMillisCeil(value time.Duration) uint64 {
 	}
 	return uint64((value + time.Millisecond - 1) / time.Millisecond)
 }
-
-func All() Start { return Sequence(0) }

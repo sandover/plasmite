@@ -3,47 +3,30 @@
 use super::context::CliContext;
 use super::feed_support::{
     FeedIngestContext, RemoteFeedIngestContext, ingest_from_stdin, ingest_from_stdin_remote,
-    missing_feed_data_error, open_feed_reader,
+    missing_feed_data_error,
 };
 use super::message_stream::InputFormat;
 use super::output_support::{emit_lite3, emit_message};
 use super::result::CommandResult;
 use super::support::{
-    DEFAULT_POOL_SIZE, add_missing_pool_create_hint, add_missing_pool_hint, add_missing_seq_hint,
-    ensure_pool_dir, message_from_frame, message_to_json, parse_durability, parse_retry_config,
-    parse_size, remote_client, resolve_pool_target,
+    add_missing_pool_create_hint, add_missing_pool_hint, add_missing_seq_hint, message_from_frame,
+    message_to_json, parse_durability, remote_client, resolve_pool_target,
 };
 use crate::PoolTarget;
-use plasmite::api::{Error, ErrorKind, Pool, PoolOptions, PoolRef};
+use plasmite::api::{Error, ErrorKind, LocalClient, Pool, PoolRef};
 use std::io::{self, IsTerminal, Read};
 
 pub(super) struct FeedArgs {
     pub(super) pool: String,
     pub(super) tags: Vec<String>,
     pub(super) data: Option<String>,
-    pub(super) file: Option<String>,
     pub(super) durability: String,
     pub(super) create: bool,
-    pub(super) create_size: Option<String>,
-    pub(super) retry: u32,
-    pub(super) retry_delay: Option<String>,
     pub(super) input: InputFormat,
 }
 
-pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandResult, Error> {
-    args.create |= args.create_size.is_some();
+pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult, Error> {
     let target = resolve_pool_target(&args.pool, context.optional_pool_dir())?;
-    if args.create && matches!(target, PoolTarget::Remote { .. }) {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote feed does not support --create or --create-size")
-            .with_hint("Create the pool on the server with pool create."));
-    }
-
-    if args.retry_delay.is_some() && args.retry == 0 {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--retry-delay requires --retry")
-            .with_hint("Add --retry or remove --retry-delay."));
-    }
     if context.output_mode() == super::output::OutputMode::Lite3Raw {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("raw Lite3 output requires fetch")
@@ -53,28 +36,18 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
         && (!args.tags.is_empty() || args.data.is_some())
     {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("binary input requires a file or pipe of complete messages")
+            .with_message("binary input requires complete messages on stdin")
             .with_hint("Remove --tag and the inline argument for Lite3 input."));
     }
     let durability = parse_durability(&args.durability)?;
     if matches!(target, PoolTarget::Udp { .. })
-        && (args.create
-            || args.create_size.is_some()
-            || args.retry > 0
-            || args.retry_delay.is_some()
-            || durability != plasmite::api::Durability::Fast)
+        && (args.create || durability != plasmite::api::Durability::Fast)
     {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("UDP feed does not support create, retry, or flush durability")
-            .with_hint(
-                "Remove --create, --create-size, --retry, --retry-delay, and --durability flush.",
-            ));
+            .with_message("UDP feed does not support --create or flush durability"));
     }
-    let retry_config = parse_retry_config(args.retry, args.retry_delay.as_deref())?;
     let reader: Box<dyn Read> = if let Some(data) = &args.data {
         Box::new(io::Cursor::new(data.as_bytes()))
-    } else if let Some(file) = &args.file {
-        open_feed_reader(file)?
     } else if !io::stdin().is_terminal() {
         Box::new(io::stdin())
     } else {
@@ -82,30 +55,14 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
     };
     match target {
         PoolTarget::LocalPath(path) => {
-            let mut pool = match Pool::open(&path) {
-                Ok(pool) => pool,
-                Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
-                    if let Some(directory) = context.optional_pool_dir() {
-                        ensure_pool_dir(directory)?;
-                    }
-                    let size = args
-                        .create_size
-                        .as_deref()
-                        .map(parse_size)
-                        .transpose()?
-                        .unwrap_or(DEFAULT_POOL_SIZE);
-                    Pool::create(&path, PoolOptions::new(size))?
-                }
-                Err(err) => {
-                    return Err(add_missing_pool_create_hint(err));
-                }
-            };
+            let mut pool = LocalClient::new()
+                .open_pool(&PoolRef::path(path), args.create)
+                .map_err(add_missing_pool_create_hint)?;
             ingest_from_stdin(
                 reader,
                 FeedIngestContext {
                     tags: &args.tags,
                     durability,
-                    retry_config,
                     pool_handle: &mut pool,
                     color_mode: context.color_mode(),
                     output_mode: context.output_mode(),
@@ -121,14 +78,13 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
         } => {
             let client = remote_client(base_url)?;
             let pool = client
-                .open_pool(&PoolRef::name(&name))
+                .open_pool(&PoolRef::name(&name), args.create)
                 .map_err(|err| add_missing_pool_hint(err, &args.pool))?;
             ingest_from_stdin_remote(
                 reader,
                 RemoteFeedIngestContext {
                     tags: &args.tags,
                     durability,
-                    retry_config,
                     remote_pool: &pool,
                     color_mode: context.color_mode(),
                     output_mode: context.output_mode(),
@@ -161,26 +117,44 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
     Ok(CommandResult::ok())
 }
 
-pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<CommandResult, Error> {
+pub(super) fn fetch(
+    pool: &str,
+    seq: Option<u64>,
+    since: Option<&str>,
+    last: Option<u64>,
+    tags: Vec<String>,
+    context: &CliContext,
+) -> Result<CommandResult, Error> {
+    use plasmite::api::{Read as ReadOptions, Since};
+
+    let mode = context.output_mode();
+    if mode == super::output::OutputMode::Lite3Raw && seq.is_none() {
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("lite3-raw requires an exact sequence")
+        );
+    }
+    let options = match (seq, since, last) {
+        (Some(seq), _, _) => ReadOptions::since(Since::Seq(seq)),
+        (_, Some(since), _) => ReadOptions::since(since.parse()?),
+        (_, _, Some(last)) => ReadOptions::last(last),
+        _ => ReadOptions::new(),
+    }
+    .tags(tags);
+    let mut found = false;
     match resolve_pool_target(pool, context.optional_pool_dir())? {
         PoolTarget::LocalPath(path) => {
             let handle = Pool::open(&path).map_err(|err| add_missing_pool_hint(err, pool))?;
-            let frame = handle
-                .get(seq)
-                .map_err(|err| add_missing_seq_hint(err, pool))?;
-            if context.output_mode().is_binary() {
-                emit_lite3(
-                    frame.seq,
-                    frame.timestamp_ns,
-                    &frame.payload,
-                    context.output_mode(),
-                )?;
-            } else {
-                emit_message(
-                    message_from_frame(&frame)?,
-                    context.output_mode(),
-                    context.color_mode(),
-                )?;
+            for frame in handle.fetch_lite3(options)? {
+                let frame = frame?;
+                if mode.is_binary() {
+                    emit_lite3(frame.seq, frame.time, &frame.payload, mode)?;
+                } else {
+                    emit_message(message_from_frame(&frame)?, mode, context.color_mode())?;
+                }
+                found = true;
+                if seq.is_some() {
+                    break;
+                }
             }
         }
         PoolTarget::Remote {
@@ -189,37 +163,80 @@ pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<Comman
         } => {
             let client = remote_client(base_url)?;
             let handle = client
-                .open_pool(&PoolRef::name(name))
+                .open_pool(&PoolRef::name(name), false)
                 .map_err(|err| add_missing_pool_hint(err, pool))?;
-            if context.output_mode().is_binary() {
-                if context.output_mode() == super::output::OutputMode::Lite3Raw {
-                    let payload = handle
-                        .get_lite3(seq)
-                        .map_err(|err| add_missing_seq_hint(err, pool))?;
-                    emit_lite3(seq, 0, &payload, context.output_mode())?;
-                } else {
-                    let frame = handle
-                        .get_lite3_frame(seq)
-                        .map_err(|err| add_missing_seq_hint(err, pool))?;
-                    emit_lite3(
-                        frame.seq,
-                        frame.timestamp_ns,
-                        &frame.payload,
-                        context.output_mode(),
-                    )?;
+            if mode.is_binary() {
+                for frame in handle.fetch_lite3(options)? {
+                    let frame = frame?;
+                    emit_lite3(frame.seq, frame.time, &frame.payload, mode)?;
+                    found = true;
+                    if seq.is_some() {
+                        break;
+                    }
                 }
             } else {
-                let message = handle
-                    .get_message(seq)
-                    .map_err(|err| add_missing_seq_hint(err, pool))?;
-                emit_message(
-                    message_to_json(message),
-                    context.output_mode(),
-                    context.color_mode(),
-                )?;
+                for message in handle.fetch(options)? {
+                    emit_message(message_to_json(message?), mode, context.color_mode())?;
+                    found = true;
+                    if seq.is_some() {
+                        break;
+                    }
+                }
             }
         }
-        PoolTarget::Udp { .. } => return Err(super::support::udp_unsupported()),
+        PoolTarget::Udp {
+            endpoint,
+            pool: name,
+        } => {
+            let handle =
+                plasmite::api::UdpClient::new(endpoint)?.open_pool(&PoolRef::name(name))?;
+            let mut reader = handle.fetch(options)?;
+            let mut skipped = false;
+            while let Some(event) = reader.next_event()? {
+                match event {
+                    plasmite::api::UdpEvent::Frame(frame) => {
+                        if mode.is_binary() {
+                            emit_lite3(frame.seq, frame.time, &frame.payload, mode)?;
+                        } else {
+                            emit_message(
+                                message_to_json(frame.message()?),
+                                mode,
+                                context.color_mode(),
+                            )?;
+                        }
+                        found = true;
+                        if seq.is_some() {
+                            break;
+                        }
+                    }
+                    plasmite::api::UdpEvent::Gap {
+                        first,
+                        last,
+                        reason,
+                    } => {
+                        skipped = true;
+                        super::stream_support::report_udp_skip(
+                            "fetch", pool, first, last, reason, context,
+                        );
+                    }
+                    plasmite::api::UdpEvent::Progress { .. } => {}
+                }
+            }
+            if skipped {
+                return Ok(CommandResult::with_code(1));
+            }
+        }
+    }
+    if let Some(seq) = seq.filter(|_| !found) {
+        return Err(add_missing_seq_hint(
+            Error::new(ErrorKind::NotFound)
+                .with_message("message not found")
+                .with_seq(seq),
+            pool,
+        ));
+    }
+    if mode == super::output::OutputMode::Lite3 {
+        super::output::emit_lite3_header()?;
     }
     Ok(CommandResult::ok())
 }

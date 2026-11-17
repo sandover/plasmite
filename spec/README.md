@@ -2,6 +2,7 @@
 
 Normative contracts are versioned under `spec/`.
 
+- [Plasmite 2.0 contract](v2/SPEC.md), the target for the 2.0 implementation.
 - CLI contract (1.x; historical path): `spec/v0/SPEC.md`
 - UDP input contract (v0): `spec/udp/v0/SPEC.md`
 - [UDP transport v1](udp/v1/SPEC.md): read when changing native UDP send/follow, subscription controls, or delivery events.

@@ -53,7 +53,7 @@ Rust now enables serde_json's `float_roundtrip` feature. Object reads preserve
 the stored float, and direct JSON output formats it once. This corrects the
 observable result; it deliberately removes the old parser's extra rounding.
 The [API contract](../../../../spec/api/v0/SPEC.md#stored-numbers-and-json-reads)
-and [migration note](../../../record/upgrading-next-major.md#json-reads-preserve-stored-floating-point-values)
+and [migration note](../../../record/upgrading-2.0.md#json-reads-preserve-stored-floating-point-values)
 record that policy and the existing signed-integer/binary64 payload range.
 Exact unsigned 64-bit envelope identity keeps its separate representation.
 

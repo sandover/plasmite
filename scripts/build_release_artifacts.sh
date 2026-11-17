@@ -40,7 +40,26 @@ if [[ $# -eq 2 ]]; then
   build_static=true
 fi
 
-cargo build --release --target "$target" --bins --lib
+# Git Bash has its own link.exe. Put the configured Visual C++ linker first.
+if [[ "$target" == *windows-msvc && -n "${VCToolsInstallDir:-}" ]]; then
+  msvc_dir="$(cygpath -u "$VCToolsInstallDir")"
+  export PATH="$msvc_dir/bin/Hostx64/x64:$PATH"
+fi
+cargo build --release --locked --target "$target" --bins --lib
+
+if [[ "$target" == *windows-msvc ]]; then
+  (
+    cd "$root_dir/target/$target/release"
+    cp plasmite.dll plasmite2.dll
+    # Cargo's import library names plasmite.dll. Generate one that names the
+    # distributed DLL and includes exactly the exports present in that build.
+    exports="$(dumpbin.exe -nologo -exports plasmite2.dll | awk '/^[[:space:]]*[0-9]+[[:space:]]+[[:xdigit:]]+[[:space:]]+[[:xdigit:]]+[[:space:]]+plsm_/ { print $4 }')"
+    [[ -n "$exports" ]] || { echo "no Plasmite exports found in plasmite2.dll" >&2; exit 1; }
+    trap 'rm -f plasmite2.def plasmite2.exp' EXIT
+    printf 'LIBRARY plasmite2.dll\nEXPORTS\n%s\n' "$exports" > plasmite2.def
+    lib.exe -nologo -machine:x64 -def:plasmite2.def -out:plasmite2.lib
+  )
+fi
 
 if [[ "$build_static" == true ]]; then
   case "$target" in

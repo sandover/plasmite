@@ -3,7 +3,6 @@
 # Key exports: plasmite_normalize_sdk_dir <input-dir> <staging-dir> [context-label].
 # Role: Convert raw cargo output layouts into stable SDK bin/lib layout when needed.
 # Invariants: Returned directory always contains bin/plasmite(.exe) + lib shared library.
-# Invariants: Windows staged SDKs preserve import-library artifacts needed for relinking.
 # Invariants: Normalized SDK inputs are returned unchanged and are never copied.
 # Invariants: Staged outputs only include required runtime artifacts and optional static library.
 # Notes: Intended to be sourced by scripts; emits actionable errors to stderr.
@@ -29,7 +28,7 @@ plasmite_normalize_sdk_dir() {
       echo "error: ${context_label} missing CLI binary under: $input_dir/bin" >&2
       return 1
     fi
-    if [[ ! -f "$input_dir/lib/libplasmite.dylib" && ! -f "$input_dir/lib/libplasmite.so" && ! -f "$input_dir/lib/plasmite.dll" ]]; then
+    if [[ ! -f "$input_dir/lib/libplasmite.2.dylib" && ! -f "$input_dir/lib/libplasmite.so.2" && ! -f "$input_dir/lib/plasmite2.dll" ]]; then
       echo "error: ${context_label} missing shared library under: $input_dir/lib" >&2
       return 1
     fi
@@ -59,22 +58,18 @@ plasmite_normalize_sdk_dir() {
   fi
 
   if [[ -f "$input_dir/plasmite.dll" ]]; then
-    cp "$input_dir/plasmite.dll" "$staging_dir/lib/plasmite.dll"
-    if [[ -f "$input_dir/plasmite.dll.lib" ]]; then
-      cp "$input_dir/plasmite.dll.lib" "$staging_dir/lib/plasmite.dll.lib"
+    if [[ -f "$input_dir/plasmite2.dll" ]]; then
+      cp "$input_dir/plasmite2.dll" "$staging_dir/lib/plasmite2.dll"
+    else
+      cp "$input_dir/plasmite.dll" "$staging_dir/lib/plasmite2.dll"
     fi
-    if [[ -f "$input_dir/plasmite.lib" ]]; then
-      cp "$input_dir/plasmite.lib" "$staging_dir/lib/plasmite.lib"
-    fi
-    if [[ -f "$staging_dir/lib/plasmite.dll.lib" && ! -f "$staging_dir/lib/plasmite.lib" ]]; then
-      cp "$staging_dir/lib/plasmite.dll.lib" "$staging_dir/lib/plasmite.lib"
-    elif [[ -f "$staging_dir/lib/plasmite.lib" && ! -f "$staging_dir/lib/plasmite.dll.lib" ]]; then
-      cp "$staging_dir/lib/plasmite.lib" "$staging_dir/lib/plasmite.dll.lib"
+    if [[ -f "$input_dir/plasmite2.lib" ]]; then
+      cp "$input_dir/plasmite2.lib" "$staging_dir/lib/plasmite2.lib"
     fi
   elif [[ -f "$input_dir/libplasmite.dylib" ]]; then
-    cp "$input_dir/libplasmite.dylib" "$staging_dir/lib/libplasmite.dylib"
+    cp "$input_dir/libplasmite.dylib" "$staging_dir/lib/libplasmite.2.dylib"
   else
-    cp "$input_dir/libplasmite.so" "$staging_dir/lib/libplasmite.so"
+    cp "$input_dir/libplasmite.so" "$staging_dir/lib/libplasmite.so.2"
   fi
 
   if [[ -f "$input_dir/libplasmite.a" ]]; then

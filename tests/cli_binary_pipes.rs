@@ -1,6 +1,6 @@
 //! Verify exact Lite3 payloads across local and HTTP CLI streams.
 pub mod support;
-use plasmite::api::{AppendOptions, Durability, Pool, PoolApiExt, PoolOptions, lite3};
+use plasmite::api::{AppendOptions, Durability, Pool, PoolOptions, lite3};
 use support::cli::*;
 
 fn append(pool: &mut Pool, value: Value, tags: &[String]) -> Vec<u8> {
@@ -10,7 +10,7 @@ fn append(pool: &mut Pool, value: Value, tags: &[String]) -> Vec<u8> {
         .to_vec();
     // Valid documents may retain unused bytes; a copying pipe must preserve them.
     payload.extend_from_slice(&[0, 0, 0]);
-    pool.append_lite3(&payload, AppendOptions::new(12, Durability::Fast))
+    pool.append_with_options(&payload, AppendOptions::new(12, Durability::Fast))
         .unwrap();
     payload
 }
@@ -21,11 +21,10 @@ fn pipe(directory: &Path, source: &str, destination: &str, format: &str) -> std:
             .args([
                 "--dir",
                 directory.to_str().unwrap(),
-                "follow",
+                "fetch",
                 source,
-                "--tail",
+                "--last",
                 "2",
-                "--no-follow",
                 "--format",
                 "lite3",
             ])
@@ -88,7 +87,7 @@ fn local_and_http_binary_pipes_preserve_exact_bytes_and_assign_identity() {
         assert_eq!(messages.len(), 2);
         for (index, payload) in original.iter().enumerate() {
             let seq = index as u64 + 2;
-            assert_eq!(destination.get_lite3(seq).unwrap().payload, *payload);
+            assert_eq!(destination.get(seq).unwrap().payload, *payload);
             assert_eq!(messages[index]["seq"], seq);
             assert_eq!(messages[index]["meta"]["tags"], json!(["sensor"]));
             assert_eq!(messages[index]["data"]["temperature"], 20 + index as u64);
@@ -123,14 +122,15 @@ fn binary_feed_receipts_report_the_committed_identity_and_original_payload() {
         .unwrap();
         append(&mut pool, json!({"existing":true}), &[]);
         let output = pipe(directory, "source", &target, "lite3");
-        let mut expected = b"PLS1".to_vec();
+        let mut expected = b"PLS2".to_vec();
         for (seq, payload) in (2..).zip(&payloads) {
-            let stored = pool.get_lite3(seq).unwrap();
+            let stored = pool.get(seq).unwrap();
             assert_eq!(&stored.payload, payload);
-            assert_ne!(stored.timestamp_ns, 12, "feed assigns destination time");
+            assert_ne!(stored.time, 12, "feed assigns destination time");
+            expected.push(b'M');
+            expected.extend_from_slice(&((payload.len() + 16) as u32).to_be_bytes());
             expected.extend_from_slice(&seq.to_be_bytes());
-            expected.extend_from_slice(&stored.timestamp_ns.to_be_bytes());
-            expected.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+            expected.extend_from_slice(&stored.time.to_be_bytes());
             expected.extend_from_slice(payload);
         }
         assert_eq!(output.stdout, expected);
@@ -178,12 +178,16 @@ fn framed_fetch_matches_local_and_http_and_truncation_keeps_prior_appends() {
     assert!(local.status.success());
     assert!(remote.status.success());
     assert_eq!(local.stdout, remote.stdout);
-    assert_eq!(&local.stdout[..4], b"PLS1");
-    let stored = source.get_lite3(1).unwrap();
-    assert_eq!(&local.stdout[4..12], &1u64.to_be_bytes());
-    assert_eq!(&local.stdout[12..20], &stored.timestamp_ns.to_be_bytes());
-    assert_eq!(&local.stdout[20..24], &(payload.len() as u32).to_be_bytes());
-    assert_eq!(&local.stdout[24..], payload.as_slice());
+    assert_eq!(&local.stdout[..4], b"PLS2");
+    let stored = source.get(1).unwrap();
+    assert_eq!(local.stdout[4], b'M');
+    assert_eq!(
+        &local.stdout[5..9],
+        &((payload.len() + 16) as u32).to_be_bytes()
+    );
+    assert_eq!(&local.stdout[9..17], &1u64.to_be_bytes());
+    assert_eq!(&local.stdout[17..25], &stored.time.to_be_bytes());
+    assert_eq!(&local.stdout[25..], payload.as_slice());
     let mut truncated = local.stdout.clone();
     truncated.extend_from_slice(&[0, 0]); // The next frame's header ends early.
     let mut feed = KillOnDrop(
@@ -197,6 +201,25 @@ fn framed_fetch_matches_local_and_http_and_truncation_keeps_prior_appends() {
     );
     feed.0.stdin.take().unwrap().write_all(&truncated).unwrap();
     assert!(!wait_within(&mut feed.0, Duration::from_secs(5), "truncated stream").success());
-    assert_eq!(destination.get_lite3(1).unwrap().payload, payload);
-    assert!(destination.get_lite3(2).is_err());
+    assert_eq!(destination.get(1).unwrap().payload, payload);
+    assert!(destination.get(2).is_err());
+}
+
+#[test]
+fn empty_lite3_fetch_writes_stream_header() {
+    let temp = tempfile::tempdir().unwrap();
+    Pool::create(temp.path().join("empty.plasmite"), PoolOptions::new(65536)).unwrap();
+    let output = cmd()
+        .args([
+            "--dir",
+            temp.path().to_str().unwrap(),
+            "fetch",
+            "empty",
+            "--format",
+            "lite3",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(output.stdout, b"PLS2");
 }

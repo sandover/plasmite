@@ -279,8 +279,9 @@ impl PoolOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Durability {
+    #[default]
     Fast,
     Flush,
 }
@@ -902,7 +903,7 @@ impl Pool {
         if destination.len() >= len {
             destination[..len].copy_from_slice(frame.payload);
         }
-        Ok((len, frame.timestamp_ns, frame.flags))
+        Ok((len, frame.time, frame.flags))
     }
 
     /// Hold an exclusive pool lock until the returned guard is dropped.
@@ -1021,7 +1022,7 @@ impl Pool {
     }
 
     fn frame_timestamp_ns_for_seq(&self, seq: u64) -> Option<u64> {
-        self.get(seq).ok().map(|frame| frame.timestamp_ns)
+        self.get(seq).ok().map(|frame| frame.time)
     }
 }
 
@@ -2437,7 +2438,7 @@ mod tests {
         options.poll_interval = Duration::from_millis(5);
         options.timeout = Some(Duration::from_secs(3));
         options.cancel = Some(Arc::clone(&cancelled));
-        let mut tail = reader.follow(options);
+        let mut tail = reader.follow_legacy(options);
         // The separate process registers its waiter before any append.
         fs::write(marker("ready"), b"ready").expect("ready");
         for expected in 1..=128 {
@@ -3087,7 +3088,7 @@ mod tests {
                     let payload_seq =
                         u64::from_le_bytes(frame.payload.as_slice().try_into().expect("payload"));
                     assert_eq!(frame.seq, payload_seq);
-                    assert_eq!(frame.timestamp_ns, payload_seq);
+                    assert_eq!(frame.time, payload_seq);
                 }
                 CursorResult::WouldBlock => thread::yield_now(),
                 CursorResult::FellBehind => {}

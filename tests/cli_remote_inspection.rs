@@ -1,17 +1,16 @@
 //! Black-box coverage for local and remote pool inspection and destination access.
 
 pub mod support;
-use plasmite::api::{Durability, LocalClient, PoolApiExt, PoolOptions, PoolRef};
+use plasmite::api::{LocalClient, PoolOptions, PoolRef};
 use support::cli::*;
 
 fn create_pool(directory: &Path, name: &str) {
     std::fs::create_dir_all(directory).expect("pool directory");
     let client = LocalClient::new().with_pool_dir(directory);
-    client
+    let mut pool = client
         .create_pool(&PoolRef::name(name), PoolOptions::new(1024 * 1024))
         .expect("create pool");
-    let mut pool = client.open_pool(&PoolRef::name(name)).expect("open pool");
-    pool.append_json_now(&json!({"hello": "world"}), &[], Durability::Fast)
+    pool.feed(&json!({"hello": "world"}), plasmite::api::Feed::default())
         .expect("append");
 }
 

@@ -1,7 +1,7 @@
 /*
 Purpose: Exercise the Node cookbook snippet path in smoke automation.
 Key Exports: main (script entrypoint).
-Role: Validate local client.pool(), typed append return fields, and not-found handling.
+Role: Validate create-on-open, the feed result, and missing-pool errors.
 Invariants: Runs against local pool directories only; no network usage.
 Invariants: Produces deterministic JSON output for shell assertions.
 Notes: Designed for scripts/cookbook_smoke.sh integration.
@@ -20,8 +20,8 @@ async function main() {
   const client = new Client(poolDir);
   let pool = null;
   try {
-    pool = client.pool("cookbook-smoke", 1024 * 1024);
-    const msg = pool.append({ task: "resize", id: 1 }, ["cookbook"]);
+    pool = client.openPool("cookbook-smoke", { create: true });
+    const msg = await pool.feed({ task: "resize", id: 1 }, { tags: ["cookbook"] });
     if (msg.seq < 1) {
       throw new Error("expected positive seq");
     }

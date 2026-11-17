@@ -41,8 +41,11 @@ class BuildPyWithNativeBundle(build_py):
 
     _NATIVE_FILES = (
         "plasmite.dll",
+        "plasmite2.dll",
         "libplasmite.dylib",
+        "libplasmite.2.dylib",
         "libplasmite.so",
+        "libplasmite.so.2",
         "libplasmite.a",
         "plasmite.exe",
         "plasmite",
@@ -67,20 +70,20 @@ class BuildPyWithNativeBundle(build_py):
             if candidate.exists():
                 candidate.unlink()
 
-        for src in self._native_candidates(project_root):
+        for src, name in self._native_candidates(project_root):
             if src.is_file():
-                dst = package_native_dir / src.name
+                dst = package_native_dir / name
                 shutil.copy2(src, dst)
                 if src.name == "plasmite":
                     dst.chmod(0o755)
 
-    def _native_candidates(self, project_root: Path) -> list[Path]:
+    def _native_candidates(self, project_root: Path) -> list[tuple[Path, str]]:
         if sys.platform == "win32":
-            lib_name, cli_name = "plasmite.dll", "plasmite.exe"
+            lib_name, cargo_name, cli_name = "plasmite2.dll", "plasmite.dll", "plasmite.exe"
         elif sys.platform == "darwin":
-            lib_name, cli_name = "libplasmite.dylib", "plasmite"
+            lib_name, cargo_name, cli_name = "libplasmite.2.dylib", "libplasmite.dylib", "plasmite"
         elif sys.platform.startswith("linux"):
-            lib_name, cli_name = "libplasmite.so", "plasmite"
+            lib_name, cargo_name, cli_name = "libplasmite.so.2", "libplasmite.so", "plasmite"
         else:
             return []
 
@@ -88,15 +91,15 @@ class BuildPyWithNativeBundle(build_py):
         if sdk_dir_env:
             sdk_dir = Path(sdk_dir_env)
             return [
-                sdk_dir / "lib" / lib_name,
-                sdk_dir / "bin" / cli_name,
+                (sdk_dir / "lib" / lib_name, lib_name),
+                (sdk_dir / "bin" / cli_name, cli_name),
             ]
 
         repo_root = project_root.parent.parent
         target_debug = repo_root / "target" / "debug"
         return [
-            target_debug / lib_name,
-            target_debug / cli_name,
+            (target_debug / cargo_name, lib_name),
+            (target_debug / cli_name, cli_name),
         ]
 
 
@@ -136,7 +139,7 @@ header = next(
         directory
         for directory in header_directories
         if (directory / "plasmite.h").is_file()
-        and "plsm_pool_get_view" in (directory / "plasmite.h").read_text()
+        and "plsm_pool_fetch_view" in (directory / "plasmite.h").read_text()
     ),
     None,
 )

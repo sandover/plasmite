@@ -31,7 +31,6 @@ fn top_level_help_orients_and_routes_readers() {
         "mcp",
         "fetch",
         "follow",
-        "tap",
         "duplex",
         "doctor",
         "version",
@@ -81,7 +80,6 @@ fn every_public_command_has_usable_help() {
         (&["mcp", "--help"], "plasmite mcp"),
         (&["fetch", "--help"], "plasmite fetch"),
         (&["follow", "--help"], "plasmite follow"),
-        (&["tap", "--help"], "plasmite tap"),
         (&["duplex", "--help"], "plasmite duplex"),
         (&["doctor", "--help"], "plasmite doctor"),
         (&["version", "--help"], "plasmite version"),
@@ -110,28 +108,14 @@ fn short_help_exposes_material_command_constraints() {
         (
             &["feed", "-h"],
             &[
-                "creates if missing",
-                "requires --retry > 0",
+                "Create the pool if it is missing",
                 "Choose one input source",
                 "Invalid input stops immediately",
             ],
         ),
         (
             &["follow", "-h"],
-            &[
-                "finite SPEED >= 0",
-                "requires --tail or --since",
-                "HTTP(S) refs reject --create",
-                "Exit 124",
-            ],
-        ),
-        (
-            &["tap", "-h"],
-            &[
-                "<POOL> -- <COMMAND>...",
-                "creates if missing",
-                "wrapped command's exit status",
-            ],
+            &["Use fetch to read retained messages", "--one"],
         ),
         (
             &["duplex", "-h"],
@@ -264,7 +248,7 @@ fn not_found_exit_code() {
             pool_dir.to_str().unwrap(),
             "fetch",
             "testpool",
-            "999",
+            "1",
             "--format",
             "json",
         ])
@@ -280,7 +264,7 @@ fn not_found_exit_code() {
         inner.get("kind").and_then(|v| v.as_str()).unwrap(),
         "NotFound"
     );
-    assert_eq!(inner.get("seq").and_then(|v| v.as_u64()).unwrap(), 999);
+    assert_eq!(inner.get("seq").and_then(|v| v.as_u64()).unwrap(), 1);
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("pool info") || hint.contains("follow"));
 }
@@ -436,7 +420,7 @@ fn color_always_does_not_color_json() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "json",
@@ -538,8 +522,8 @@ fn misuse_feedback_matrix_is_actionable_across_command_families() {
     let cases: [(&[&str], &str, &str); 4] = [
         (
             &["feed", "demo", "{\"x\":1}", "--retry-delay", "1s"],
-            "--retry-delay requires --retry",
-            "Add --retry",
+            "unexpected argument",
+            "feed --help",
         ),
         (
             &["doctor", "demo", "--all"],

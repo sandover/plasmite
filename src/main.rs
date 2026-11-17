@@ -14,7 +14,6 @@ mod access_store;
 mod cli;
 mod color_json;
 mod interface_wire;
-mod jq_filter;
 mod mcp_stdio;
 mod pool_info_json;
 mod pool_paths;
@@ -24,7 +23,6 @@ mod serve_registry;
 mod serve_service;
 #[cfg(windows)]
 mod server_private;
-mod since;
 mod udp_input;
 #[expect(
     dead_code,
@@ -187,7 +185,7 @@ fn has_conflicting_directories(args: &[OsString]) -> bool {
 }
 
 // The parser may fail before it can produce a command. Respect an explicit
-// output request, but never interpret flags belonging to tap's child process.
+// output request, but stop interpreting options after `--`.
 fn default_output_mode() -> OutputMode {
     use std::io::IsTerminal;
     if std::io::stdout().is_terminal() {
@@ -248,10 +246,7 @@ mod tests {
     use crate::cli::output_support::{
         format_bytes, format_relative_time, format_seq_range, format_timestamp_human,
     };
-    use crate::cli::stream_support::matches_required_tags;
-    use crate::cli::support::{
-        RetryConfig, parse_duration, parse_size, resolve_pool_target, retry_append,
-    };
+    use crate::cli::support::{parse_duration, parse_size, resolve_pool_target};
     use clap::CommandFactory;
     use serde_json::json;
     use std::io::Cursor;
@@ -328,41 +323,26 @@ mod tests {
             ("plasmite doctor", vec!["all", "format", "help"]),
             (
                 "plasmite duplex",
-                vec!["create", "format", "help", "since", "tail", "timeout"],
+                vec!["create", "format", "help", "last", "since", "timeout"],
             ),
             (
                 "plasmite feed",
                 vec![
                     "create",
-                    "create-size",
                     "durability",
-                    "file",
                     "format",
                     "help",
                     "input-format",
-                    "retry",
-                    "retry-delay",
                     "tag",
                 ],
             ),
-            ("plasmite fetch", vec!["format", "help"]),
+            (
+                "plasmite fetch",
+                vec!["format", "help", "last", "since", "tag"],
+            ),
             (
                 "plasmite follow",
-                vec![
-                    "create",
-                    "format",
-                    "help",
-                    "no-follow",
-                    "no-notify",
-                    "one",
-                    "quiet-drops",
-                    "replay",
-                    "since",
-                    "tag",
-                    "tail",
-                    "timeout",
-                    "where",
-                ],
+                vec!["create", "format", "help", "last", "one", "since", "tag"],
             ),
             ("plasmite help", vec![]),
             ("plasmite mcp", vec!["format", "help"]),
@@ -421,18 +401,6 @@ mod tests {
             ("plasmite serve status", vec!["all", "format", "help"]),
             ("plasmite serve stop", vec!["format", "help"]),
             ("plasmite serve uninstall", vec!["format", "help"]),
-            (
-                "plasmite tap",
-                vec![
-                    "create",
-                    "create-size",
-                    "durability",
-                    "format",
-                    "help",
-                    "quiet",
-                    "tag",
-                ],
-            ),
             ("plasmite version", vec!["format", "help"]),
         ]
         .into_iter()
@@ -608,29 +576,6 @@ mod tests {
     }
 
     #[test]
-    fn required_tags_match_all_requested_tags() {
-        let message = json!({
-            "meta": {
-                "tags": ["error", "billing", "prod"]
-            }
-        });
-        assert!(matches_required_tags(
-            &["error".to_string(), "billing".to_string()],
-            &message
-        ));
-        assert!(!matches_required_tags(
-            &["error".to_string(), "missing".to_string()],
-            &message
-        ));
-    }
-
-    #[test]
-    fn required_tags_returns_false_on_missing_meta_tags() {
-        let message = json!({"data": {"x": 1}});
-        assert!(!matches_required_tags(&["error".to_string()], &message));
-    }
-
-    #[test]
     fn error_text_respects_color_flag() {
         let err = Error::new(ErrorKind::Usage).with_message("bad input");
         let colored = error_text(&err, true);
@@ -756,47 +701,6 @@ mod tests {
             PoolTarget::LocalPath(path) => assert_eq!(path, PathBuf::from(input)),
             _ => panic!("expected local path"),
         }
-    }
-
-    #[test]
-    fn retry_append_retries_until_success() {
-        let mut attempts = 0u32;
-        let value = retry_append(
-            Some(RetryConfig {
-                retries: 2,
-                delay: Duration::from_millis(0),
-            }),
-            || {
-                attempts += 1;
-                if attempts < 2 {
-                    return Err(Error::new(ErrorKind::Busy));
-                }
-                Ok(21u8)
-            },
-        )
-        .expect("retry should succeed");
-        assert_eq!(attempts, 2);
-        assert_eq!(value, 21u8);
-    }
-
-    #[test]
-    fn retry_append_exhausts_when_still_retryable() {
-        let mut attempts = 0u32;
-        let result: Result<u8, Error> = retry_append(
-            Some(RetryConfig {
-                retries: 1,
-                delay: Duration::from_millis(0),
-            }),
-            || {
-                attempts += 1;
-                Err(Error::new(ErrorKind::Busy))
-            },
-        );
-        assert_eq!(attempts, 2);
-        let err = result.expect_err("expected retry exhaustion");
-        assert_eq!(err.kind(), ErrorKind::Busy);
-        let hint = err.hint().unwrap_or("");
-        assert!(hint.contains("Retry attempts: 2"));
     }
 
     #[test]

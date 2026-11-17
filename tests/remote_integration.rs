@@ -6,8 +6,8 @@
 //! Invariants: Server processes are cleaned up on drop.
 
 use plasmite::api::{
-    AppendOptions, Durability, ErrorKind, FollowOptions, GapPolicy, Pool, PoolOptions, PoolRef,
-    RemoteClient, access,
+    AppendOptions, Durability, ErrorKind, Feed, Pool, PoolOptions, PoolRef, Read as ReadOptions,
+    RemoteClient, RemotePool, Since, access,
 };
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
@@ -21,6 +21,24 @@ use support::server::TestServer;
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+fn fetch_message(
+    pool: &RemotePool,
+    seq: u64,
+) -> Result<plasmite::api::Message, Box<plasmite::api::Error>> {
+    pool.fetch(ReadOptions::since(Since::Seq(seq)))?
+        .next_message()?
+        .ok_or_else(|| Box::new(plasmite::api::Error::new(ErrorKind::NotFound).with_seq(seq)))
+}
+
+fn fetch_frame(
+    pool: &RemotePool,
+    seq: u64,
+) -> Result<plasmite::api::RemoteLite3Frame, Box<plasmite::api::Error>> {
+    pool.fetch_lite3(ReadOptions::since(Since::Seq(seq)))?
+        .next_frame()?
+        .ok_or_else(|| Box::new(plasmite::api::Error::new(ErrorKind::NotFound).with_seq(seq)))
+}
+
 #[test]
 fn remote_append_and_get() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
@@ -29,11 +47,11 @@ fn remote_append_and_get() -> TestResult<()> {
     let pool_ref = PoolRef::name("chat");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
+    let pool = client.open_pool(&pool_ref, false)?;
     let payload = json!({"kind": "note", "body": "hello"});
-    let message = pool.append_json_now(&payload, &[], Durability::Fast)?;
+    let message = pool.feed(&payload, Feed::default())?;
 
-    let fetched = pool.get_message(message.seq)?;
+    let fetched = fetch_message(&pool, message.seq)?;
     assert_eq!(fetched.seq, message.seq);
     assert_eq!(fetched.data, payload);
     Ok(())
@@ -69,8 +87,8 @@ fn remote_delete_sends_no_body_and_reuses_connection() -> TestResult<()> {
         socket.set_write_timeout(Some(Duration::from_secs(5)))?;
         let mut body_lengths = Vec::new();
         for (request_line, response) in [
-            ("DELETE /v0/pools/shared HTTP/1.1", "{\"ok\":true}"),
-            ("GET /v0/pools HTTP/1.1", "{\"pools\":[]}"),
+            ("DELETE /v2/pools/shared HTTP/1.1", "{\"ok\":true}"),
+            ("GET /v2/pools HTTP/1.1", "{\"pools\":[]}"),
         ] {
             let mut headers = Vec::new();
             while !headers.ends_with(b"\r\n\r\n") {
@@ -126,34 +144,32 @@ fn remote_append_get_follow_lite3() -> TestResult<()> {
     let pool_ref = PoolRef::name("lite3");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let message = pool.append_json_now(&json!({"x": 1}), &[], Durability::Fast)?;
-    let payload = match pool.get_lite3(message.seq) {
+    let pool = client.open_pool(&pool_ref, false)?;
+    let message = pool.feed(&json!({"x": 1}), Feed::default())?;
+    let payload = match fetch_frame(&pool, message.seq).map(|frame| frame.payload) {
         Ok(payload) => payload,
         Err(err) => return Err(format!("get_lite3 failed: {err}").into()),
     };
 
-    let seq = match pool.append_lite3_now(&payload, Durability::Fast) {
+    let seq = match pool
+        .feed_lite3_receipt(&payload, Feed::default())
+        .map(|receipt| receipt.seq)
+    {
         Ok(seq) => seq,
         Err(err) => return Err(format!("append_lite3_now failed: {err}").into()),
     };
 
-    let fetched = match pool.get_lite3(seq) {
+    let fetched = match fetch_frame(&pool, seq).map(|frame| frame.payload) {
         Ok(payload) => payload,
         Err(err) => return Err(format!("get_lite3 failed: {err}").into()),
     };
     assert_eq!(fetched, payload);
-    let frame = pool.get_lite3_frame(seq)?;
+    let frame = fetch_frame(&pool, seq)?;
     assert_eq!(frame.seq, seq);
     assert_eq!(frame.payload, payload);
-    assert_eq!(frame.timestamp_ns, pool.get_message(seq)?.timestamp_ns()?);
+    assert_eq!(frame.time, fetch_message(&pool, seq)?.time);
 
-    let options = FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(seq),
-        max_messages: Some(1),
-        timeout: Some(Duration::from_millis(500)),
-        ..Default::default()
-    };
+    let options = ReadOptions::since(Since::Seq(seq));
     let mut tail = match pool.follow_lite3(options) {
         Ok(tail) => tail,
         Err(err) => return Err(format!("follow_lite3 failed: {err}").into()),
@@ -175,18 +191,26 @@ fn remote_lite3_receipt_preserves_payload_and_rejects_unreadable_data() -> TestR
     let client = server.client()?;
     let reference = PoolRef::name("binary-receipt");
     client.create_pool(&reference, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&reference)?;
+    let pool = client.open_pool(&reference, false)?;
     let tags = vec!["heartbeat".to_string()];
-    let seed = pool.append_json_now(&json!({"x": "y"}), &tags, Durability::Fast)?;
-    let payload = pool.get_lite3(seed.seq)?;
-    let copied = pool.append_lite3_with_receipt(
-        &payload,
-        plasmite::api::AppendOptions::new(0, Durability::Fast),
-    )?;
+    let seed = pool.feed(&json!({"x": "y"}), Feed::new().tags(tags.clone()))?;
+    let payload = fetch_frame(&pool, seed.seq).map(|frame| frame.payload)?;
+    let copied = pool.feed_lite3(&payload, Feed::new())?;
     assert_eq!(copied.seq, seed.seq + 1);
     assert_eq!(copied.meta.tags, tags);
     assert_eq!(copied.data, seed.data);
-    assert_eq!(pool.get_lite3(copied.seq)?, payload);
+    assert_eq!(
+        fetch_frame(&pool, copied.seq).map(|frame| frame.payload)?,
+        payload
+    );
+    let receipt = pool.feed_lite3_receipt(&payload, Feed::new())?;
+    assert_eq!(receipt.seq, copied.seq + 1);
+    let frame = pool
+        .fetch_lite3(ReadOptions::since(Since::Seq(receipt.seq)))?
+        .next_frame()?
+        .expect("committed receipt must name a frame");
+    assert_eq!(frame.time, receipt.time);
+    assert_eq!(frame.payload, payload);
 
     let doc = plasmite::api::Lite3DocRef::new(&payload);
     let data = doc.key_offset("data")?;
@@ -196,7 +220,8 @@ fn remote_lite3_receipt_preserves_payload_and_rejects_unreadable_data() -> TestR
     invalid[value + 5] = 0xff;
     let before = pool.info()?.bounds;
     let err = pool
-        .append_lite3_now(&invalid, Durability::Fast)
+        .feed_lite3_receipt(&invalid, Feed::default())
+        .map(|receipt| receipt.seq)
         .expect_err("nested invalid UTF-8 must not append");
     assert_eq!(err.kind(), ErrorKind::Corrupt);
     assert_eq!(pool.info()?.bounds, before);
@@ -215,26 +240,24 @@ fn remote_lite3_invalid_payloads_error() -> TestResult<()> {
     let server = TestServer::try_start(pool_dir)?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("bad-lite3");
-    let pool = client.open_pool(&pool_ref)?;
+    let pool = client.open_pool(&pool_ref, false)?;
 
-    let err = pool.get_lite3(1).expect_err("invalid lite3 get");
+    let err = fetch_frame(&pool, 1)
+        .map(|frame| frame.payload)
+        .expect_err("invalid lite3 get");
     assert_eq!(err.kind(), ErrorKind::Corrupt);
 
     let err = pool
-        .append_lite3_now(&[0x01], Durability::Fast)
+        .feed_lite3_receipt(&[0x01], Feed::default())
+        .map(|receipt| receipt.seq)
         .expect_err("invalid lite3 append");
     assert_eq!(err.kind(), ErrorKind::Corrupt);
 
-    let options = FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(1),
-        max_messages: Some(1),
-        timeout: Some(Duration::from_millis(200)),
-        ..Default::default()
-    };
-    let err = match pool.follow_lite3(options) {
-        Ok(_) => return Err("expected invalid lite3 tail".into()),
-        Err(err) => err,
-    };
+    let options = ReadOptions::since(Since::Seq(1));
+    let err = pool
+        .follow_lite3(options)?
+        .next_frame()
+        .expect_err("invalid lite3 tail");
     assert_eq!(err.kind(), ErrorKind::Corrupt);
     Ok(())
 }
@@ -247,16 +270,11 @@ fn remote_tail_streams_in_order() -> TestResult<()> {
     let pool_ref = PoolRef::name("tail");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let first = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
-    let second = pool.append_json_now(&json!({"n": 2}), &[], Durability::Fast)?;
+    let pool = client.open_pool(&pool_ref, false)?;
+    let first = pool.feed(&json!({"n": 1}), Feed::default())?;
+    let second = pool.feed(&json!({"n": 2}), Feed::default())?;
 
-    let options = FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(first.seq),
-        max_messages: Some(2),
-        timeout: Some(Duration::from_millis(500)),
-        ..Default::default()
-    };
+    let options = ReadOptions::since(Since::Seq(first.seq));
     let mut tail = pool.follow(options)?;
 
     let msg1 = tail.next_message()?.expect("first message");
@@ -274,17 +292,12 @@ fn remote_tail_reconnects_with_stable_since_seq_without_duplicates() -> TestResu
     let pool_ref = PoolRef::name("tail-reconnect");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
+    let pool = client.open_pool(&pool_ref, false)?;
 
-    let first = pool.append_json_now(&json!({"seq": 1}), &[], Durability::Fast)?;
-    let second = pool.append_json_now(&json!({"seq": 2}), &[], Durability::Fast)?;
+    let first = pool.feed(&json!({"seq": 1}), Feed::default())?;
+    let second = pool.feed(&json!({"seq": 2}), Feed::default())?;
 
-    let mut first_tail = pool.follow(FollowOptions {
-        max_messages: Some(2),
-        timeout: Some(Duration::from_millis(150)),
-        start: plasmite::api::FollowStart::all(),
-        ..Default::default()
-    })?;
+    let mut first_tail = pool.fetch(ReadOptions::since(Since::Oldest))?;
     let message_one = first_tail.next_message()?.expect("first replay message");
     let message_two = first_tail.next_message()?.expect("second replay message");
     assert_eq!(message_one.seq, first.seq);
@@ -294,15 +307,10 @@ fn remote_tail_reconnects_with_stable_since_seq_without_duplicates() -> TestResu
         "replay tail should stop after max_messages"
     );
 
-    let third = pool.append_json_now(&json!({"seq": 3}), &[], Durability::Fast)?;
-    let fourth = pool.append_json_now(&json!({"seq": 4}), &[], Durability::Fast)?;
+    let third = pool.feed(&json!({"seq": 3}), Feed::default())?;
+    let fourth = pool.feed(&json!({"seq": 4}), Feed::default())?;
 
-    let mut reconnect_tail = pool.follow(FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(message_two.seq + 1),
-        max_messages: Some(2),
-        timeout: Some(Duration::from_millis(300)),
-        ..Default::default()
-    })?;
+    let mut reconnect_tail = pool.fetch(ReadOptions::since(Since::Seq(message_two.seq + 1)))?;
     let resume_three = reconnect_tail
         .next_message()?
         .expect("first resumed message");
@@ -329,8 +337,8 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
     base_client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
 
     let append_client = base_client.clone();
-    let writer_pool = append_client.open_pool(&pool_ref)?;
-    let tail_pool = base_client.open_pool(&pool_ref)?;
+    let writer_pool = append_client.open_pool(&pool_ref, false)?;
+    let tail_pool = base_client.open_pool(&pool_ref, false)?;
 
     let cancel = Arc::new(AtomicBool::new(false));
     let done = Arc::new(AtomicBool::new(false));
@@ -344,7 +352,7 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
         while !done_writer.load(Ordering::Acquire) {
             let payload = json!({"seq": seq});
             writer_pool
-                .append_json_now(&payload, &[], Durability::Fast)
+                .feed(&payload, Feed::default())
                 .map(|_| ())
                 .map_err(|err| err.to_string())?;
             seq += 1;
@@ -363,11 +371,7 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
         // append would end it empty. The writer appends every 10 ms, so each read
         // returns soon and the loop checks for cancellation.
         let mut tail = tail_pool
-            .follow(FollowOptions {
-                max_messages: Some(10_000),
-                start: plasmite::api::FollowStart::all(),
-                ..Default::default()
-            })
+            .follow(ReadOptions::since(Since::Oldest))
             .map_err(|err| err.to_string())?;
         tail_started_tx
             .send(())
@@ -375,7 +379,7 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
         let mut observed = 0usize;
         loop {
             if cancel_tail.load(Ordering::Acquire) {
-                tail.cancel();
+                tail.close();
                 return Ok(observed);
             }
             if tail
@@ -431,7 +435,7 @@ fn remote_errors_propagate_kind() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
-    let err = match client.open_pool(&PoolRef::name("missing")) {
+    let err = match client.open_pool(&PoolRef::name("missing"), false) {
         Ok(_) => return Err("expected missing pool error".into()),
         Err(err) => err,
     };
@@ -477,7 +481,7 @@ fn remote_rejects_path_pool_names() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
 
-    let create_url = format!("{}/v0/pools", server.local_url);
+    let create_url = format!("{}/v2/pools", server.local_url);
     let create_body = r#"{"pool":"/tmp/evil","size_bytes":1024}"#;
     match ureq::post(&create_url)
         .set("Content-Type", "application/json")
@@ -493,8 +497,8 @@ fn remote_rejects_path_pool_names() -> TestResult<()> {
         Err(err) => return Err(err.into()),
     }
 
-    let open_url = format!("{}/v0/pools/open", server.local_url);
-    let open_body = r#"{"pool":"/tmp/evil"}"#;
+    let open_url = format!("{}/v2/pools/%2Ftmp%2Fevil/open", server.local_url);
+    let open_body = r#"{"create":true}"#;
     match ureq::post(&open_url)
         .set("Content-Type", "application/json")
         .send_string(open_body)
@@ -549,53 +553,11 @@ fn remote_corrupt_errors() -> TestResult<()> {
 
     let corrupt_path = pool_dir.join("bad.plasmite");
     std::fs::write(&corrupt_path, b"NOPE")?;
-    let err = match client.open_pool(&PoolRef::name("bad")) {
+    let err = match client.open_pool(&PoolRef::name("bad"), false) {
         Ok(_) => return Err("expected corrupt pool error".into()),
         Err(err) => err,
     };
     assert_eq!(err.kind(), ErrorKind::Corrupt);
-    Ok(())
-}
-
-#[test]
-fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::try_start(temp_dir.path())?;
-    let client = server.client()?;
-    let pool_ref = PoolRef::name("tail-limits");
-
-    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let first = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
-    let _second = pool.append_json_now(&json!({"n": 2}), &[], Durability::Fast)?;
-
-    let options = FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(first.seq),
-        max_messages: Some(1),
-        timeout: Some(Duration::from_millis(500)),
-        ..Default::default()
-    };
-    let mut tail = pool.follow(options)?;
-    let msg = tail.next_message()?.expect("first message");
-    assert_eq!(msg.seq, first.seq);
-    assert!(tail.next_message()?.is_none());
-
-    let mut tail = pool.follow(FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(9999),
-        timeout: Some(Duration::from_millis(100)),
-        ..Default::default()
-    })?;
-    assert!(tail.next_message()?.is_none());
-
-    let _third = pool.append_json_now(&json!({"n": 3}), &[], Durability::Fast)?;
-    let mut tail = pool.follow(FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(3),
-        max_messages: Some(1),
-        timeout: Some(Duration::from_millis(500)),
-        ..Default::default()
-    })?;
-    let msg = tail.next_message()?.expect("resumed message");
-    assert_eq!(msg.data, json!({"n": 3}));
     Ok(())
 }
 
@@ -607,17 +569,16 @@ fn remote_json_tail_can_fail_closed_on_retention_gaps() -> TestResult<()> {
     let pool_ref = PoolRef::name("tail-gap");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let first = pool.append_json_now(&json!({"kind": "first"}), &[], Durability::Fast)?;
+    let pool = client.open_pool(&pool_ref, false)?;
+    let first = pool.feed(&json!({"kind": "first"}), Feed::default())?;
     for i in 0..10_000 {
-        pool.append_json_now(
+        pool.feed(
             &json!({"i": i, "padding": "x".repeat(64 * 1024)}),
-            &[],
-            Durability::Fast,
+            Feed::default(),
         )?;
-        match pool.get_message(first.seq) {
+        match fetch_message(&pool, first.seq) {
             Ok(_) => {}
-            Err(err) if err.kind() == ErrorKind::NotFound => break,
+            Err(err) if err.kind() == ErrorKind::RetentionGap => break,
             Err(err) => return Err(err.into()),
         }
         if i == 9_999 {
@@ -625,62 +586,13 @@ fn remote_json_tail_can_fail_closed_on_retention_gaps() -> TestResult<()> {
         }
     }
 
-    let mut continuing = pool.follow(FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(first.seq),
-        max_messages: Some(1),
-        timeout: Some(Duration::from_millis(500)),
-        ..Default::default()
-    })?;
-    let continued = continuing
-        .next_message()?
-        .ok_or("default remote tail did not continue")?;
-    assert!(continued.seq > first.seq);
-
-    let mut failing = pool.follow(FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(first.seq),
-        tags: vec!["never".to_string()],
-        timeout: Some(Duration::from_millis(500)),
-        gap_policy: GapPolicy::Error,
-        ..Default::default()
-    })?;
+    let mut failing = pool.follow(ReadOptions::since(Since::Seq(first.seq)).tags(["never"]))?;
     let err = failing
         .next_message()
         .expect_err("expected remote retention gap");
     assert_eq!(err.kind(), ErrorKind::RetentionGap);
     assert_eq!(err.seq(), Some(first.seq));
     assert!(failing.next_message()?.is_none());
-    Ok(())
-}
-
-#[test]
-fn remote_tail_rejects_invalid_or_unsupported_gap_policies() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::try_start(temp_dir.path())?;
-    let client = server.client()?;
-    let pool_ref = PoolRef::name("tail-gap-policy");
-    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-
-    let err = match pool.follow_lite3(FollowOptions {
-        gap_policy: GapPolicy::Error,
-        start: plasmite::api::FollowStart::all(),
-        ..Default::default()
-    }) {
-        Ok(_) => return Err("expected remote Lite3 gap-policy rejection".into()),
-        Err(err) => err,
-    };
-    assert_eq!(err.kind(), ErrorKind::Usage);
-
-    for path in ["follow?gap_policy=unknown", "follow_lite3?gap_policy=error"] {
-        let url = format!(
-            "{}/v0/pools/tail-gap-policy/{path}",
-            server.local_url.trim_end_matches('/')
-        );
-        match ureq::get(&url).call() {
-            Err(ureq::Error::Status(400, _)) => {}
-            other => return Err(format!("expected HTTP 400 for {path}, got {other:?}").into()),
-        }
-    }
     Ok(())
 }
 
@@ -692,25 +604,17 @@ fn remote_tail_filters_by_tags() -> TestResult<()> {
     let pool_ref = PoolRef::name("tail-tags");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let first = pool.append_json_now(
+    let pool = client.open_pool(&pool_ref, false)?;
+    let first = pool.feed(
         &json!({"kind": "drop"}),
-        &["drop".to_string()],
-        Durability::Fast,
+        Feed::default().tags(["drop".to_string()]),
     )?;
-    let second = pool.append_json_now(
+    let second = pool.feed(
         &json!({"kind": "keep"}),
-        &["keep".to_string()],
-        Durability::Fast,
+        Feed::default().tags(["keep".to_string()]),
     )?;
 
-    let options = FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(first.seq),
-        max_messages: Some(1),
-        tags: vec!["keep".to_string()],
-        timeout: Some(Duration::from_millis(500)),
-        ..Default::default()
-    };
+    let options = ReadOptions::since(Since::Seq(first.seq)).tags(["keep"]);
     let mut tail = pool.follow(options)?;
     let msg = tail.next_message()?.expect("filtered message");
     assert_eq!(msg.seq, second.seq);
@@ -726,25 +630,17 @@ fn remote_tail_filters_by_tags_with_commas() -> TestResult<()> {
     let pool_ref = PoolRef::name("tail-tags-commas");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let first = pool.append_json_now(
+    let pool = client.open_pool(&pool_ref, false)?;
+    let first = pool.feed(
         &json!({"kind": "drop"}),
-        &["keep".to_string()],
-        Durability::Fast,
+        Feed::default().tags(["keep".to_string()]),
     )?;
-    let second = pool.append_json_now(
+    let second = pool.feed(
         &json!({"kind": "keep"}),
-        &["keep,prod".to_string()],
-        Durability::Fast,
+        Feed::default().tags(["keep,prod".to_string()]),
     )?;
 
-    let options = FollowOptions {
-        start: plasmite::api::FollowStart::Sequence(first.seq),
-        max_messages: Some(1),
-        tags: vec!["keep,prod".to_string()],
-        timeout: Some(Duration::from_millis(500)),
-        ..Default::default()
-    };
+    let options = ReadOptions::since(Since::Seq(first.seq)).tags(["keep,prod"]);
     let mut tail = pool.follow(options)?;
     let msg = tail.next_message()?.expect("filtered message");
     assert_eq!(msg.seq, second.seq);
@@ -822,9 +718,9 @@ fn local_ui_pool_list_reports_ring_layout() -> TestResult<()> {
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
     client.create_pool(&PoolRef::name("empty"), PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    pool.append_json_now(&json!({"body": "short"}), &[], Durability::Fast)?;
-    pool.append_json_now(&json!({"body": "x".repeat(2000)}), &[], Durability::Fast)?;
+    let pool = client.open_pool(&pool_ref, false)?;
+    pool.feed(&json!({"body": "short"}), Feed::default())?;
+    pool.feed(&json!({"body": "x".repeat(2000)}), Feed::default())?;
 
     let body: Value = ureq::get(&format!("{}/v0/ui/pools", server.local_url))
         .call()
@@ -914,8 +810,8 @@ fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
     assert!(created_at.elapsed() < PUSH_WITHIN);
     assert_eq!(created["pools"][0]["name"], "changing");
 
-    let pool = client.open_pool(&pool_ref)?;
-    let message = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
+    let pool = client.open_pool(&pool_ref, false)?;
+    let message = pool.feed(&json!({"n": 1}), Feed::default())?;
     let appended_at = Instant::now();
     let appended = read_pool_event(&mut reader)?;
     assert!(appended_at.elapsed() < PUSH_WITHIN);
@@ -931,8 +827,8 @@ fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
     // every read, and the stream must not count that as a change.
     let resting_ref = PoolRef::name("resting");
     client.create_pool(&resting_ref, PoolOptions::new(1024 * 1024))?;
-    let resting = client.open_pool(&resting_ref)?;
-    let last = resting.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
+    let resting = client.open_pool(&resting_ref, false)?;
+    let last = resting.feed(&json!({"n": 1}), Feed::default())?;
     while read_pool_event(&mut reader)?["pools"][0]["bounds"]["newest"] != last.seq {}
 
     // A second reader thread lets this assertion time the idle interval from
@@ -957,9 +853,8 @@ fn local_ui_events_stream_sends_sse() -> TestResult<()> {
     let pool_ref = PoolRef::name("ui-events");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let created =
-        pool.append_json_now(&json!({"kind": "ui", "ok": true}), &[], Durability::Fast)?;
+    let pool = client.open_pool(&pool_ref, false)?;
+    let created = pool.feed(&json!({"kind": "ui", "ok": true}), Feed::default())?;
 
     let response = ureq::get(&format!(
         "{}/v0/ui/pools/ui-events/events?since_seq={}&max=1",
@@ -984,12 +879,11 @@ fn local_ui_tail_reads_reported_oldest_after_small_pool_wrap() -> TestResult<()>
     let client = server.client()?;
     let pool_ref = PoolRef::name("wrapped");
     client.create_pool(&pool_ref, PoolOptions::new(64 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
+    let pool = client.open_pool(&pool_ref, false)?;
     for i in 1..=450 {
-        pool.append_json_now(
+        pool.feed(
             &json!({"message": format!("tick {i}"), "level": "info"}),
-            &[],
-            Durability::Fast,
+            Feed::default(),
         )?;
     }
     let oldest = pool.info()?.bounds.oldest_seq.expect("oldest");
@@ -1205,11 +1099,10 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
             "id": 5,
             "method": "tools/call",
             "params": {
-                "name": "plasmite_read",
+                "name": "plasmite_fetch",
                 "arguments": {
                     "pool": "flow",
-                    "since": "1970-01-01T00:00:00Z",
-                    "after_seq": first_seq,
+                    "since": first_seq + 1,
                     "count": 10
                 }
             }
@@ -1230,14 +1123,14 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
             "method": "tools/call",
             "params": {
                 "name": "plasmite_fetch",
-                "arguments": { "pool": "flow", "seq": second_seq }
+                "arguments": { "pool": "flow", "since": second_seq, "count": 1 }
             }
         }),
     )
     .expect("fetch");
     let fetch_json: Value = serde_json::from_str(&fetch.into_string()?)?;
     assert_eq!(
-        fetch_json["result"]["structuredContent"]["message"]["data"]["n"],
+        fetch_json["result"]["structuredContent"]["messages"][0]["data"]["n"],
         json!(2)
     );
 
@@ -1334,44 +1227,38 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
     );
     let client = server.client()?;
     client.create_pool(&PoolRef::name("bounded"), PoolOptions::new(1024 * 1024))?;
-    for route in ["follow", "follow_lite3", "events"] {
-        let prefix = if route == "events" {
-            "v0/ui/pools"
+    let url = format!("{}/v2/pools/bounded/follow", server.local_url);
+    let began = Instant::now();
+    let body = ureq::get(&url)
+        .timeout(Duration::from_secs(3))
+        .call()?
+        .into_string()?;
+    assert_eq!(
+        serde_json::from_str::<Value>(body.trim())?,
+        json!({"type": "cutoff", "next_seq": 1})
+    );
+    assert!(began.elapsed() >= Duration::from_millis(400));
+    assert!(began.elapsed() < Duration::from_secs(2));
+
+    for wait in [None, Some("20")] {
+        let query = wait
+            .map(|ms| format!("?timeout_ms={ms}"))
+            .unwrap_or_default();
+        let url = format!("{}/v0/ui/pools/bounded/events{query}", server.local_url);
+        let began = Instant::now();
+        let mut bytes = Vec::new();
+        ureq::get(&url)
+            .timeout(Duration::from_secs(3))
+            .call()?
+            .into_reader()
+            .read_to_end(&mut bytes)?;
+        let body = String::from_utf8(bytes)?;
+        assert!(!body.contains("event: message"), "{body}");
+        assert!(!body.contains("event: error"), "{body}");
+        if wait.is_some() {
+            assert!(began.elapsed() < Duration::from_millis(300));
         } else {
-            "v0/pools"
-        };
-        for requested in [None, Some("18446744073709551615"), Some("20"), Some("0")] {
-            let query = requested
-                .map(|n| format!("?timeout_ms={n}"))
-                .unwrap_or_default();
-            let url = format!("{}/{prefix}/bounded/{route}{query}", server.local_url);
-            let began = std::time::Instant::now();
-            let response = ureq::get(&url).timeout(Duration::from_secs(3)).call()?;
-            let mut bytes = Vec::new();
-            response.into_reader().read_to_end(&mut bytes)?;
-            if route == "events" {
-                let body = String::from_utf8(bytes)?;
-                assert!(!body.contains("event: message"), "quiet UI pool");
-                assert!(!body.contains("event: error"), "{body}");
-            } else {
-                assert!(bytes.is_empty(), "quiet pool: {route}");
-            }
-            let elapsed = began.elapsed();
-            if matches!(requested, None | Some("18446744073709551615")) {
-                assert!(
-                    elapsed >= Duration::from_millis(400),
-                    "{route} ended before its configured lifetime: {elapsed:?}"
-                );
-            } else {
-                assert!(
-                    elapsed < Duration::from_millis(300),
-                    "{route} ignored the shorter requested wait: {elapsed:?}"
-                );
-            }
-            assert!(
-                elapsed < Duration::from_secs(2),
-                "{route} {requested:?} exceeded the server cap"
-            );
+            assert!(began.elapsed() >= Duration::from_millis(400));
         }
     }
     Ok(())
@@ -1381,7 +1268,7 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
 fn ordinary_http_rejects_untrusted_origin_before_body_extraction() -> TestResult<()> {
     let temp = tempfile::tempdir()?;
     let server = TestServer::try_start(temp.path())?;
-    let response = ureq::post(&format!("{}/v0/pools", server.local_url))
+    let response = ureq::post(&format!("{}/v2/pools", server.local_url))
         .set("Origin", "https://untrusted.example")
         .set("Content-Type", "application/json")
         .send_string("{");
@@ -1390,39 +1277,117 @@ fn ordinary_http_rejects_untrusted_origin_before_body_extraction() -> TestResult
 }
 
 #[test]
-fn remote_follow_opens_before_response_and_history_is_explicit() -> TestResult<()> {
-    use plasmite::api::FollowStart;
-    let directory = tempfile::tempdir()?;
-    let server = TestServer::try_start(directory.path())?;
+fn v2_live_reads_open_before_returning_and_fetch_is_finite() -> TestResult<()> {
+    use plasmite::api::{Feed, Read, Since};
+
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp.path())?;
     let client = server.client()?;
-    let reference = PoolRef::name("follow-start");
-    client.create_pool(&reference, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&reference)?;
-    pool.append_json_now(&json!({"n":1}), &[], Durability::Fast)?;
-    let mut live = pool.follow(FollowOptions {
-        max_messages: Some(1),
-        timeout: Some(Duration::from_secs(2)),
-        ..Default::default()
-    })?;
-    let appended = pool.append_json_now(&json!({"n":2}), &[], Durability::Fast)?;
-    assert_eq!(live.next_message()?.unwrap().seq, appended.seq);
-    let mut finite = pool.follow(FollowOptions {
-        start: FollowStart::Last(1),
-        live: false,
-        ..Default::default()
-    })?;
-    pool.append_json_now(&json!({"n":3}), &[], Durability::Fast)?;
-    assert_eq!(finite.next_message()?.unwrap().seq, 2);
-    assert!(finite.next_message()?.is_none());
-    let mut all = pool.follow_lite3(FollowOptions {
-        start: FollowStart::all(),
-        live: false,
-        ..Default::default()
-    })?;
-    let mut sequences = Vec::new();
-    while let Some(frame) = all.next_frame()? {
-        sequences.push(frame.seq);
+    let name = PoolRef::name("v2");
+    client.create_pool(&name, PoolOptions::new(65536))?;
+    let pool = client.open_pool(&name, false)?;
+    let first = pool.feed(&json!({"point":[1,2]}), Feed::new().tags(["gfx"]))?;
+    let mut follow = pool.follow(Read::new().tags(["gfx"]))?;
+    pool.feed(&json!({"ready":true}), Feed::new())?;
+    let third = pool.feed(&first, Feed::new())?;
+    assert_eq!(
+        follow.next_message()?.expect("next matching message"),
+        third
+    );
+    follow.close();
+
+    let mut fetch = pool.fetch_lite3(Read::since(Since::Seq(2)))?;
+    pool.feed(&json!({"later":true}), Feed::new())?;
+    let frames = fetch.by_ref().collect::<Result<Vec<_>, _>>()?;
+    let seqs: Vec<_> = frames.iter().map(|frame| frame.seq).collect();
+    assert_eq!(seqs, [2, 3]);
+    Ok(())
+}
+
+#[test]
+fn v2_binary_read_ends_with_a_structured_retention_gap() -> TestResult<()> {
+    use plasmite::api::{Feed, Read, Since};
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp.path())?;
+    let client = server.client()?;
+    let name = PoolRef::name("gaps");
+    client.create_pool(&name, PoolOptions::new(16384))?;
+    let pool = client.open_pool(&name, false)?;
+    let value = json!({"padding": "x".repeat(1024)});
+    for _ in 0..24 {
+        pool.feed(&value, Feed::new())?;
     }
-    assert_eq!(sequences, vec![1, 2, 3]);
+    let oldest = pool.info()?.bounds.oldest_seq.expect("retained history");
+    assert!(oldest > 1);
+    let mut reader = pool.fetch_lite3(Read::since(Since::Seq(1)).tags(["no match"]))?;
+    let error = reader.next_frame().expect_err("filter cannot conceal loss");
+    assert_eq!(error.kind(), ErrorKind::RetentionGap);
+    assert_eq!(error.missing(), Some(1));
+    assert_eq!(error.next_seq(), Some(oldest));
+    assert!(reader.next_frame()?.is_none());
+    Ok(())
+}
+
+#[test]
+fn version_one_pool_routes_name_required_upgrade() -> TestResult<()> {
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp.path())?;
+    for path in ["pools", "pools/events/append", "pools/events/follow"] {
+        let url = format!("{}/v0/{path}", server.local_url);
+        let Err(ureq::Error::Status(426, response)) = ureq::get(&url).call() else {
+            panic!("expected upgrade error for {path}");
+        };
+        let value: Value = response.into_json()?;
+        assert_eq!(value["error"]["kind"], "Usage");
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("HTTP API v2")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn v2_cancels_a_blocked_https_reader() -> TestResult<()> {
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::start_with_args_and_scheme(
+        temp.path(),
+        &[
+            "--max-tail-timeout-ms",
+            "5000",
+            "--max-tail-concurrency",
+            "1",
+        ],
+        "https",
+    );
+    let client = server.client()?;
+    let name = PoolRef::name("quiet");
+    let pool = client.create_pool(&name, PoolOptions::new(65536))?;
+    for binary in [false, true] {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let options = ReadOptions::new().cancel(Arc::clone(&cancel));
+        let (done, completed) = mpsc::channel();
+        if binary {
+            let mut reader = pool.follow_lite3(options)?;
+            std::thread::spawn(move || {
+                let _ = done.send(reader.next_frame().map(|record| record.is_none()));
+            });
+        } else {
+            let mut reader = pool.follow(options)?;
+            std::thread::spawn(move || {
+                let _ = done.send(reader.next_message().map(|record| record.is_none()));
+            });
+        }
+        assert!(matches!(
+            completed.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        cancel.store(true, Ordering::Release);
+        assert!(completed.recv_timeout(Duration::from_secs(2))??);
+        // The next iteration uses the same server slot.
+        sleep(Duration::from_millis(120));
+    }
     Ok(())
 }

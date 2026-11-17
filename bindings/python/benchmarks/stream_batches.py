@@ -1,4 +1,3 @@
-from plasmite import FollowStart
 #!/usr/bin/env python3
 """Check reader fairness, independent retention and direct view forwarding."""
 
@@ -18,9 +17,7 @@ import plasmite
 
 def receive(directory, count, batch_count, ready, start, output):
     with plasmite.Client(directory) as client, client.open_pool("events") as pool:
-        with pool.follow_views(
-            start=FollowStart.sequence(1), max_messages=count, error_on_gap=True
-        ) as stream:
+        with pool.follow_view(since=1) as stream:
             ready.put(True)
             start.wait()
             wall, cpu = time.perf_counter_ns(), time.process_time_ns()
@@ -66,7 +63,7 @@ def fairness(count, batch_count):
                 wall, cpu = time.perf_counter_ns(), time.process_time_ns()
                 start.set()
                 for i in range(count):
-                    pool.append_view({"index": i})
+                    pool.feed_view({"index": i})
                 writer = {
                     "wall_ns": time.perf_counter_ns() - wall,
                     "cpu_ns": time.process_time_ns() - cpu,
@@ -93,10 +90,10 @@ def retention():
     with TemporaryDirectory() as directory, plasmite.Client(directory) as client:
         with client.create_pool("events", 1024 * 1024) as pool:
             for i in range(32):
-                pool.append_view({"index": i, "nested": [i], "padding": "x" * 128})
+                pool.feed_view({"index": i, "nested": [i], "padding": "x" * 128})
             gc.collect()
             tracemalloc.start()
-            with pool.follow_views(start=FollowStart.sequence(1)) as stream:
+            with pool.follow_view(since=1) as stream:
                 messages = stream.next_batch(16, 4096, 0)
                 lengths = [len(memoryview(message)) for message in messages]
                 child = messages[0].data["nested"]
@@ -134,7 +131,7 @@ def forwarding():
                 ("wide", {f"field_{i}": {"value": i} for i in range(200)}, 150),
                 ("long_string", {"text": "x" * 65536}, 100),
             ]:
-                source = pool.append_view(data, ["source"])
+                source = pool.feed_view(data, ["source"])
                 for repeat in range(5):
                     lanes = ["forward", "native-copy-encode", "root-subtree-copy"]
                     if repeat % 2:
@@ -143,11 +140,11 @@ def forwarding():
                         start, cpu = time.perf_counter_ns(), time.process_time_ns()
                         for _ in range(count):
                             if lane == "forward":
-                                result = pool.append_view(source)
+                                result = pool.feed_view(source)
                             elif lane == "root-subtree-copy":
-                                result = pool.append_view(source.data, ["source"])
+                                result = pool.feed_view(source.data, ["source"])
                             else:
-                                result = pool.append_view(
+                                result = pool.feed_view(
                                     plasmite.to_native(source.data), ["source"]
                                 )
                         elapsed, used_cpu = (

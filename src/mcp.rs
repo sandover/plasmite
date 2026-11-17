@@ -10,14 +10,16 @@ use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
 use crate::api::{
-    Durability, Error, ErrorKind, LocalClient, Pool, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
+    DEFAULT_POOL_SIZE, Error, ErrorKind, Feed, LocalClient, Message, Pool, PoolInfo, PoolOptions,
+    PoolRef, Read, ReadPoll, Since,
 };
 use crate::interface_wire::{ErrorKindWire, MessageWire, error_policy};
-use crate::since::{parse_rfc3339_ns, parse_since_ns as parse_shared_since_ns};
+#[cfg(test)]
+use crate::{api::Durability, since::parse_rfc3339_ns};
 
 const JSON_RPC_VERSION: &str = "2.0";
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -26,12 +28,10 @@ const INVALID_REQUEST_CODE: i32 = -32600;
 const METHOD_NOT_FOUND_CODE: i32 = -32601;
 const INVALID_PARAMS_CODE: i32 = -32602;
 const INTERNAL_ERROR_CODE: i32 = -32603;
-const DEFAULT_POOL_SIZE_BYTES: u64 = 1024 * 1024;
 const DEFAULT_READ_COUNT: usize = 20;
 const MAX_READ_COUNT: usize = 200;
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 10_000;
 const MAX_WAIT_TIMEOUT_MS: u64 = 60_000;
-const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MCP_INSTRUCTIONS: &str = concat!(
     "Plasmite stores JSON messages in named, persistent, fixed-size streams called pools. ",
     "Pools are append-only ring buffers: feeding appends a message, and the oldest messages are ",
@@ -41,11 +41,10 @@ const MCP_INSTRUCTIONS: &str = concat!(
     "delete a pool only when the task requires it. If listing is unavailable, use a pool name ",
     "supplied by the task or operator; plasmite_feed with create true can create a missing pool. ",
     "Messages contain data, optional tags, time, and an automatic sequence number; most users can ",
-    "ignore sequence numbers. Use plasmite_fetch only for exact lookup of one retained sequence ",
-    "number. Use plasmite_read for recent messages, time windows, and resumable ranges. Use ",
-    "plasmite_wait without after_seq to wait only for future messages. Prefer plasmite_wait over ",
-    "repeated plasmite_read polling when idle. Tag filters require all specified tags. Use ",
-    "after_seq, next_after_seq, and fell_behind for resumable delivery and repeated wait loops. ",
+    "ignore sequence numbers. Use plasmite_fetch for retained messages and plasmite_follow for ",
+    "new messages. Use since or last to choose a starting point. Tag filters require all ",
+    "specified tags. Pass next_seq as since to resume a read. RetentionGap reports the first ",
+    "missed sequence and the oldest sequence still retained. ",
     "Tool failures set isError and include a structured error_kind. plasmite_feed is ",
     "non-idempotent, so after an ambiguous transport failure retry only when the payload has an ",
     "application-level stable identifier."
@@ -275,6 +274,8 @@ fn tool_output_schema(success_schema: Value) -> Value {
                 "description": "Tool failure with a stable error_kind and optional actionable context.",
                 "properties": {
                     "tool": {"type": "string"},
+                    "missing": {"type": "integer", "minimum": 1},
+                    "next_seq": {"type": "integer", "minimum": 1},
                     "error_kind": {
                         "type": "string",
                         "enum": [
@@ -285,7 +286,8 @@ fn tool_output_schema(success_schema: Value) -> Value {
                             "Busy",
                             "Permission",
                             "Corrupt",
-                            "Io"
+                            "Io",
+                            "RetentionGap"
                         ]
                     }
                 },
@@ -353,65 +355,55 @@ fn property_output_schema(name: &str, value_schema: Value) -> Value {
     }))
 }
 
-fn read_output_schema(include_timeout: bool) -> Value {
+fn read_tool(live: bool) -> McpTool {
     let mut properties = json!({
-        "messages": {
-            "description": "Matching retained messages in append order.",
-            "type": "array",
-            "items": message_output_schema()
+        "pool": {"type": "string", "description": "Pool name"},
+        "since": {
+            "oneOf": [{"type": "integer", "minimum": 1}, {"type": "string"}],
+            "description": "Inclusive sequence, oldest, RFC 3339 instant, or relative duration"
         },
-        "next_after_seq": {
-            "description": "Advanced resume cursor for the next read or repeated wait.",
-            "type": ["integer", "null"],
-            "minimum": 0
-        },
-        "last_returned_seq": {
-            "description": "Sequence number of the last matching message, or null when none matched.",
-            "type": ["integer", "null"],
-            "minimum": 0
-        },
-        "oldest_available_seq": {
-            "description": "Oldest message still retained, or null for an empty pool.",
-            "type": ["integer", "null"],
-            "minimum": 0
-        },
-        "newest_available_seq": {
-            "description": "Newest message currently retained, or null for an empty pool.",
-            "type": ["integer", "null"],
-            "minimum": 0
-        },
-        "fell_behind": {
-            "description": "True when retention overwrote messages after the supplied cursor; those messages are gone and reading resumes at the oldest retained message.",
-            "type": "boolean"
-        }
+        "last": {"type": "integer", "minimum": 0, "description": "Start this many records back before filtering"},
+        "count": {"type": "integer", "minimum": 1, "maximum": MAX_READ_COUNT, "default": DEFAULT_READ_COUNT},
+        "tags": {"type": "array", "items": {"type": "string"}, "description": "Return only messages containing all specified tags"}
     });
-    let mut required = vec![
-        "messages",
-        "next_after_seq",
-        "last_returned_seq",
-        "oldest_available_seq",
-        "newest_available_seq",
-        "fell_behind",
-    ];
-    if include_timeout {
-        properties
-            .as_object_mut()
-            .expect("read output properties must be an object")
-            .insert(
-                "timed_out".to_string(),
-                json!({
-                    "description": "True when no matching message arrived before the bounded timeout.",
-                    "type": "boolean"
-                }),
-            );
-        required.push("timed_out");
+    if live {
+        properties["timeout_ms"] = json!({
+            "type": "integer", "minimum": 0, "maximum": MAX_WAIT_TIMEOUT_MS, "default": DEFAULT_WAIT_TIMEOUT_MS
+        });
     }
-    tool_output_schema(json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": false
-    }))
+    let (name, description) = if live {
+        (
+            "plasmite_follow",
+            "Wait for new messages by default. Set since or last to start in retained history. Resume by passing next_seq as since.",
+        )
+    } else {
+        (
+            "plasmite_fetch",
+            "Read retained messages in sequence order through the opening bound. Resume by passing next_seq as since.",
+        )
+    };
+    McpTool {
+        name: name.to_string(),
+        description: description.to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": properties,
+            "required": ["pool"],
+            "additionalProperties": false
+        }),
+        output_schema: tool_output_schema(json!({
+            "type": "object",
+            "properties": {
+                "messages": {"type": "array", "items": message_output_schema()},
+                "next_seq": {"type": ["integer", "null"], "minimum": 1},
+                "ended": {"enum": ["complete", "limit"]}
+            },
+            "required": ["messages", "next_seq", "ended"],
+            "additionalProperties": false
+        })),
+        annotations: ToolAnnotations::read_only(),
+        access: McpToolAccess::Read,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -687,12 +679,17 @@ impl PlasmiteMcpHandler {
         };
         let size = match optional_u64_arg(args, "size") {
             Ok(Some(size)) => size,
-            Ok(None) => DEFAULT_POOL_SIZE_BYTES,
+            Ok(None) => DEFAULT_POOL_SIZE,
             Err(result) => return invalid_argument_result("plasmite_pool_create", "size", result),
         };
 
         let pool_ref = PoolRef::name(name.clone());
-        let info = match self.client.create_pool(&pool_ref, PoolOptions::new(size)) {
+        let info = match self
+            .client
+            .create_pool(&pool_ref, PoolOptions::new(size))
+            .map_err(Box::new)
+            .and_then(|pool| pool.info().map_err(Box::new))
+        {
             Ok(info) => info,
             Err(err) if err.kind() == ErrorKind::AlreadyExists => {
                 return api_error_tool_result(
@@ -702,7 +699,7 @@ impl PlasmiteMcpHandler {
                     )),
                 );
             }
-            Err(err) => return api_error_tool_result("plasmite_pool_create", err),
+            Err(err) => return api_error_tool_result("plasmite_pool_create", *err),
         };
 
         ToolCallResult::success_with_structured(
@@ -786,26 +783,8 @@ impl PlasmiteMcpHandler {
         };
 
         let pool_ref = PoolRef::name(pool.clone());
-        let mut opened = match self.client.open_pool(&pool_ref) {
+        let mut opened = match self.client.open_pool(&pool_ref, create) {
             Ok(pool) => pool,
-            Err(err) if create && err.kind() == ErrorKind::NotFound => {
-                if let Err(create_err) = self
-                    .client
-                    .create_pool(&pool_ref, PoolOptions::new(DEFAULT_POOL_SIZE_BYTES))
-                    && create_err.kind() != ErrorKind::AlreadyExists
-                {
-                    return api_error_tool_result("plasmite_feed", create_err);
-                }
-                match self.client.open_pool(&pool_ref) {
-                    Ok(pool) => pool,
-                    Err(open_err) => {
-                        return api_error_tool_result(
-                            "plasmite_feed",
-                            with_missing_pool_hint(open_err, &pool, true),
-                        );
-                    }
-                }
-            }
             Err(err) => {
                 return api_error_tool_result(
                     "plasmite_feed",
@@ -814,7 +793,7 @@ impl PlasmiteMcpHandler {
             }
         };
 
-        let message = match opened.append_json_now(&data, &tags, Durability::Fast) {
+        let message = match opened.feed(&data, Feed::new().tags(tags)) {
             Ok(message) => message,
             Err(err) => return api_error_tool_result("plasmite_feed", err),
         };
@@ -825,235 +804,108 @@ impl PlasmiteMcpHandler {
         )
     }
 
-    fn tool_fetch(&self, args: &Map<String, Value>) -> ToolCallResult {
-        if let Some(result) = reject_unknown_args("plasmite_fetch", args, &["pool", "seq"]) {
+    fn tool_read(&self, args: &Map<String, Value>, live: bool) -> ToolCallResult {
+        let (tool, fields): (&str, &[&str]) = if live {
+            (
+                "plasmite_follow",
+                &["pool", "since", "last", "tags", "count", "timeout_ms"],
+            )
+        } else {
+            (
+                "plasmite_fetch",
+                &["pool", "since", "last", "tags", "count"],
+            )
+        };
+        if let Some(result) = reject_unknown_args(tool, args, fields) {
             return result;
         }
         let pool = match required_string_arg(args, "pool") {
             Ok(name) => name,
-            Err(result) => return invalid_argument_result("plasmite_fetch", "pool", result),
-        };
-        let seq = match required_u64_arg(args, "seq") {
-            Ok(seq) => seq,
-            Err(result) => return invalid_argument_result("plasmite_fetch", "seq", result),
-        };
-        let pool_ref = PoolRef::name(pool.clone());
-        let opened = match self.client.open_pool(&pool_ref) {
-            Ok(pool) => pool,
-            Err(err) => {
-                return api_error_tool_result(
-                    "plasmite_fetch",
-                    with_missing_pool_hint(err, &pool, false),
-                );
-            }
-        };
-        let message = match opened.get_message(seq) {
-            Ok(message) => message,
-            Err(err) => {
-                let err = if err.kind() == ErrorKind::NotFound && err.hint().is_none() {
-                    err.with_hint(format!(
-                        "Sequence {seq} is not retained in `{pool}`; call plasmite_read to inspect the available range."
-                    ))
-                } else {
-                    err
-                };
-                return api_error_tool_result("plasmite_fetch", err);
-            }
-        };
-        ToolCallResult::success_with_structured(
-            format!("Fetched sequence {seq} from `{pool}`."),
-            Value::from_iter([("message", message_json_value(message))]),
-        )
-    }
-
-    fn tool_read(&self, args: &Map<String, Value>) -> ToolCallResult {
-        if let Some(result) = reject_unknown_args(
-            "plasmite_read",
-            args,
-            &["pool", "count", "after_seq", "since", "tags"],
-        ) {
-            return result;
-        }
-        let pool = match required_string_arg(args, "pool") {
-            Ok(name) => name,
-            Err(result) => return invalid_argument_result("plasmite_read", "pool", result),
+            Err(detail) => return invalid_argument_result(tool, "pool", detail),
         };
         let count = match optional_usize_arg(args, "count") {
-            Ok(Some(value)) => value,
             Ok(None) => DEFAULT_READ_COUNT,
-            Err(result) => return invalid_argument_result("plasmite_read", "count", result),
+            Ok(Some(count)) if (1..=MAX_READ_COUNT).contains(&count) => count,
+            Ok(Some(_)) => {
+                return invalid_argument_result(
+                    tool,
+                    "count",
+                    format!("must be between 1 and {MAX_READ_COUNT}"),
+                );
+            }
+            Err(detail) => return invalid_argument_result(tool, "count", detail),
         };
-        if count == 0 || count > MAX_READ_COUNT {
-            return invalid_argument_result(
-                "plasmite_read",
-                "count",
-                format!("count must be between 1 and {MAX_READ_COUNT}"),
-            );
+        let wait_ms = match optional_u64_arg(args, "timeout_ms") {
+            Ok(None) if live => DEFAULT_WAIT_TIMEOUT_MS,
+            Ok(None) => 0,
+            Ok(Some(value)) if value <= MAX_WAIT_TIMEOUT_MS => value,
+            Ok(Some(_)) => {
+                return invalid_argument_result(
+                    tool,
+                    "timeout_ms",
+                    format!("must be at most {MAX_WAIT_TIMEOUT_MS}"),
+                );
+            }
+            Err(detail) => return invalid_argument_result(tool, "timeout_ms", detail),
+        };
+        let mut options = match read_selection(args) {
+            Ok(options) => options,
+            Err((field, detail)) => return invalid_argument_result(tool, field, detail),
+        };
+        if let Some(cancel) = &self.cancel {
+            options = options.cancel(cancel.clone());
         }
-        let after_seq = match optional_u64_arg(args, "after_seq") {
-            Ok(value) => value,
-            Err(result) => return invalid_argument_result("plasmite_read", "after_seq", result),
-        };
-        let since = match optional_string_arg(args, "since") {
-            Ok(value) => value,
-            Err(result) => return invalid_argument_result("plasmite_read", "since", result),
-        };
-        let since_ns = match since {
-            Some(since) => match parse_since_ns(&since, now_unix_ns()) {
-                Ok(value) => Some(value),
-                Err(err) => return invalid_argument_result("plasmite_read", "since", err),
-            },
-            None => None,
-        };
-        let tags = match optional_string_array_arg(args, "tags") {
-            Ok(Some(tags)) => tags,
-            Ok(None) => Vec::new(),
-            Err(result) => return invalid_argument_result("plasmite_read", "tags", result),
-        };
         let pool_ref = PoolRef::name(pool.clone());
-        let opened = match self.client.open_pool(&pool_ref) {
+        let opened = match self.client.open_pool(&pool_ref, false) {
             Ok(pool) => pool,
             Err(err) => {
-                return api_error_tool_result(
-                    "plasmite_read",
-                    with_missing_pool_hint(err, &pool, false),
-                );
+                return api_error_tool_result(tool, with_missing_pool_hint(err, &pool, false));
             }
         };
-        let info = match opened.info() {
-            Ok(info) => info,
-            Err(err) => return api_error_tool_result("plasmite_read", err),
+        let reader = if live {
+            opened.follow_lite3(options)
+        } else {
+            opened.fetch_lite3(options)
         };
-        let batch = match read_messages_for_tool(&opened, &info, count, after_seq, since_ns, &tags)
-        {
-            Ok(batch) => batch,
-            Err(err) => return api_error_tool_result("plasmite_read", *err),
+        let mut reader = match reader {
+            Ok(reader) => reader,
+            Err(err) => return api_error_tool_result(tool, err),
         };
-        let message_count = batch.messages.len();
-
-        ToolCallResult::success_with_structured(
-            format!("Read {message_count} message(s) from `{pool}`."),
-            read_batch_json_value(batch, None),
-        )
-    }
-
-    fn tool_wait(&self, args: &Map<String, Value>) -> ToolCallResult {
-        if let Some(result) = reject_unknown_args(
-            "plasmite_wait",
-            args,
-            &["pool", "after_seq", "count", "timeout_ms", "tags"],
-        ) {
-            return result;
-        }
-        let pool = match required_string_arg(args, "pool") {
-            Ok(name) => name,
-            Err(result) => return invalid_argument_result("plasmite_wait", "pool", result),
-        };
-        let after_seq = match optional_u64_arg(args, "after_seq") {
-            Ok(value) => value,
-            Err(result) => return invalid_argument_result("plasmite_wait", "after_seq", result),
-        };
-        let count = match optional_usize_arg(args, "count") {
-            Ok(Some(value)) => value,
-            Ok(None) => DEFAULT_READ_COUNT,
-            Err(result) => return invalid_argument_result("plasmite_wait", "count", result),
-        };
-        if count == 0 || count > MAX_READ_COUNT {
-            return invalid_argument_result(
-                "plasmite_wait",
-                "count",
-                format!("count must be between 1 and {MAX_READ_COUNT}"),
-            );
-        }
-        let timeout_ms = match optional_u64_arg(args, "timeout_ms") {
-            Ok(Some(value)) => value,
-            Ok(None) => DEFAULT_WAIT_TIMEOUT_MS,
-            Err(result) => return invalid_argument_result("plasmite_wait", "timeout_ms", result),
-        };
-        if timeout_ms > MAX_WAIT_TIMEOUT_MS {
-            return invalid_argument_result(
-                "plasmite_wait",
-                "timeout_ms",
-                format!("timeout_ms must be <= {MAX_WAIT_TIMEOUT_MS}"),
-            );
-        }
-        let tags = match optional_string_array_arg(args, "tags") {
-            Ok(Some(tags)) => tags,
-            Ok(None) => Vec::new(),
-            Err(result) => return invalid_argument_result("plasmite_wait", "tags", result),
-        };
-
-        let pool_ref = PoolRef::name(pool.clone());
-        let opened = match self.client.open_pool(&pool_ref) {
-            Ok(pool) => pool,
-            Err(err) => {
-                return api_error_tool_result(
-                    "plasmite_wait",
-                    with_missing_pool_hint(err, &pool, false),
-                );
-            }
-        };
-        let mut cursor = match after_seq {
-            Some(cursor) => cursor,
-            None => match opened.info() {
-                Ok(info) => info.bounds.newest_seq.unwrap_or(0),
-                Err(err) => return api_error_tool_result("plasmite_wait", err),
-            },
-        };
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        let mut notify = crate::api::notify::open_for_pool(&opened);
-        let mut fell_behind = false;
-
-        loop {
-            if self
-                .cancel
-                .as_ref()
-                .is_some_and(|flag| flag.load(Ordering::Acquire))
-            {
-                return ToolCallResult::execution_error_text("access key was revoked");
-            }
-            let info = match opened.info() {
-                Ok(info) => info,
-                Err(err) => return api_error_tool_result("plasmite_wait", err),
-            };
-            let mut batch =
-                match read_messages_for_tool(&opened, &info, count, Some(cursor), None, &tags) {
-                    Ok(batch) => batch,
-                    Err(err) => return api_error_tool_result("plasmite_wait", *err),
-                };
-            fell_behind |= batch.fell_behind;
-            batch.fell_behind = fell_behind;
-            cursor = batch.next_after_seq.unwrap_or(cursor);
-            if !batch.messages.is_empty() {
-                let message_count = batch.messages.len();
-                return ToolCallResult::success_with_structured(
-                    format!("Received {message_count} message(s) from `{pool}`."),
-                    read_batch_json_value(batch, Some(false)),
-                );
-            }
-
-            let now = Instant::now();
-            if now >= deadline {
-                return ToolCallResult::success_with_structured(
-                    format!("No new messages arrived in `{pool}` before the timeout."),
-                    read_batch_json_value(batch, Some(true)),
-                );
-            }
-
-            let remaining = deadline - now;
-            if let Some(handle) = &mut notify {
-                let wait_for = remaining.min(if self.cancel.is_some() {
-                    WAIT_POLL_INTERVAL
-                } else {
-                    Duration::from_millis(250)
-                });
-                if handle.wait(wait_for) == crate::api::notify::NotifyWait::Unavailable {
-                    notify = None;
+        let deadline = Instant::now() + Duration::from_millis(wait_ms);
+        let mut messages = Vec::with_capacity(count);
+        let ended = loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match reader.poll(remaining) {
+                Ok(ReadPoll::Message(frame)) => {
+                    let message = match Message::from_lite3(frame.seq, frame.time, &frame.payload) {
+                        Ok(message) => message,
+                        Err(err) => return api_error_tool_result(tool, err),
+                    };
+                    messages.push(message_json_value(message));
+                    if messages.len() == count {
+                        let (next, upper) = reader.position();
+                        break if upper.is_some() && (next.is_none() || next > upper) {
+                            "complete"
+                        } else {
+                            "limit"
+                        };
+                    }
                 }
-            } else {
-                std::thread::sleep(remaining.min(WAIT_POLL_INTERVAL));
+                Ok(ReadPoll::Waiting) => break "limit",
+                Ok(ReadPoll::Complete) => break "complete",
+                Ok(ReadPoll::Cancelled) => {
+                    return api_error_tool_result(
+                        tool,
+                        Error::new(ErrorKind::Permission).with_message("access key was revoked"),
+                    );
+                }
+                Err(err) => return api_error_tool_result(tool, err),
             }
-        }
+        };
+        ToolCallResult::success_with_structured(
+            format!("Read {} message(s) from `{pool}`.", messages.len()),
+            json!({"messages": messages, "next_seq": reader.position().0, "ended": ended}),
+        )
     }
 }
 
@@ -1147,7 +999,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     "type": "object",
                     "properties": {
                         "pool": {"type":"string","description":"Destination pool name"},
-                        "data": {"description":"JSON message payload (object, array, string, number, etc.)"},
+                        "data": {"type":"object","description":"Application data"},
                         "tags": {"type":"array","items":{"type":"string"},"description":"Optional labels readers can filter on; surrounding whitespace is trimmed and empty tags are rejected"},
                         "create": {"type":"boolean","description":"Create a missing pool with the default fixed capacity (default: false)"}
                     },
@@ -1158,60 +1010,8 @@ impl McpHandler for PlasmiteMcpHandler {
                 annotations: ToolAnnotations::additive(),
                 access: McpToolAccess::Write,
             },
-            McpTool {
-                name: "plasmite_fetch".to_string(),
-                description: "Advanced exact lookup: fetch one retained message by its sequence number.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "pool": {"type":"string","description":"Pool name"},
-                        "seq": {"type":"integer","minimum":0,"description":"Sequence number"}
-                    },
-                    "required": ["pool", "seq"],
-                    "additionalProperties": false
-                }),
-                output_schema: property_output_schema("message", message_output_schema()),
-                annotations: ToolAnnotations::read_only(),
-                access: McpToolAccess::Read,
-            },
-            McpTool {
-                name: "plasmite_read".to_string(),
-                description: "Inspect recent or retained historical messages. By default, returns the latest 20 matching messages in append order. Use `since` for a time window; `after_seq` is an advanced resume cursor.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "pool": {"type":"string","description":"Pool name"},
-                        "count": {"type":"integer","minimum":1,"maximum":200,"description":"Max messages to return (default: 20, max: 200)"},
-                        "after_seq": {"type":"integer","minimum":0,"description":"Advanced: return messages after this resume cursor"},
-                        "since": {"type":"string","description":"Time window, e.g. '5m', '1h', '2024-01-15T00:00:00Z'"},
-                        "tags": {"type":"array","items":{"type":"string"},"description":"Return only messages containing all specified tags; surrounding whitespace is trimmed and empty tags are rejected"}
-                    },
-                    "required": ["pool"],
-                    "additionalProperties": false
-                }),
-                output_schema: read_output_schema(false),
-                annotations: ToolAnnotations::read_only(),
-                access: McpToolAccess::Read,
-            },
-            McpTool {
-                name: "plasmite_wait".to_string(),
-                description: "Wait once for new messages, returning when a matching batch arrives or the bounded timeout expires. Omit `after_seq` to start at the live edge. For repeated waits, pass the previous `next_after_seq` as `after_seq` so messages arriving between calls are not skipped.".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "pool": {"type":"string","description":"Pool name"},
-                        "after_seq": {"type":"integer","minimum":0,"description":"Advanced: resume after this cursor; omit to wait only for future messages"},
-                        "count": {"type":"integer","minimum":1,"maximum":200,"description":"Max messages to return (default: 20, max: 200)"},
-                        "timeout_ms": {"type":"integer","minimum":0,"maximum":60000,"description":"Bounded wait in milliseconds (default: 10000, max: 60000)"},
-                        "tags": {"type":"array","items":{"type":"string"},"description":"Return only messages containing all specified tags; surrounding whitespace is trimmed and empty tags are rejected"}
-                    },
-                    "required": ["pool"],
-                    "additionalProperties": false
-                }),
-                output_schema: read_output_schema(true),
-                annotations: ToolAnnotations::read_only(),
-                access: McpToolAccess::Read,
-            },
+            read_tool(false),
+            read_tool(true),
         ])
     }
 
@@ -1223,9 +1023,8 @@ impl McpHandler for PlasmiteMcpHandler {
             "plasmite_pool_info" => self.tool_pool_info(&args),
             "plasmite_pool_delete" => self.tool_pool_delete(&args),
             "plasmite_feed" => self.tool_feed(&args),
-            "plasmite_fetch" => self.tool_fetch(&args),
-            "plasmite_read" => self.tool_read(&args),
-            "plasmite_wait" => self.tool_wait(&args),
+            "plasmite_fetch" => self.tool_read(&args, false),
+            "plasmite_follow" => self.tool_read(&args, true),
             _ => {
                 return Err(JsonRpcError::invalid_params(format!(
                     "unknown tool: {}",
@@ -1266,7 +1065,7 @@ impl McpHandler for PlasmiteMcpHandler {
         let pool_ref = PoolRef::name(pool);
         let opened = self
             .client
-            .open_pool(&pool_ref)
+            .open_pool(&pool_ref, false)
             .map_err(api_error_jsonrpc)?;
         let info = opened.info().map_err(api_error_jsonrpc)?;
         let batch = read_messages_for_tool(&opened, &info, DEFAULT_READ_COUNT, None, None, &[])
@@ -1423,22 +1222,34 @@ fn required_string_arg(args: &Map<String, Value>, key: &str) -> Result<String, S
     }
 }
 
-fn optional_string_arg(args: &Map<String, Value>, key: &str) -> Result<Option<String>, String> {
-    match args.get(key) {
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => Err(format!("`{key}` must be a string")),
-    }
-}
-
 fn required_value_arg(args: &Map<String, Value>, key: &str) -> Result<Value, String> {
     args.get(key)
         .cloned()
         .ok_or_else(|| format!("missing required `{key}` argument"))
 }
 
-fn required_u64_arg(args: &Map<String, Value>, key: &str) -> Result<u64, String> {
-    optional_u64_arg(args, key)?.ok_or_else(|| format!("missing required `{key}` argument"))
+fn read_selection(args: &Map<String, Value>) -> Result<Read, (&'static str, String)> {
+    let last = optional_u64_arg(args, "last").map_err(|detail| ("last", detail))?;
+    let options = match (args.get("since"), last) {
+        (Some(_), Some(_)) => return Err(("since", "use either since or last".into())),
+        (Some(Value::String(value)), None) => Read::since(
+            value
+                .parse::<Since>()
+                .map_err(|err| ("since", err.to_string()))?,
+        ),
+        (Some(value), None) => Read::since(Since::Seq(value.as_u64().ok_or_else(|| {
+            (
+                "since",
+                "expected a positive sequence or time selection".into(),
+            )
+        })?)),
+        (None, Some(last)) => Read::last(last),
+        (None, None) => Read::new(),
+    };
+    let tags = optional_string_array_arg(args, "tags")
+        .map_err(|detail| ("tags", detail))?
+        .unwrap_or_default();
+    Ok(options.tags(tags))
 }
 
 fn optional_u64_arg(args: &Map<String, Value>, key: &str) -> Result<Option<u64>, String> {
@@ -1476,12 +1287,7 @@ fn reject_unknown_args(
     let field = args
         .keys()
         .find(|field| !allowed.contains(&field.as_str()))?;
-    let detail = if tool == "plasmite_read" && field == "where" {
-        "where filtering is not implemented on the MCP surface"
-    } else {
-        "unknown argument"
-    };
-    Some(invalid_argument_result(tool, field, detail))
+    Some(invalid_argument_result(tool, field, "unknown argument"))
 }
 
 fn optional_string_array_arg(
@@ -1521,7 +1327,13 @@ fn pool_info_json_value(pool_ref: &str, info: &PoolInfo) -> Value {
 }
 
 fn message_json_value(message: crate::api::Message) -> Value {
-    MessageWire::new(message.seq, message.time, message.meta.tags, message.data).into_json()
+    MessageWire::new(
+        message.seq,
+        message.time_rfc3339(),
+        message.meta.tags,
+        message.data,
+    )
+    .into_json()
 }
 
 struct ReadBatch {
@@ -1640,23 +1452,13 @@ fn read_messages_for_tool(
             continue;
         }
         next_after_seq = Some(frame.seq);
-        let message =
-            crate::api::Message::from_lite3(frame.seq, frame.timestamp_ns, &frame.payload)
-                .map_err(Box::new)?;
+        let message = crate::api::Message::from_lite3(frame.seq, frame.time, &frame.payload)
+            .map_err(Box::new)?;
         if !message_has_tags(&message.meta.tags, required_tags) {
             continue;
         }
-        if let Some(since_ns) = since_ns {
-            let message_ns = parse_rfc3339_ns(&message.time)
-                .map_err(|parse_err| {
-                    Error::new(ErrorKind::Corrupt)
-                        .with_message("stored message has invalid timestamp")
-                        .with_source(parse_err)
-                })
-                .map_err(Box::new)?;
-            if message_ns < since_ns {
-                continue;
-            }
+        if since_ns.is_some_and(|since| message.time < since) {
+            continue;
         }
 
         messages.push_back(message_json_value(message));
@@ -1686,22 +1488,6 @@ fn message_has_tags(message_tags: &[String], required_tags: &[String]) -> bool {
     required_tags
         .iter()
         .all(|required| message_tags.iter().any(|tag| tag == required))
-}
-
-fn parse_since_ns(input: &str, now_ns: u64) -> Result<u64, String> {
-    parse_shared_since_ns(input, now_ns).map_err(|_| {
-        "since must be RFC 3339 (2026-02-02T23:45:00Z) or relative like 5m".to_string()
-    })
-}
-
-fn now_unix_ns() -> u64 {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::from_secs(0));
-    duration
-        .as_secs()
-        .saturating_mul(1_000_000_000)
-        .saturating_add(u64::from(duration.subsec_nanos()))
 }
 
 fn invalid_argument_result(tool: &str, field: &str, detail: impl Into<String>) -> ToolCallResult {
@@ -1762,6 +1548,11 @@ fn api_error_tool_result(tool: &str, err: Error) -> ToolCallResult {
     }
     if let Some(offset) = err.offset() {
         structured.insert("offset".to_string(), json!(offset));
+    }
+
+    if let Some((missing, next_seq)) = err.missing().zip(err.next_seq()) {
+        structured.insert("missing".into(), json!(missing));
+        structured.insert("next_seq".into(), json!(next_seq));
     }
 
     ToolCallResult::execution_error_with_structured(text, Some(Value::Object(structured)))
@@ -1837,7 +1628,7 @@ fn pool_name_from_resource_uri(uri: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::AppendOptions;
+    use crate::api::{AppendOptions, PoolApiExt};
 
     #[derive(Default)]
     struct StubHandler {
@@ -1947,7 +1738,7 @@ mod tests {
                 && instructions.contains("most users can ignore sequence numbers")
                 && instructions.contains("target pool is unknown")
                 && instructions.contains("visible tool list is the server's effective access mode")
-                && instructions.contains("plasmite_fetch only for exact lookup")
+                && instructions.contains("Use plasmite_fetch for retained messages")
         }));
     }
 
@@ -2105,7 +1896,7 @@ mod tests {
             JsonRpcId::Number(8),
             "tools/call",
             Some(json!({
-                "name": "plasmite_read",
+                "name": "plasmite_fetch",
                 "arguments": {"pool":"missing"}
             })),
         )));
@@ -2169,7 +1960,10 @@ mod tests {
         assert!(!create_result.is_error);
 
         let pool_ref = PoolRef::name(pool.to_string());
-        let mut opened = handler.client.open_pool(&pool_ref).expect("open pool");
+        let mut opened = handler
+            .client
+            .open_pool(&pool_ref, false)
+            .expect("open pool");
         for idx in 0..count {
             let timestamp_ns = base_ns.saturating_add(idx.saturating_mul(1_000_000_000));
             opened
@@ -2219,7 +2013,7 @@ mod tests {
                 name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({
                     "pool": "demo",
-                    "seq": seq
+                    "since": seq, "count": 1
                 })),
             })
             .expect("fetch");
@@ -2229,8 +2023,7 @@ mod tests {
                 .structured_content
                 .as_ref()
                 .expect("structured")
-                .get("message")
-                .and_then(|value| value.get("data"))
+                .pointer("/messages/0/data")
                 .and_then(|value| value.get("msg"))
                 .and_then(Value::as_str),
             Some("hello")
@@ -2296,7 +2089,7 @@ mod tests {
 
         let read_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_read".to_string(),
+                name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({"pool":"events"})),
             })
             .expect("read");
@@ -2349,7 +2142,7 @@ mod tests {
 
         let read_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_read".to_string(),
+                name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({"pool": "missing"})),
             })
             .expect("read");
@@ -2401,13 +2194,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
 
-        for (field, detail) in [
-            ("where", "where filtering is not implemented"),
-            ("limit", "unknown argument"),
-        ] {
+        for (field, detail) in [("where", "unknown argument"), ("limit", "unknown argument")] {
             let result = handler
                 .call_tool(ToolCallRequest {
-                    name: "plasmite_read".to_string(),
+                    name: "plasmite_fetch".to_string(),
                     arguments: map_args(json!({"pool": "events", (field): true})),
                 })
                 .expect("read");
@@ -2454,8 +2244,7 @@ mod tests {
             "plasmite_pool_list",
             "plasmite_pool_info",
             "plasmite_fetch",
-            "plasmite_read",
-            "plasmite_wait",
+            "plasmite_follow",
         ] {
             let annotations = &tools
                 .iter()
@@ -2493,7 +2282,7 @@ mod tests {
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         let tools = handler.list_tools().expect("list tools");
 
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 7);
         for tool in &tools {
             assert_eq!(tool.output_schema["type"], json!("object"), "{}", tool.name);
             assert_eq!(
@@ -2512,7 +2301,8 @@ mod tests {
                     "Busy",
                     "Permission",
                     "Corrupt",
-                    "Io"
+                    "Io",
+                    "RetentionGap"
                 ]),
                 "{}",
                 tool.name
@@ -2521,7 +2311,7 @@ mod tests {
 
         let read = tools
             .iter()
-            .find(|tool| tool.name == "plasmite_read")
+            .find(|tool| tool.name == "plasmite_fetch")
             .expect("read tool");
         assert!(read.input_schema["properties"].get("where").is_none());
         assert_eq!(read.input_schema["additionalProperties"], json!(false));
@@ -2535,29 +2325,29 @@ mod tests {
                 .is_some_and(|description| description.contains("all specified tags"))
         );
         assert_eq!(
-            read.output_schema["oneOf"][0]["properties"]["fell_behind"]["type"],
-            json!("boolean")
+            read.output_schema["oneOf"][0]["properties"]["next_seq"]["minimum"],
+            json!(1)
         );
         let wait = tools
             .iter()
-            .find(|tool| tool.name == "plasmite_wait")
+            .find(|tool| tool.name == "plasmite_follow")
             .expect("wait tool");
         assert_eq!(wait.input_schema["required"], json!(["pool"]));
         assert_eq!(
-            wait.output_schema["oneOf"][0]["properties"]["timed_out"]["type"],
-            json!("boolean")
+            wait.output_schema["oneOf"][0]["properties"]["ended"]["enum"],
+            json!(["complete", "limit"])
         );
     }
 
     #[test]
-    fn plasmite_wait_without_cursor_starts_at_live_tail() {
+    fn plasmite_follow_without_cursor_starts_at_live_tail() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
 
         let wait_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_wait".to_string(),
+                name: "plasmite_follow".to_string(),
                 arguments: map_args(json!({
                     "pool": "events",
                     "timeout_ms": 10
@@ -2566,37 +2356,37 @@ mod tests {
             .expect("wait");
         assert!(!wait_result.is_error);
         let structured = wait_result.structured_content.expect("structured");
-        assert_eq!(structured["timed_out"], json!(true));
         assert_eq!(structured["messages"], json!([]));
-        assert_eq!(structured["next_after_seq"], json!(3));
-        assert_eq!(structured["last_returned_seq"], Value::Null);
-        assert_eq!(structured["fell_behind"], json!(false));
+        assert_eq!(structured["next_seq"], json!(4));
+        assert!(matches!(
+            structured["ended"].as_str(),
+            Some("limit" | "complete")
+        ));
     }
 
     #[test]
-    fn plasmite_wait_returns_available_messages_after_cursor() {
+    fn plasmite_follow_returns_available_messages_after_cursor() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
 
         let wait_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_wait".to_string(),
+                name: "plasmite_follow".to_string(),
                 arguments: map_args(json!({
                     "pool": "events",
-                    "after_seq": 1,
+                    "since": 2,
                     "timeout_ms": 50
                 })),
             })
             .expect("wait");
         assert!(!wait_result.is_error);
         let structured = wait_result.structured_content.expect("structured");
-        assert_eq!(structured["timed_out"], json!(false));
-        assert_eq!(structured["next_after_seq"], json!(3));
-        assert_eq!(structured["last_returned_seq"], json!(3));
-        assert_eq!(structured["oldest_available_seq"], json!(1));
-        assert_eq!(structured["newest_available_seq"], json!(3));
-        assert_eq!(structured["fell_behind"], json!(false));
+        assert_eq!(structured["next_seq"], json!(4));
+        assert!(matches!(
+            structured["ended"].as_str(),
+            Some("limit" | "complete")
+        ));
         assert_eq!(
             structured["messages"].as_array().expect("messages").len(),
             2
@@ -2604,91 +2394,91 @@ mod tests {
     }
 
     #[test]
-    fn plasmite_wait_returns_bounded_timeout() {
+    fn plasmite_follow_returns_bounded_timeout() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 1, 1_700_000_000_000_000_000);
 
         let wait_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_wait".to_string(),
+                name: "plasmite_follow".to_string(),
                 arguments: map_args(json!({
                     "pool": "events",
-                    "after_seq": 1,
+                    "since": 2,
                     "timeout_ms": 10
                 })),
             })
             .expect("wait");
         assert!(!wait_result.is_error);
         let structured = wait_result.structured_content.expect("structured");
-        assert_eq!(structured["timed_out"], json!(true));
-        assert_eq!(structured["next_after_seq"], json!(1));
-        assert_eq!(structured["last_returned_seq"], Value::Null);
-        assert_eq!(structured["oldest_available_seq"], json!(1));
-        assert_eq!(structured["newest_available_seq"], json!(1));
-        assert_eq!(structured["fell_behind"], json!(false));
+        assert_eq!(structured["next_seq"], json!(2));
         assert_eq!(structured["messages"], json!([]));
     }
 
     #[test]
-    fn plasmite_wait_timeout_advances_past_filtered_messages() {
+    fn plasmite_follow_timeout_advances_past_filtered_messages() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
 
         let wait_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_wait".to_string(),
+                name: "plasmite_follow".to_string(),
                 arguments: map_args(json!({
                     "pool": "events",
-                    "after_seq": 0,
+                    "since": 1,
                     "tags": ["missing"],
                     "timeout_ms": 10
                 })),
             })
             .expect("wait");
         let structured = wait_result.structured_content.expect("structured");
-        assert_eq!(structured["timed_out"], json!(true));
         assert_eq!(structured["messages"], json!([]));
-        assert_eq!(structured["next_after_seq"], json!(3));
-        assert_eq!(structured["last_returned_seq"], Value::Null);
+        assert_eq!(structured["next_seq"], json!(4));
+        assert!(matches!(
+            structured["ended"].as_str(),
+            Some("limit" | "complete")
+        ));
     }
 
     #[test]
-    fn plasmite_read_advances_cursor_past_filtered_messages() {
+    fn plasmite_fetch_advances_cursor_past_filtered_messages() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
 
         let read_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_read".to_string(),
+                name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({
                     "pool": "events",
-                    "after_seq": 0,
+                    "since": 1,
                     "tags": ["missing"]
                 })),
             })
             .expect("read");
         let structured = read_result.structured_content.expect("structured");
         assert_eq!(structured["messages"], json!([]));
-        assert_eq!(structured["next_after_seq"], json!(3));
-        assert_eq!(structured["last_returned_seq"], Value::Null);
-        assert_eq!(structured["oldest_available_seq"], json!(1));
-        assert_eq!(structured["newest_available_seq"], json!(3));
-        assert_eq!(structured["fell_behind"], json!(false));
+        assert_eq!(structured["next_seq"], json!(4));
+        assert!(matches!(
+            structured["ended"].as_str(),
+            Some("limit" | "complete")
+        ));
     }
 
     #[test]
-    fn plasmite_read_reports_when_cursor_fell_behind_retention() {
+    fn plasmite_fetch_reports_when_cursor_fell_behind_retention() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         let pool_ref = PoolRef::name("events");
         handler
             .client
-            .create_pool(&pool_ref, PoolOptions::new(DEFAULT_POOL_SIZE_BYTES))
+            .create_pool(&pool_ref, PoolOptions::new(DEFAULT_POOL_SIZE))
             .expect("create pool");
-        let mut opened = handler.client.open_pool(&pool_ref).expect("open pool");
+        let mut opened = handler
+            .client
+            .open_pool(&pool_ref, false)
+            .expect("open pool");
         let padding = "x".repeat(32 * 1024);
         for idx in 0..40_u64 {
             opened
@@ -2709,19 +2499,19 @@ mod tests {
 
         let read_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_read".to_string(),
+                name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({
                     "pool": "events",
-                    "after_seq": 0,
+                    "since": 1,
                     "count": 1
                 })),
             })
             .expect("read");
+        assert!(read_result.is_error);
         let structured = read_result.structured_content.expect("structured");
-        assert_eq!(structured["fell_behind"], json!(true));
-        assert_eq!(structured["oldest_available_seq"], json!(oldest));
-        assert_eq!(structured["messages"][0]["seq"], json!(oldest));
-        assert_eq!(structured["next_after_seq"], json!(oldest));
+        assert_eq!(structured["error_kind"], json!("RetentionGap"));
+        assert_eq!(structured["missing"], json!(1));
+        assert_eq!(structured["next_seq"], json!(oldest));
     }
 
     #[test]
@@ -2806,14 +2596,14 @@ mod tests {
     }
 
     #[test]
-    fn plasmite_read_defaults_to_last_twenty_messages_in_ascending_order() {
+    fn plasmite_fetch_defaults_to_first_twenty_messages_in_ascending_order() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 30, 1_700_000_000_000_000_000);
 
         let read_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_read".to_string(),
+                name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({"pool":"events"})),
             })
             .expect("read");
@@ -2822,26 +2612,26 @@ mod tests {
         assert_eq!(messages.len(), 20);
         assert_eq!(
             messages.first().and_then(|value| value["seq"].as_u64()),
-            Some(11)
+            Some(1)
         );
         assert_eq!(
             messages.last().and_then(|value| value["seq"].as_u64()),
-            Some(30)
+            Some(20)
         );
     }
 
     #[test]
-    fn plasmite_read_after_seq_returns_ascending_forward_window() {
+    fn plasmite_fetch_since_seq_returns_ascending_forward_window() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 10, 1_700_000_000_000_000_000);
 
         let read_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_read".to_string(),
+                name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({
                     "pool":"events",
-                    "after_seq": 4,
+                    "since": 5,
                     "count": 3
                 })),
             })
@@ -2854,15 +2644,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(seqs, vec![5, 6, 7]);
         let structured = read_result.structured_content.expect("structured");
-        assert_eq!(structured["next_after_seq"], json!(7));
-        assert_eq!(structured["last_returned_seq"], json!(7));
-        assert_eq!(structured["oldest_available_seq"], json!(1));
-        assert_eq!(structured["newest_available_seq"], json!(10));
-        assert_eq!(structured["fell_behind"], json!(false));
+        assert_eq!(structured["next_seq"], json!(8));
     }
 
     #[test]
-    fn plasmite_read_since_and_after_seq_intersect() {
+    fn plasmite_fetch_accepts_time_start() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         let base_ns = parse_rfc3339_ns("2026-01-01T00:00:00Z").expect("base");
@@ -2870,10 +2656,9 @@ mod tests {
 
         let read_result = handler
             .call_tool(ToolCallRequest {
-                name: "plasmite_read".to_string(),
+                name: "plasmite_fetch".to_string(),
                 arguments: map_args(json!({
                     "pool":"events",
-                    "after_seq": 2,
                     "since": "2026-01-01T00:00:03Z",
                     "count": 3
                 })),
@@ -2888,7 +2673,7 @@ mod tests {
     }
 
     #[test]
-    fn plasmite_read_rejects_count_outside_range() {
+    fn plasmite_fetch_rejects_count_outside_range() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         seed_pool_with_messages(&mut handler, "events", 1, 1_700_000_000_000_000_000);
@@ -2896,7 +2681,7 @@ mod tests {
         for count in [0, 201] {
             let read_result = handler
                 .call_tool(ToolCallRequest {
-                    name: "plasmite_read".to_string(),
+                    name: "plasmite_fetch".to_string(),
                     arguments: map_args(json!({
                         "pool":"events",
                         "count": count

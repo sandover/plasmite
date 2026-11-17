@@ -107,21 +107,21 @@ def main():
             with client.create_pool("producer", 8 * 1024 * 1024) as pool:
 
                 def retained():
-                    return pool.append_view(data)
+                    return pool.feed_view(data)
 
                 def native_result():
-                    message = pool.append_view(data)
+                    message = pool.feed_view(data)
                     return message.seq, plasmite.to_native(message.data)
 
                 def selected():
-                    message = pool.append_view(data)
+                    message = pool.feed_view(data)
                     return message.seq, message.data["metrics"]["power"]
 
                 lanes = {
                     "view_retained": (
                         retained,
                         lambda m: require(
-                            m.seq > 0 and m.timestamp_ns > 0 and m.data == data
+                            m.seq > 0 and m.time > 0 and m.data == data
                         ),
                     ),
                     "view_native": (
@@ -141,38 +141,38 @@ def main():
                         ).encode("utf-8")
 
                     def compact_identity():
-                        return pool.append_json_identity(
+                        return pool.feed_json_receipt(
                             compact(), [], plasmite.Durability.FAST
                         )
 
                     def legacy_selected():
-                        message = pool.append(data)
+                        message = pool.feed(data)
                         return message.seq, message.data["metrics"]["power"]
 
                     def legacy_native():
-                        message = pool.append(data)
+                        message = pool.feed(data)
                         return message.seq, message.data
 
                     def compact_native():
                         message = plasmite.parse_message(
-                            pool.append_json(compact(), [], plasmite.Durability.FAST)
+                            pool.feed_json(compact(), [], plasmite.Durability.FAST)
                         )
                         return message.seq, message.data
 
                     def view_json():
-                        return plasmite.to_json(pool.append_view(data))
+                        return plasmite.to_json(pool.feed_view(data))
 
                     def compact_json():
-                        return pool.append_json(
+                        return pool.feed_json(
                             compact(), [], plasmite.Durability.FAST
                         ).decode("utf-8")
 
-                    check_identity = lambda m: require(m.seq > 0 and m.timestamp_ns > 0)
+                    check_identity = lambda m: require(m.seq > 0 and m.time > 0)
                     check_json = lambda m: require(json.loads(m)["data"] == data)
                     lanes.update(
                         {
                             "legacy_identity": (
-                                lambda: pool.append_identity(data),
+                                lambda: pool.feed_receipt(data),
                                 check_identity,
                             ),
                             "compact_identity": (compact_identity, check_identity),
@@ -207,7 +207,7 @@ def main():
                         result["runs"].append(
                             dict(measured, fixture=shape, lane=lane, repeat=repeat + 1)
                         )
-                require(pool.get_view(pool.append_view(data).seq).data == data)
+                require(pool._get_view(pool.feed_view(data).seq).data == data)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(

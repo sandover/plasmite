@@ -60,7 +60,7 @@ def main():
                     for index in range(args.messages):
                         update(value, index)
                         if variant == "native-view":
-                            pool.append_view(value)
+                            pool.feed_view(value)
                         else:
                             pool.append_identity(value)
                 command = [

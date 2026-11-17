@@ -115,9 +115,9 @@ fn local_responses_include_the_remote_protocol_version() -> Result<(), Box<dyn s
     let temp = tempfile::tempdir()?;
     let server = TestServer::try_start(temp.path())?;
 
-    for path in ["/healthz", "/v0/pools"] {
+    for (path, version) in [("/healthz", "0"), ("/v2/pools", "2")] {
         let response = ureq::get(&format!("{}{path}", server.local_url)).call()?;
-        assert_eq!(response.header("plasmite-version"), Some("0"));
+        assert_eq!(response.header("plasmite-version"), Some(version), "{path}");
     }
     Ok(())
 }

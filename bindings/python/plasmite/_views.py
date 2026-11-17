@@ -9,22 +9,15 @@ import platform
 import sysconfig
 import sys
 import time
-from threading import Lock
 from collections.abc import ItemsView, Mapping, Sequence, ValuesView
-from datetime import datetime, timezone
 
 from . import (
     _LIB,
     _require_open,
     _take_error,
     plsm_error_t,
-    plsm_pool_t,
-    plsm_stream_t,
-    plsm_follow_options_t,
-    _stream_options,
     _optional_non_negative_int,
     _ensure_bytes,
-    Stream,
 )
 
 
@@ -100,30 +93,12 @@ MessageView.meta = property(lambda self: self._root["meta"])
 MessageView.tags = property(lambda self: self.meta["tags"])
 
 
-def _time_text(message):
-    seconds, nanoseconds = divmod(message.timestamp_ns, 1_000_000_000)
-    fraction = f"{nanoseconds:09d}".rstrip("0")
-    return (
-        datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-        + ("." + fraction if fraction else "")
-        + "Z"
-    )
-
-
-MessageView.time_rfc3339 = property(_time_text)
-MessageView.time = property(
-    lambda self: datetime.fromtimestamp(
-        self.timestamp_ns // 1_000_000_000, timezone.utc
-    ).replace(microsecond=self.timestamp_ns % 1_000_000_000 // 1000)
-)
-
-
 def to_native(value):
     """Build independent native containers for one view or subtree."""
     if isinstance(value, MessageView):
         return {
             "seq": value.seq,
-            "time": value.time_rfc3339,
+            "time": value.time,
             "meta": {"tags": to_native(value.tags)},
             "data": to_native(value.data),
         }
@@ -184,30 +159,6 @@ def append_view(pool, data, tags, durability):
     _require_open(pool._ptr, "pool")
     address = ctypes.cast(pool._ptr, ctypes.c_void_p).value
     return backend.append(address, data, normalized_tags, normalized_durability)
-
-
-class _Text(ctypes.Structure):
-    _fields_ = [("data", ctypes.c_char_p), ("len", ctypes.c_size_t)]
-
-
-_stream_configured = False
-_stream_configure_lock = Lock()
-
-
-def _configure_stream():
-    global _stream_configured
-    with _stream_configure_lock:
-        if not _stream_configured:
-            _LIB.plsm_pool_follow_views.argtypes = [
-                ctypes.POINTER(plsm_pool_t),
-                ctypes.POINTER(plsm_follow_options_t),
-                ctypes.POINTER(_Text),
-                ctypes.c_size_t,
-                ctypes.POINTER(ctypes.POINTER(plsm_stream_t)),
-                ctypes.POINTER(ctypes.POINTER(plsm_error_t)),
-            ]
-            _LIB.plsm_pool_follow_views.restype = ctypes.c_int
-            _stream_configured = True
 
 
 class ViewStream:
@@ -272,38 +223,3 @@ class ViewStream:
 
     def __exit__(self, *args):
         self.close()
-
-
-def follow_views(
-    pool,
-    *,
-    start=None,
-    finite=False,
-    max_messages=None,
-    tags=(),
-    timeout_ms=None,
-    cancel=None,
-    error_on_gap=False,
-):
-    max_messages = _optional_non_negative_int(max_messages, "max_messages")
-    timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
-    options = _stream_options(start, max_messages, timeout_ms, bool(error_on_gap), finite)
-    encoded_tags = [
-        _ensure_bytes(tag.encode("utf-8"), "tag")
-        for tag in (() if tags is None else tags)
-    ]
-    spans = (_Text * len(encoded_tags))(*[_Text(tag, len(tag)) for tag in encoded_tags])
-    _configure_stream()
-    output = ctypes.POINTER(plsm_stream_t)()
-    error = ctypes.POINTER(plsm_error_t)()
-    _require_open(pool._ptr, "pool")
-    if _LIB.plsm_pool_follow_views(
-        pool._ptr,
-        ctypes.byref(options),
-        spans,
-        len(spans),
-        ctypes.byref(output),
-        ctypes.byref(error),
-    ):
-        raise _take_error(error)
-    return ViewStream(Stream(output), cancel)

@@ -18,11 +18,10 @@ use std::path::PathBuf;
 COMMANDS
   Send and read
     feed POOL [MESSAGE | --file PATH]    Append objects or messages (stdin when omitted)
-    follow POOL [--tail N | --since TIME]
+    follow POOL [--last N | --since POSITION]
                 [--no-follow] [--replay SPEED]
                 [--tag TAG] [--where EXPR] [--one] [--timeout DURATION]
-    fetch POOL SEQ                      Read one message
-    tap POOL -- COMMAND...              Capture command output
+    fetch POOL [SEQ]                    Read retained messages and exit
     duplex POOL                         Send and receive in one session
 
   Manage pools
@@ -77,7 +76,7 @@ FIRST LOCAL WORKFLOW
   Errors and notices go to stderr. Help and completion stay text.
 
 OPTIONS AND HELP
-  Global options work before or after commands, up to tap's -- separator.
+  Global options work before or after commands.
   One --dir selects pools and server-side keys, including mcp; conflicting repeats fail.
   $ plasmite follow chat --dir ./pools --tail 10
   $ plasmite <command> --help
@@ -167,7 +166,7 @@ NOTES
         long_about = r#"Send JSON or pre-encoded Lite3 messages to a pool.
 
 Accepts local pool refs (name/path), HTTP(S) refs, and udp://host:port/<pool>,
-inline JSON, file input (-f/--file), or streams via stdin (auto-detected).
+inline JSON or streams via stdin (auto-detected).
 Use --input-format lite3-raw for one raw attachment from a file or stdin."#,
         after_help = r#"EXAMPLES
   $ plasmite feed foo '{"hello":"world"}'             # create a message
@@ -179,9 +178,10 @@ INPUT AND OUTPUT
   - Objects are application data unless they have exactly seq, time, meta.tags, and data
   - Complete messages preserve data and tags; source seq/time are validated and replaced
   - --tag adds tags to application objects; complete messages supply their own tags
-  - Choose one input source: MESSAGE, --file, or stdin
+  - Choose one input source: a message argument or stdin
   - JSON, marked YAML, and framed Lite3 detect automatically and append one message at a time
-  - --input-format chooses an explicit encoding; lite3-raw reads one attachment through EOF
+  - --input-format lines stores each input line as a message with a line field
+  - --input-format lite3-raw reads one attachment through EOF
   - Each append gets a new sequence and time and writes the complete destination message
   - UDP sends produce no storage receipt and may be lost, duplicated, or reordered
   - Invalid input stops immediately; earlier successful appends remain stored
@@ -194,36 +194,16 @@ INPUT AND OUTPUT
         data: Option<String>,
         #[arg(long, help = "Tag for application objects (repeatable)")]
         tag: Vec<String>,
-        #[arg(
-            short = 'f',
-            long = "file",
-            help = "Message file (JSON, YAML, or Lite3; use - for stdin)",
-            conflicts_with = "data",
-            value_hint = ValueHint::FilePath
-        )]
-        file: Option<String>,
         #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
         durability: String,
         #[arg(long, help = "Create the pool if it is missing")]
         create: bool,
         #[arg(
-            long = "create-size",
-            help = "Pool size when creating (bytes or K/M/G; creates if missing, leaves existing pools unchanged)"
-        )]
-        create_size: Option<String>,
-        #[arg(long, default_value_t = 0, help = "Retry count for Busy errors")]
-        retry: u32,
-        #[arg(
-            long,
-            help = "Delay between retries (e.g. 50ms, 1s, 2m; requires --retry > 0)"
-        )]
-        retry_delay: Option<String>,
-        #[arg(
             short = 'i',
             long = "input-format",
             default_value = "auto",
             value_enum,
-            help = "Input mode for file or stdin streams",
+            help = "Input mode for stdin streams",
             long_help = "Input encoding: auto recognizes JSON objects, marked YAML documents, and framed Lite3. JSON accepts whitespace-separated objects. YAML accepts marked documents or one unmarked document through EOF. lite3-raw reads one attachment through EOF."
         )]
         input: InputMode,
@@ -291,27 +271,41 @@ to the server's HTTPS /mcp URL and authorize through OAuth.
     #[command(
         arg_required_else_help = true,
         display_order = 2,
-        about = "Fetch one message by sequence number",
-        long_about = r#"Fetch a message from a local name/path or remote pool URL.
-Readable in a terminal; compact JSON in a pipe; --format json or --format yaml emits one message envelope.
-YAML uses explicit document start and end markers.
-Use --format lite3 for the original binary message bytes."#,
+        about = "Read retained messages and exit",
+        long_about = r#"Read a pool's retained history as it stood when the read opened.
+Use --since or --last to choose a starting position, and --tag to select messages.
+Give a sequence as a positional argument to fetch exactly one message."#,
         after_help = r#"EXAMPLES
   $ plasmite fetch foo 7
+  $ plasmite fetch foo --last 10
   $ plasmite fetch foo 7 | plasmite feed bar
   $ plasmite fetch foo 7 --format yaml
   $ plasmite fetch foo 7 --format lite3-raw > heartbeat.lite3
 
 OUTPUT
-  Writes one complete message; --format selects the same encoding as follow and feed.
-  lite3 writes a framed message; lite3-raw writes only the original attachment bytes.
+  Writes complete messages; --format selects the same encoding as follow and feed.
+  lite3 writes framed messages; lite3-raw requires an exact sequence.
   Local and remote reads share these formats. Errors go to stderr."#
     )]
     Fetch {
         #[arg(help = "Pool ref: local name/path or HTTP(S) pool URL")]
         pool: String,
-        #[arg(help = "Sequence number")]
-        seq: u64,
+        #[arg(help = "Fetch this exact sequence", conflicts_with_all = ["since", "last", "tags"])]
+        seq: Option<u64>,
+        #[arg(
+            long,
+            help = "Start at a sequence, oldest, an RFC 3339 time, or a duration"
+        )]
+        since: Option<String>,
+        #[arg(
+            long,
+            short = 'n',
+            conflicts_with = "since",
+            help = "Start N messages back"
+        )]
+        last: Option<u64>,
+        #[arg(long = "tag", help = "Require a tag (repeatable)")]
+        tags: Vec<String>,
     },
     #[command(
         arg_required_else_help = true,
@@ -319,127 +313,42 @@ OUTPUT
         about = "Follow messages from a pool",
         long_about = r#"Follow a pool and stream messages as they arrive.
 
-By default, `follow` waits for new messages forever (Ctrl-C to stop).
-Use `--tail N` to see recent history first, then keep following.
-Use --no-follow alone for all retained history, or with --tail or --since for a selection.
-Use --replay SPEED with history for local timed playback; it implies --no-follow."#,
+By default, follow waits for new messages. Use --since or --last to begin with
+retained history. Use --one to wait for one matching message and exit."#,
         after_help = r#"EXAMPLES
-  $ plasmite follow foo                                      # new messages
-  $ plasmite follow foo --tail 10                            # history, then new messages
-  $ plasmite follow foo --where '.data.ok == true' --one      # match and exit
-  $ plasmite follow source | jq -c '.data.temperature += 1' | plasmite feed destination
-  $ plasmite follow foo --tail 100 --no-follow > messages.jsonl
+  $ plasmite follow foo
+  $ plasmite follow foo --last 10
+  $ plasmite follow foo --tag ready --one
+  $ plasmite follow source | plasmite feed destination
 
 LOCAL AND REMOTE
-  Local, HTTP(S), and UDP refs support history, filters, and JSON, YAML, or framed Lite3.
-  HTTP(S) refs reject --create, --replay, --no-notify, and --quiet-drops.
-  UDP refs reject --create, --replay, and --no-notify.
-  UDP delivers messages in arrival order, including late messages and duplicates.
-  Only explicit server skips produce UDP gap notices; sequence jumps do not prove loss.
-  Finite UDP reads end on terminal progress and may leave packets in flight.
-  --no-follow alone reads all retained history and stops at the starting history bound.
-  --tail counts retained messages before filters; filters apply to history and new messages.
-  Finite reads exit nonzero if retention removes selected messages.
-  Live reads report dropped messages on stderr and continue."#
+  Use --create to open a missing local or HTTPS pool at the default size.
+  Tags select messages after the starting position is set.
+  Use fetch to read retained messages and exit.
+  Live reads report retention gaps on stderr and continue.
+  UDP delivers messages in arrival order, including late messages and duplicates."#
     )]
     Follow {
-        #[arg(
-            long,
-            help = "Read all retained history and exit, or select with --tail or --since"
-        )]
-        no_follow: bool,
         #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
-        #[arg(long, help = "Create local pool if missing before following")]
+        #[arg(long, help = "Create the pool if missing")]
         create: bool,
         #[arg(
-            long = "tail",
+            long,
             short = 'n',
-            default_value_t = 0,
-            help = "Print the last N messages first, then keep following"
+            conflicts_with = "since",
+            help = "Start N messages back"
         )]
-        tail: u64,
+        last: Option<u64>,
         #[arg(long, help = "Exit after emitting one matching message")]
         one: bool,
         #[arg(
             long,
-            help = "Exit 124 if no output within duration (e.g. 500ms, 5s, 1m)"
-        )]
-        timeout: Option<String>,
-        #[arg(
-            long,
-            help = "Only emit messages at or after this time (RFC 3339 or relative like 5m)",
-            conflicts_with = "tail"
+            help = "Start at a sequence, oldest, an RFC 3339 time, or a duration"
         )]
         since: Option<String>,
-        #[arg(
-            long = "where",
-            value_name = "EXPR",
-            help = "Filter messages by boolean expression (repeatable; AND across repeats)"
-        )]
-        where_expr: Vec<String>,
-        #[arg(
-            long = "tag",
-            value_name = "TAG",
-            help = "Filter messages by exact tag (repeatable; AND across repeats)"
-        )]
+        #[arg(long = "tag", value_name = "TAG", help = "Require a tag (repeatable)")]
         tags: Vec<String>,
-        #[arg(long = "quiet-drops", help = "Suppress drop notices on stderr")]
-        quiet_drops: bool,
-        #[arg(long = "no-notify", help = "Disable semaphore wakeups (poll only)")]
-        no_notify: bool,
-        #[arg(
-            long = "replay",
-            value_name = "SPEED",
-            help = "Replay local history at finite SPEED >= 0; requires --tail or --since"
-        )]
-        replay: Option<f64>,
-    },
-    #[command(
-        arg_required_else_help = true,
-        display_order = 3,
-        about = "Capture command output into a local pool",
-        override_usage = "plasmite tap [OPTIONS] <POOL> -- <COMMAND>...",
-        long_about = r#"Run a command, capture stdout/stderr as line messages, and append them to a local pool.
-
-Use `--` to separate tap flags from the wrapped command argv."#,
-        after_help = r#"EXAMPLES
-  $ plasmite tap build --create -- cargo build
-  $ plasmite follow build
-  $ plasmite follow build --where '.data.stream == "stderr"'
-  $ plasmite tap deploy --tag prod -- ./deploy.sh
-  $ plasmite tap api --create-size 64M -- ./server
-
-CAPTURE AND EXIT
-  - `--` is required before wrapped command args
-  - Use --create-size for long-running/high-volume captures
-  - Lines larger than the pool ring capacity fail; the wrapped child is terminated
-  - Emits start, stdout/stderr line, and exit messages
-  - Returns the wrapped command's exit status; `tap` accepts local pools only"#
-    )]
-    Tap {
-        #[arg(help = "Pool ref: local name/path")]
-        pool: String,
-        #[arg(long, help = "Create local pool if missing before tapping")]
-        create: bool,
-        #[arg(
-            long = "create-size",
-            help = "Pool size when creating (bytes or K/M/G; creates if missing, leaves existing pools unchanged)"
-        )]
-        create_size: Option<String>,
-        #[arg(long, help = "Repeatable tag for captured line messages")]
-        tag: Vec<String>,
-        #[arg(short = 'q', long, help = "Suppress child stdout/stderr passthrough")]
-        quiet: bool,
-        #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
-        durability: String,
-        #[arg(
-            last = true,
-            allow_hyphen_values = true,
-            value_name = "COMMAND",
-            help = "Wrapped command and args (must follow `--`)"
-        )]
-        command: Vec<String>,
     },
     #[command(
         arg_required_else_help = true,
@@ -461,20 +370,15 @@ INPUT AND OUTPUT
   stdout streams received complete messages, including your own appends.
   Input EOF closes sending while reception continues.
   --timeout exits 124 after a period without output.
-  HTTP(S) and UDP refs do not support --create."#
+  UDP refs do not support --create."#
     )]
     Duplex {
         #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
         #[arg(long, help = "Create local pool if missing before following")]
         create: bool,
-        #[arg(
-            long = "tail",
-            short = 'n',
-            default_value_t = 0,
-            help = "Print the last N messages first"
-        )]
-        tail: u64,
+        #[arg(long = "last", short = 'n', help = "Print the last N messages first")]
+        last: Option<u64>,
         #[arg(
             long,
             help = "Exit 124 if no output within duration (e.g. 500ms, 5s, 1m)"
@@ -482,8 +386,8 @@ INPUT AND OUTPUT
         timeout: Option<String>,
         #[arg(
             long,
-            help = "Start at or after this time (RFC 3339 or relative like 5m)",
-            conflicts_with = "tail"
+            help = "Start at a sequence, oldest, an RFC 3339 time, or a duration",
+            conflicts_with = "last"
         )]
         since: Option<String>,
     },

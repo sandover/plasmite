@@ -70,7 +70,7 @@ async fn browser_writes_accept_http2_authority() -> Result<(), Box<dyn std::erro
 
     let create = Request::builder()
         .method("POST")
-        .uri(format!("{origin}/v0/pools"))
+        .uri(format!("{origin}/v2/pools"))
         .header(ORIGIN, origin.as_str())
         .header(COOKIE, &cookie)
         .header(CONTENT_TYPE, "application/json")
@@ -79,7 +79,7 @@ async fn browser_writes_accept_http2_authority() -> Result<(), Box<dyn std::erro
 
     let conflicting_host = Request::builder()
         .method("POST")
-        .uri(format!("{origin}/v0/pools/http2-browser/append"))
+        .uri(format!("{origin}/v2/pools/http2-browser/feed"))
         .header(ORIGIN, origin.as_str())
         .header(HOST, "evil.example")
         .header(COOKIE, &cookie)
@@ -137,7 +137,7 @@ fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dy
         .split(';')
         .next()
         .ok_or("missing cookie value")?;
-    let pools_url = format!("{origin}/v0/pools");
+    let pools_url = format!("{origin}/v2/pools");
     assert!(agent.get(&pools_url).set("Cookie", cookie).call().is_ok());
     let forged_write = agent
         .post(&pools_url)
@@ -150,7 +150,7 @@ fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dy
         .set("Cookie", cookie)
         .set("Origin", origin)
         .send_json(json!({"pool":"browser"}))?;
-    let append_url = format!("{origin}/v0/pools/browser/append");
+    let append_url = format!("{origin}/v2/pools/browser/feed");
     let appended: Value = agent
         .post(&append_url)
         .set("Cookie", cookie)
@@ -160,20 +160,18 @@ fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dy
     let seq = appended["message"]["seq"]
         .as_u64()
         .ok_or("missing sequence")?;
-    let read: Value = agent
-        .get(&format!("{origin}/v0/pools/browser/messages/{seq}"))
+    let read_body = agent
+        .get(&format!("{origin}/v2/pools/browser/fetch?since={seq}"))
         .set("Cookie", cookie)
         .call()?
-        .into_json()?;
-    assert_eq!(
-        read["message"]["data"]["text"],
-        "<img src=x onerror=alert(1)>"
-    );
+        .into_string()?;
+    let read: Value = serde_json::from_str(read_body.lines().next().ok_or("missing message")?)?;
+    assert_eq!(read["data"]["text"], "<img src=x onerror=alert(1)>");
 
     drop(server);
     let server = TestServer::try_start(temp.path())?;
     let origin = &server.remote_url;
-    let pools_url = format!("{origin}/v0/pools");
+    let pools_url = format!("{origin}/v2/pools");
     let login_url = format!("{origin}/v0/browser/session");
     assert!(
         agent.get(&pools_url).set("Cookie", cookie).call().is_ok(),

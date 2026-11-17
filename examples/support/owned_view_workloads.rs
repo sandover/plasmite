@@ -1,8 +1,6 @@
 //! Focused immutable-view comparison; timings exclude fixture construction.
 //! Run: cargo run --release --example bench_owned_views -- 2000
-use plasmite::api::{
-    AppendOptions, Durability, Message, Pool, PoolApiExt, PoolOptions, lite3::Lite3Buf,
-};
+use plasmite::api::{Message, Pool, PoolOptions, lite3::Lite3Buf};
 use plasmite::view::MessageView;
 use std::hint::black_box;
 use std::time::Instant;
@@ -89,18 +87,27 @@ pub fn main() {
             PoolOptions::new(8 * 1024 * 1024),
         )
         .unwrap();
-        let options = AppendOptions::new(1, Durability::Fast);
-        let committed = pool.append_value(&expected_typed, &[], options).unwrap();
+        let committed = pool
+            .feed_view(
+                &MessageView::encode(&expected_typed, &[]).unwrap(),
+                plasmite::api::Feed::default(),
+            )
+            .unwrap();
         assert_eq!(
             committed.data().decode::<Reading<'_>>().unwrap(),
             expected_typed
         );
         assert_eq!(
-            pool.get_view(committed.seq)
-                .unwrap()
-                .data()
-                .decode::<Reading<'_>>()
-                .unwrap(),
+            pool.fetch_view(plasmite::api::Read::since(plasmite::api::Since::Seq(
+                committed.seq
+            )))
+            .unwrap()
+            .next_view()
+            .unwrap()
+            .unwrap()
+            .data()
+            .decode::<Reading<'_>>()
+            .unwrap(),
             expected_typed
         );
         let retagged = MessageView::encode(&v.data(), &["changed"]).unwrap();
@@ -143,7 +150,10 @@ pub fn main() {
                 }),
                 "append_typed_direct" => run(name, lane, n, || {
                     let committed = pool
-                        .append_value(black_box(&expected_typed), &[], options)
+                        .feed_view(
+                            &MessageView::encode(black_box(&expected_typed), &[]).unwrap(),
+                            plasmite::api::Feed::default(),
+                        )
                         .unwrap();
                     assert!(committed.seq > 0);
                     black_box(committed);
@@ -151,7 +161,9 @@ pub fn main() {
                 "append_typed_json" => run(name, lane, n, || {
                     let json = serde_json::to_vec(black_box(&expected_typed)).unwrap();
                     let encoded = MessageView::from_json(&json, &[]).unwrap();
-                    let committed = pool.append_view(&encoded, options).unwrap();
+                    let committed = pool
+                        .feed_view(&encoded, plasmite::api::Feed::default())
+                        .unwrap();
                     assert!(committed.seq > 0);
                     black_box(committed);
                 }),

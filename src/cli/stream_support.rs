@@ -1,820 +1,231 @@
-//! CLI helpers for stream commands.
+//! CLI output and cancellation for local, HTTPS and UDP readers.
 
-use super::output::OutputMode;
-use crate::ColorMode;
 use crate::RunOutcome;
-use crate::jq_filter::JqFilter;
-use crate::jq_filter::matches_all;
-use plasmite::api::Cursor;
-use plasmite::api::CursorResult;
-use plasmite::api::Error;
-use plasmite::api::ErrorKind;
-use plasmite::api::FollowOptions;
-use plasmite::api::Pool;
-use plasmite::api::PoolRef;
-use plasmite::api::RemoteClient;
-use plasmite::api::RemoteFollow;
-use plasmite::api::RemoteLite3Follow;
-use plasmite::api::RemoteLite3Frame;
-use plasmite::api::notify;
-use plasmite::api::notify::NotifyWait;
-use plasmite::api::{UdpClient, UdpEvent, UdpFollowOptions, UdpStart};
+use plasmite::api::{Error, Pool, UdpEvent};
 use plasmite::notice::Notice;
-use serde_json::Map;
-use serde_json::Value;
-use serde_json::json;
-use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
+use serde_json::{Map, json};
 use std::time::Duration;
-use std::time::Instant;
 
-use super::output_support::emit_lite3;
-use super::output_support::emit_message;
-use super::output_support::emit_notice;
-use super::output_support::notice_time_now;
-use super::support::message_from_frame;
+use super::output_support::{emit_lite3, emit_message, emit_notice, notice_time_now};
 use super::support::message_from_lite3;
-use super::support::message_to_json;
 
-#[derive(Debug, Clone)]
-pub(crate) struct DropNotice {
-    last_seen_seq: u64,
-    next_seen_seq: u64,
-    count: u64,
+pub(super) enum FollowSignal {
+    Opened,
+    Message,
 }
 
-impl DropNotice {
-    fn dropped_count(&self) -> u64 {
-        self.count
+/// Only poll a pipe. Regular files and terminals never have a downstream reader.
+pub(super) fn stdout_is_pipe() -> bool {
+    #[cfg(unix)]
+    {
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: fstat writes one stat to the supplied buffer on success.
+        unsafe {
+            libc::fstat(libc::STDOUT_FILENO, stat.as_mut_ptr()) == 0
+                && stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFIFO
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        false
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct FollowConfig {
-    pub(crate) tail: u64,
-    pub(crate) output_mode: OutputMode,
-    pub(crate) one: bool,
-    pub(crate) timeout: Option<Duration>,
-    pub(crate) since_ns: Option<u64>,
-    pub(crate) no_follow: bool,
-    pub(crate) required_tags: Vec<String>,
-    pub(crate) where_predicates: Vec<JqFilter>,
-    pub(crate) quiet_drops: bool,
-    pub(crate) notify: bool,
-    pub(crate) color_mode: ColorMode,
-    pub(crate) replay_speed: Option<f64>,
-    pub(crate) ready: Option<std::sync::mpsc::Sender<()>>,
-    pub(crate) stop: Option<Arc<AtomicBool>>,
+fn stdout_pipe_closed() -> bool {
+    #[cfg(unix)]
+    {
+        let mut output = libc::pollfd {
+            fd: libc::STDOUT_FILENO,
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        // SAFETY: poll receives one initialized descriptor and does not retain it.
+        (unsafe { libc::poll(&mut output, 1, 0) } > 0)
+            && output.revents & (libc::POLLERR | libc::POLLHUP) != 0
+    }
+    #[cfg(not(unix))]
+    false
 }
 
-// Duplex starts sending only after the receiver has chosen its starting position.
-fn signal_ready(cfg: &FollowConfig) {
-    if let Some(ready) = &cfg.ready {
-        let _ = ready.send(());
-    }
-}
-
-pub(crate) fn matches_required_tags(required_tags: &[String], message: &Value) -> bool {
-    if required_tags.is_empty() {
-        return true;
-    }
-    let Some(tags) = message
-        .get("meta")
-        .and_then(|meta| meta.get("tags"))
-        .and_then(Value::as_array)
-    else {
-        return false;
+fn report_read_gap(
+    error: Error,
+    args: &super::stream::FollowArgs,
+    context: &super::context::CliContext,
+) -> Result<plasmite::api::Read, Error> {
+    let (Some(missing), Some(next_seq)) = (error.missing(), error.next_seq()) else {
+        return Err(error);
     };
-    required_tags.iter().all(|required| {
-        tags.iter()
-            .any(|tag| tag.as_str().is_some_and(|value| value == required))
-    })
-}
-
-pub(crate) fn follow_should_stop(stop: Option<&Arc<AtomicBool>>) -> bool {
-    stop.is_some_and(|flag| flag.load(Ordering::Acquire))
-}
-
-// The timeout measures time without successful output, across transport waits.
-struct FollowDeadline {
-    timeout: Option<Duration>,
-    deadline: Option<Instant>,
-}
-
-impl FollowDeadline {
-    fn new(timeout: Option<Duration>) -> Self {
-        Self {
-            timeout,
-            deadline: timeout.map(|duration| Instant::now() + duration),
-        }
-    }
-
-    fn expired(&self) -> bool {
-        self.deadline.is_some_and(|at| Instant::now() >= at)
-    }
-
-    fn limit_wait(&self, max_wait: Duration) -> Duration {
-        self.deadline.map_or(max_wait, |at| {
-            at.saturating_duration_since(Instant::now()).min(max_wait)
-        })
-    }
-
-    fn emitted(&mut self) {
-        *self = Self::new(self.timeout);
-    }
-}
-
-// Sequence bounds and relative time use one start snapshot. Follow selects retained
-// frames, not matching frames; all selection predicates run after that selection.
-fn history_start(oldest: u64, newest: u64, cfg: &FollowConfig) -> u64 {
-    if oldest == 0 {
-        newest.saturating_add(1).max(1)
-    } else if cfg.since_ns.is_some() {
-        oldest.max(1)
-    } else if cfg.tail > 0 {
-        newest
-            .saturating_sub(cfg.tail.saturating_sub(1))
-            .max(oldest)
-            .max(1)
-    } else if cfg.no_follow {
-        oldest.max(1)
-    } else {
-        newest.saturating_add(1).max(1)
-    }
-}
-
-fn matches_message(
-    cfg: &FollowConfig,
-    since_ns: Option<u64>,
-    timestamp_ns: u64,
-    message: &Value,
-) -> Result<bool, Error> {
-    Ok(since_ns.is_none_or(|since| timestamp_ns >= since)
-        && matches_required_tags(&cfg.required_tags, message)
-        && matches_all(&cfg.where_predicates, message)?)
-}
-
-struct DropReporter<'a> {
-    cfg: &'a FollowConfig,
-    pool: &'a str,
-    path: String,
-    pending: Option<DropNotice>,
-    last_notice_at: Option<Instant>,
-    had_gap: bool,
-}
-
-impl<'a> DropReporter<'a> {
-    fn new(cfg: &'a FollowConfig, pool: &'a str, path: String) -> Self {
-        Self {
-            cfg,
-            pool,
-            path,
-            pending: None,
-            last_notice_at: None,
-            had_gap: false,
-        }
-    }
-
-    fn gap(&mut self, expected_seq: u64, next_seq: u64) {
-        if next_seq <= expected_seq {
-            return;
-        }
-        self.had_gap = true;
-        if self.cfg.quiet_drops {
-            return;
-        }
-        match &mut self.pending {
-            Some(pending) => {
-                pending.next_seen_seq = next_seq;
-                pending.count = pending.count.saturating_add(next_seq - expected_seq);
-            }
-            None => {
-                self.pending = Some(DropNotice {
-                    last_seen_seq: expected_seq.saturating_sub(1),
-                    next_seen_seq: next_seq,
-                    count: next_seq - expected_seq,
-                })
-            }
-        }
-        self.flush(false);
-    }
-
-    fn flush(&mut self, force: bool) {
-        if !force
-            && self
-                .last_notice_at
-                .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
-        {
-            return;
-        }
-        let Some(pending) = self.pending.take() else {
-            return;
-        };
-        let Some(time) = notice_time_now() else {
-            return;
-        };
-        let dropped_count = pending.dropped_count();
-        let mut details = Map::new();
-        details.insert("last_seen_seq".into(), json!(pending.last_seen_seq));
-        details.insert("next_seen_seq".into(), json!(pending.next_seen_seq));
-        details.insert("dropped_count".into(), json!(dropped_count));
-        details.insert("pool_path".into(), json!(self.path));
+    if let Some(time) = notice_time_now() {
         emit_notice(
             &Notice {
                 kind: "drop".into(),
                 time,
                 cmd: "follow".into(),
-                pool: self.pool.into(),
-                message: format!("dropped {dropped_count} messages"),
-                details,
+                pool: args.pool.clone(),
+                message: format!("dropped {} messages", next_seq - missing),
+                details: Map::from_iter([
+                    ("last_seen_seq".into(), json!(missing.saturating_sub(1))),
+                    ("next_seen_seq".into(), json!(next_seq)),
+                    ("dropped_count".into(), json!(next_seq - missing)),
+                ]),
             },
-            self.cfg.color_mode,
-            self.cfg.output_mode,
+            context.color_mode(),
+            context.output_mode(),
         );
-        self.last_notice_at = Some(Instant::now());
     }
-
-    fn finish(&mut self, code: i32) -> RunOutcome {
-        self.flush(true);
-        RunOutcome::with_code(if code == 0 && self.cfg.no_follow && self.had_gap {
-            1
-        } else {
-            code
-        })
-    }
+    Ok(plasmite::api::Read::since(plasmite::api::Since::Seq(next_seq)).tags(args.tags.clone()))
 }
 
-// UDP retains the full-message path and its aligned payload copy.
-fn needs_message(cfg: &FollowConfig) -> bool {
-    !cfg.output_mode.is_binary()
-        || !cfg.required_tags.is_empty()
-        || !cfg.where_predicates.is_empty()
+fn emit_frame(
+    seq: u64,
+    time: u64,
+    payload: &[u8],
+    context: &super::context::CliContext,
+) -> Result<(), Error> {
+    let mode = context.output_mode();
+    if mode.is_binary() {
+        return emit_lite3(seq, time, payload, mode);
+    }
+    let message = message_from_lite3(seq, time, payload)?;
+    emit_message(message, mode, context.color_mode())
 }
 
-fn needs_data_value(cfg: &FollowConfig) -> bool {
-    !cfg.output_mode.is_binary() || !cfg.where_predicates.is_empty()
-}
-
-fn matches_raw(cfg: &FollowConfig, timestamp_ns: u64, payload: &[u8]) -> Result<bool, Error> {
-    if !cfg.required_tags.is_empty() {
-        let meta = plasmite::api::Meta::from_lite3(payload)?;
-        if !cfg.required_tags.iter().all(|tag| meta.tags.contains(tag)) {
-            return Ok(false);
-        }
-    }
-    Ok(cfg.since_ns.is_none_or(|since| timestamp_ns >= since))
-}
-
-enum RemoteStream {
-    Json(RemoteFollow),
-    Lite3(RemoteLite3Follow),
-}
-
-enum RemoteRecord {
-    Json(plasmite::api::Message),
-    Lite3(RemoteLite3Frame),
-}
-
-impl RemoteStream {
-    fn next_record(&mut self) -> Result<Option<RemoteRecord>, Error> {
-        match self {
-            Self::Json(tail) => tail.next_message().map(|item| item.map(RemoteRecord::Json)),
-            Self::Lite3(tail) => tail.next_frame().map(|item| item.map(RemoteRecord::Lite3)),
-        }
-    }
-}
-
-impl RemoteRecord {
-    fn seq(&self) -> u64 {
-        match self {
-            Self::Json(message) => message.seq,
-            Self::Lite3(frame) => frame.seq,
-        }
-    }
-
-    fn timestamp_ns(&self, needed: bool) -> Result<u64, Error> {
-        match self {
-            Self::Lite3(frame) => Ok(frame.timestamp_ns),
-            Self::Json(message) if needed => {
-                let time = time::OffsetDateTime::parse(
-                    &message.time,
-                    &time::format_description::well_known::Rfc3339,
-                )
-                .map_err(|err| {
-                    Error::new(ErrorKind::Corrupt)
-                        .with_message("invalid remote message timestamp")
-                        .with_source(err)
-                })?;
-                Ok(u64::try_from(time.unix_timestamp_nanos()).unwrap_or(0))
-            }
-            Self::Json(_) => Ok(0),
-        }
-    }
-}
-
-pub(crate) fn follow_remote(
-    client: &RemoteClient,
-    pool: &str,
-    cfg: &FollowConfig,
-) -> Result<RunOutcome, Error> {
-    if cfg.replay_speed.is_some() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote follow does not support --replay")
-            .with_hint("Use local follow with --replay, or omit --replay for remote streams."));
-    }
-    if !cfg.notify {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote follow does not support --no-notify")
-            .with_hint("--no-notify only applies to local pool semaphores."));
-    }
-    let remote_pool = client.open_pool(&PoolRef::name(pool))?;
-    let bounds = remote_pool.info()?.bounds;
-    let upper = bounds.newest_seq.unwrap_or(0);
-    let mut expected = history_start(bounds.oldest_seq.unwrap_or(0), upper, cfg);
-    let since_ns = cfg.since_ns;
-    signal_ready(cfg);
-    let mut drops = DropReporter::new(cfg, pool, format!("{}/{}", client.base_url(), pool));
-    if cfg.no_follow && expected > upper {
-        return Ok(drops.finish(0));
-    }
-    let mut deadline = FollowDeadline::new(cfg.timeout);
-    loop {
-        if follow_should_stop(cfg.stop.as_ref()) {
-            return Ok(drops.finish(0));
-        }
-        if cfg.no_follow && expected > upper {
-            return Ok(drops.finish(0));
-        }
-        if deadline.expired() {
-            return Ok(drops.finish(124));
-        }
-        let mut options = FollowOptions::new();
-        options.start = plasmite::api::FollowStart::Sequence(expected);
-        // Finite reads and cancellable duplex sessions use short server waits
-        // so they can observe retention/cancellation without another message.
-        // An ordinary unbounded follow uses the server's streaming lifetime.
-        options.timeout = (cfg.no_follow || cfg.stop.is_some() || cfg.timeout.is_some())
-            .then(|| deadline.limit_wait(Duration::from_millis(100)));
-        if cfg.no_follow {
-            options.max_messages = Some(
-                usize::try_from(upper.saturating_sub(expected).saturating_add(1))
-                    .unwrap_or(usize::MAX),
-            );
-        }
-        let result = if cfg.output_mode.is_binary() {
-            remote_pool.follow_lite3(options).map(RemoteStream::Lite3)
-        } else {
-            remote_pool.follow(options).map(RemoteStream::Json)
-        };
-        let mut tail = result?;
-        while let Some(record) = tail.next_record()? {
-            if follow_should_stop(cfg.stop.as_ref()) {
-                return Ok(drops.finish(0));
-            }
-            if cfg.no_follow && record.seq() > upper {
-                drops.gap(expected, upper.saturating_add(1));
-                return Ok(drops.finish(0));
-            }
-            if record.seq() < expected {
-                continue;
-            }
-            drops.gap(expected, record.seq());
-            // At u64::MAX the next sequence cannot advance past the snapshot.
-            let reached_end = cfg.no_follow && record.seq() == upper;
-            expected = record.seq().saturating_add(1);
-            let timestamp_ns = record.timestamp_ns(since_ns.is_some())?;
-            let (value, frame) = match record {
-                RemoteRecord::Json(message) => (Some(message_to_json(message)), None),
-                RemoteRecord::Lite3(frame) => {
-                    let value = if needs_data_value(cfg) {
-                        Some(message_from_lite3(
-                            frame.seq,
-                            frame.timestamp_ns,
-                            &frame.payload,
-                        )?)
-                    } else {
-                        None
-                    };
-                    (value, Some(frame))
-                }
-            };
-            let matches = match (value.as_ref(), frame.as_ref()) {
-                (Some(value), _) => matches_message(cfg, since_ns, timestamp_ns, value)?,
-                (None, Some(frame)) => matches_raw(cfg, timestamp_ns, &frame.payload)?,
-                (None, None) => since_ns.is_none_or(|since| timestamp_ns >= since),
-            };
-            if matches {
-                // Receiving a matching line after the deadline must not reset
-                // the timer, even if the transport buffered or delayed it.
-                if deadline.expired() {
-                    return Ok(drops.finish(124));
-                }
-                if let Some(frame) = frame {
-                    emit_lite3(
-                        frame.seq,
-                        frame.timestamp_ns,
-                        &frame.payload,
-                        cfg.output_mode,
-                    )?;
-                } else if let Some(value) = value {
-                    emit_message(value, cfg.output_mode, cfg.color_mode)?;
-                }
-                deadline.emitted();
-                if cfg.one {
-                    return Ok(drops.finish(0));
-                }
-            }
-            if reached_end {
-                return Ok(drops.finish(0));
-            }
-            if deadline.expired() {
-                return Ok(drops.finish(124));
-            }
-        }
-        if cfg.no_follow {
-            // The stream can end after retention removes the rest of the
-            // snapshot. A fresh bound identifies that gap without waiting for
-            // future messages to fill the original count.
-            let retained = remote_pool.info()?.bounds;
-            let next = retained
-                .oldest_seq
-                .unwrap_or_else(|| upper.saturating_add(1));
-            if next > expected {
-                let next = next.min(upper.saturating_add(1));
-                drops.gap(expected, next);
-                expected = next;
-            }
-        }
-        drops.flush(false);
-    }
-}
-
-pub(crate) fn follow_udp(
-    endpoint: &str,
-    pool: &str,
-    cfg: &FollowConfig,
-) -> Result<RunOutcome, Error> {
-    if cfg.replay_speed.is_some() || !cfg.notify {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("UDP follow does not support --replay or --no-notify"));
-    }
-    let client = UdpClient::new(endpoint)?;
-    let handle = client.open_pool(&PoolRef::name(pool))?;
-    let start = if let Some(since) = cfg.since_ns {
-        UdpStart::Since(since)
-    } else if cfg.tail > 0 {
-        UdpStart::Last(cfg.tail)
-    } else if cfg.no_follow {
-        UdpStart::Last(u64::MAX)
-    } else {
-        UdpStart::New
-    };
-    let mut follow = handle.follow(UdpFollowOptions {
-        start,
-        live: !cfg.no_follow,
-    })?;
-    signal_ready(cfg);
-    let mut deadline = FollowDeadline::new(cfg.timeout);
-    let mut server_skipped = false;
-    let mut retention_gap = false;
-    loop {
-        if follow_should_stop(cfg.stop.as_ref()) {
-            follow.close();
-            return Ok(RunOutcome::with_code(0));
-        }
-        if deadline.expired() {
-            return Ok(RunOutcome::with_code(124));
-        }
-        let wait = deadline.limit_wait(Duration::from_millis(50));
-        let event = follow.next_event_timeout(wait)?;
-        let Some(event) = event else {
-            if follow.is_finished() {
-                return Ok(RunOutcome::with_code(if retention_gap {
-                    9
-                } else if server_skipped {
-                    1
-                } else {
-                    0
-                }));
-            }
-            continue;
-        };
-        match event {
-            UdpEvent::Gap {
-                first,
-                last,
-                reason,
-            } => {
-                server_skipped = true;
-                if matches!(reason, plasmite::api::UdpSkipReason::Retention) {
-                    retention_gap = true;
-                }
-                if !cfg.quiet_drops {
-                    let mut details = Map::new();
-                    details.insert("first_seq".into(), json!(first));
-                    details.insert("last_seq".into(), json!(last));
-                    details.insert("reason".into(), json!(format!("{reason:?}").to_lowercase()));
-                    emit_notice(
-                        &Notice {
-                            kind: "udp-gap".into(),
-                            time: notice_time_now().unwrap_or_default(),
-                            cmd: "follow".into(),
-                            pool: pool.into(),
-                            message: format!("UDP server skipped sequences {first} through {last}"),
-                            details,
-                        },
-                        cfg.color_mode,
-                        cfg.output_mode,
-                    );
-                }
-            }
-            UdpEvent::Progress {
-                retention_gap: retained,
-                ..
-            } => {
-                if retained && !retention_gap && !cfg.quiet_drops {
-                    emit_notice(
-                        &Notice {
-                            kind: "udp-gap".into(),
-                            time: notice_time_now().unwrap_or_default(),
-                            cmd: "follow".into(),
-                            pool: pool.into(),
-                            message: "UDP server reported a retention gap; range unavailable"
-                                .into(),
-                            details: Map::from_iter([("reason".into(), json!("retention"))]),
-                        },
-                        cfg.color_mode,
-                        cfg.output_mode,
-                    );
-                }
-                retention_gap |= retained;
-                server_skipped |= retained;
-            }
-            UdpEvent::Frame(frame) => {
-                let value = if needs_message(cfg) {
-                    Some(message_to_json(frame.message()?))
-                } else {
-                    None
-                };
-                let matches = match value.as_ref() {
-                    Some(value) => matches_message(cfg, cfg.since_ns, frame.timestamp_ns, value)?,
-                    None => cfg.since_ns.is_none_or(|since| frame.timestamp_ns >= since),
-                };
-                if matches {
-                    if deadline.expired() {
-                        return Ok(RunOutcome::with_code(124));
-                    }
-                    if cfg.output_mode.is_binary() {
-                        emit_lite3(
-                            frame.seq,
-                            frame.timestamp_ns,
-                            &frame.payload,
-                            cfg.output_mode,
-                        )?;
-                    } else {
-                        emit_message(
-                            value.expect("text output decodes message"),
-                            cfg.output_mode,
-                            cfg.color_mode,
-                        )?;
-                    }
-                    deadline.emitted();
-                    if cfg.one {
-                        return Ok(RunOutcome::with_code(0));
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn follow_pool(
+pub(super) fn follow_local(
     pool: &Pool,
-    pool_ref: &str,
-    pool_path: &Path,
-    cfg: FollowConfig,
+    args: &super::stream::FollowArgs,
+    read: plasmite::api::Read,
+    context: &super::context::CliContext,
+    signal: &mut dyn FnMut(FollowSignal),
 ) -> Result<RunOutcome, Error> {
-    let header = pool.header_from_mmap()?;
-    let upper = header.newest_seq;
-    let mut expected = history_start(header.oldest_seq, upper, &cfg);
-    let since_ns = cfg.since_ns;
-    let mut cursor = Cursor::new();
-    // Scan retained frames once. The sequence lower bound skips earlier frames
-    // without buffering them and stays fixed if the writer advances the ring.
-    cursor.seek_to(if cfg.since_ns.is_some() || cfg.tail > 0 || cfg.no_follow {
-        header.tail_off
-    } else {
-        header.head_off
-    } as usize);
-    signal_ready(&cfg);
-    let finite = cfg.no_follow || cfg.replay_speed.is_some();
-    let mut previous_timestamp = None::<u64>;
-    let mut drops = DropReporter::new(&cfg, pool_ref, pool_path.display().to_string());
-    let mut deadline = FollowDeadline::new(cfg.timeout);
-    let mut notify_handle = if cfg.notify {
-        notify::open_for_pool(pool)
-    } else {
-        None
-    };
-    let mut backoff = Duration::from_millis(1);
+    use plasmite::api::ReadPoll;
+    let mut options = read.tags(args.tags.clone());
+    let watch = stdout_is_pipe();
     loop {
-        if follow_should_stop(cfg.stop.as_ref()) || (finite && expected > upper) {
-            return Ok(drops.finish(0));
-        }
-        if deadline.expired() {
-            return Ok(drops.finish(124));
-        }
-        match cursor.next(pool)? {
-            CursorResult::Message(frame) => {
-                if frame.seq < expected {
-                    continue;
+        let result = (|| {
+            let mut reader = pool.follow_lite3(options)?;
+            signal(FollowSignal::Opened);
+            loop {
+                if watch && stdout_pipe_closed() {
+                    return Ok(());
                 }
-                if finite && frame.seq > upper {
-                    drops.gap(expected, upper.saturating_add(1));
-                    return Ok(drops.finish(0));
-                }
-                drops.gap(expected, frame.seq);
-                expected = frame.seq.saturating_add(1);
-                let message = if needs_data_value(&cfg) {
-                    Some(message_from_frame(&frame)?)
-                } else {
-                    None
-                };
-                let matches = match message.as_ref() {
-                    Some(message) => matches_message(&cfg, since_ns, frame.timestamp_ns, message)?,
-                    None => matches_raw(&cfg, frame.timestamp_ns, &frame.payload)?,
-                };
-                if matches {
-                    if let (Some(speed), Some(previous)) = (cfg.replay_speed, previous_timestamp)
-                        && speed > 0.0
-                    {
-                        let delay_ns =
-                            (frame.timestamp_ns.saturating_sub(previous) as f64 / speed) as u64;
-                        // Bounded waits keep duplex/caller cancellation responsive.
-                        let until = Instant::now()
-                            .checked_add(Duration::from_nanos(delay_ns))
-                            .ok_or_else(|| {
-                                Error::new(ErrorKind::Usage)
-                                    .with_message("replay delay is too large")
-                            })?;
-                        while Instant::now() < until {
-                            if follow_should_stop(cfg.stop.as_ref()) {
-                                return Ok(drops.finish(0));
-                            }
-                            if deadline.expired() {
-                                return Ok(drops.finish(124));
-                            }
-                            let wait = until
-                                .saturating_duration_since(Instant::now())
-                                .min(Duration::from_millis(50));
-                            std::thread::sleep(deadline.limit_wait(wait));
+                match reader.poll(Duration::from_millis(50))? {
+                    ReadPoll::Message(frame) => {
+                        emit_frame(frame.seq, frame.time, &frame.payload, context)?;
+                        signal(FollowSignal::Message);
+                        if args.one {
+                            return Ok(());
                         }
                     }
-                    // A playback delay may finish on the same wake-up that
-                    // crosses the output deadline; check before emitting.
-                    if deadline.expired() {
-                        return Ok(drops.finish(124));
-                    }
-                    if follow_should_stop(cfg.stop.as_ref()) {
-                        return Ok(drops.finish(0));
-                    }
-                    if cfg.output_mode.is_binary() {
-                        emit_lite3(
-                            frame.seq,
-                            frame.timestamp_ns,
-                            &frame.payload,
-                            cfg.output_mode,
-                        )?;
-                    } else {
-                        emit_message(
-                            message.expect("text mode decodes message"),
-                            cfg.output_mode,
-                            cfg.color_mode,
-                        )?;
-                    }
-                    previous_timestamp = Some(frame.timestamp_ns);
-                    deadline.emitted();
-                    if cfg.one {
-                        return Ok(drops.finish(0));
-                    }
+                    ReadPoll::Waiting => {}
+                    ReadPoll::Complete | ReadPoll::Cancelled => return Ok(()),
                 }
-                drops.flush(false);
-                backoff = Duration::from_millis(1);
             }
-            CursorResult::FellBehind => {
-                let header = pool.header_from_mmap()?;
-                let next = if header.oldest_seq == 0 {
-                    header.newest_seq.saturating_add(1)
-                } else {
-                    header.oldest_seq
-                };
-                let next = if finite {
-                    next.min(upper.saturating_add(1))
-                } else {
-                    next
-                };
-                drops.gap(expected, next);
-                expected = expected.max(next);
-                cursor.seek_to(header.tail_off as usize);
-            }
-            CursorResult::WouldBlock => {
-                if finite {
-                    // All committed frames through the initial upper bound
-                    // have been visited or removed. No later append belongs
-                    // to this read.
-                    drops.gap(expected, upper.saturating_add(1));
-                    return Ok(drops.finish(0));
-                }
-                drops.flush(false);
-                let wait = deadline.limit_wait(backoff);
-                let waited = notify_handle.as_mut().map(|handle| handle.wait(wait));
-                if matches!(waited, None | Some(NotifyWait::Unavailable)) {
-                    notify_handle = None;
-                    std::thread::sleep(wait);
-                }
-                backoff = (backoff * 2).min(Duration::from_millis(50));
-            }
+        })();
+        match result {
+            Ok(()) => return Ok(RunOutcome::with_code(0)),
+            Err(error) => options = report_read_gap(error, args, context)?,
         }
     }
 }
 
-#[cfg(test)]
-mod metadata_tests {
-    use super::*;
-    use plasmite::api::lite3::{Lite3Buf, encode_message};
+pub(super) fn report_udp_skip(
+    command: &str,
+    pool: &str,
+    first: u64,
+    last: u64,
+    reason: plasmite::api::UdpSkipReason,
+    context: &super::context::CliContext,
+) {
+    emit_notice(
+        &Notice {
+            kind: "udp-gap".into(),
+            time: notice_time_now().unwrap_or_default(),
+            cmd: command.into(),
+            pool: pool.into(),
+            message: format!("UDP server skipped sequences {first} through {last}"),
+            details: Map::from_iter([
+                ("first_seq".into(), json!(first)),
+                ("last_seq".into(), json!(last)),
+                ("reason".into(), json!(format!("{reason:?}").to_lowercase())),
+            ]),
+        },
+        context.color_mode(),
+        context.output_mode(),
+    );
+}
 
-    fn config() -> FollowConfig {
-        FollowConfig {
-            tail: 0,
-            output_mode: OutputMode::Lite3,
-            one: false,
-            timeout: None,
-            since_ns: Some(1000),
-            no_follow: true,
-            required_tags: vec!["absent".into()],
-            where_predicates: vec![],
-            quiet_drops: false,
-            notify: false,
-            color_mode: ColorMode::Never,
-            replay_speed: None,
-            ready: None,
-            stop: None,
+pub(super) fn follow_udp(
+    pool: &plasmite::api::UdpPool,
+    args: &super::stream::FollowArgs,
+    read: plasmite::api::Read,
+    context: &super::context::CliContext,
+    signal: &mut dyn FnMut(FollowSignal),
+) -> Result<RunOutcome, Error> {
+    let mut options = read.tags(args.tags.clone());
+    let watch = stdout_is_pipe();
+    loop {
+        let result = (|| {
+            let mut reader = pool.follow(options)?;
+            signal(FollowSignal::Opened);
+            loop {
+                if watch && stdout_pipe_closed() {
+                    return Ok(());
+                }
+                if let Some(event) = reader.next_event_timeout(Duration::from_millis(50))? {
+                    match event {
+                        UdpEvent::Frame(frame) => {
+                            emit_frame(frame.seq, frame.time, &frame.payload, context)?;
+                            signal(FollowSignal::Message);
+                            if args.one {
+                                return Ok(());
+                            }
+                        }
+                        UdpEvent::Gap {
+                            first,
+                            last,
+                            reason,
+                        } => {
+                            report_udp_skip("follow", &args.pool, first, last, reason, context);
+                        }
+                        UdpEvent::Progress { .. } => {}
+                    }
+                } else if reader.is_finished() {
+                    return Ok(());
+                }
+            }
+        })();
+        match result {
+            Ok(()) => return Ok(RunOutcome::with_code(0)),
+            Err(error) => options = report_read_gap(error, args, context)?,
         }
     }
+}
 
-    #[test]
-    fn raw_tags_preserve_corruption_errors_before_tag_and_time_rejection() {
-        let cfg = config();
-        for json in [
-            r#"{"data":{}}"#,
-            r#"{"meta":0,"data":{}}"#,
-            r#"{"meta":{"tags":[1]},"data":{}}"#,
-            r#"{"meta":{"tags":null},"data":{}}"#,
-            r#"{"meta":{"tags":["other"]}}"#,
-        ] {
-            let bytes = Lite3Buf::from_json_str(json).unwrap();
-            assert_eq!(
-                matches_raw(&cfg, 1, bytes.as_slice()).unwrap_err().kind(),
-                ErrorKind::Corrupt
-            );
+pub(super) fn follow_remote(
+    pool: &plasmite::api::RemotePool,
+    args: &super::stream::FollowArgs,
+    read: plasmite::api::Read,
+    context: &super::context::CliContext,
+    signal: &mut dyn FnMut(FollowSignal),
+) -> Result<RunOutcome, Error> {
+    let mut options = read.tags(args.tags.clone());
+    loop {
+        let result = (|| {
+            let reader = pool.follow_lite3(options)?;
+            signal(FollowSignal::Opened);
+            for frame in reader {
+                let frame = frame?;
+                emit_frame(frame.seq, frame.time, &frame.payload, context)?;
+                signal(FollowSignal::Message);
+                if args.one {
+                    break;
+                }
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => return Ok(RunOutcome::with_code(0)),
+            Err(error) => options = report_read_gap(error, args, context)?,
         }
-        let encoded = encode_message(&["other".into()], &json!({"text":"broken"})).unwrap();
-        let data = encoded.as_doc().key_offset("data").unwrap();
-        let text = encoded.as_doc().key_offset_at(data, "text").unwrap();
-        let mut bytes = encoded.as_slice().to_vec();
-        bytes[text + 1..text + 5].copy_from_slice(&0u32.to_le_bytes());
-        assert_eq!(
-            matches_raw(&cfg, 1, &bytes).unwrap_err().kind(),
-            ErrorKind::Corrupt
-        );
-        let valid = encode_message(&["other".into()], &json!({"nested":[{"x":1}]})).unwrap();
-        assert!(!matches_raw(&cfg, 1, valid.as_slice()).unwrap());
-    }
-
-    #[test]
-    fn raw_no_filter_preserves_the_unvalidated_path() {
-        let mut cfg = config();
-        cfg.required_tags.clear();
-        cfg.since_ns = None;
-        assert!(!needs_data_value(&cfg));
-        assert!(matches_raw(&cfg, 0, b"not a Lite3 document").unwrap());
-    }
-
-    #[test]
-    fn raw_tag_only_skips_data_but_json_and_jq_still_require_it() {
-        let mut cfg = config();
-        assert!(!needs_data_value(&cfg));
-        assert!(
-            needs_message(&cfg),
-            "UDP keeps its aligned full-message path"
-        );
-        cfg.output_mode = OutputMode::Json;
-        assert!(needs_data_value(&cfg));
-        cfg.output_mode = OutputMode::Lite3;
-        cfg.where_predicates
-            .push(JqFilter::compile(".data.x == 1").unwrap());
-        assert!(needs_data_value(&cfg));
     }
 }

@@ -1,4 +1,3 @@
-from plasmite import FollowStart
 """Compare UDP raw, selected and requested native output with verified delivery.
 
 The peer sends one DATA at a time using a test-only queue. This measures the
@@ -30,8 +29,8 @@ def run(lane, fixture, count):
     with tempfile.TemporaryDirectory(prefix="plasmite-udp-view-") as directory:
         with plasmite.Client(directory) as client:
             with client.create_pool("source", 1024 * 1024) as pool:
-                message = pool.append(data, ["source"])
-                payload = pool.get_lite3(message.seq).payload
+                message = pool.feed(data, ["source"])
+                payload = pool._get_lite3(message.seq).payload
     assert len(payload) + 40 < 65507
     permit = queue.Queue(maxsize=1)
     errors = []
@@ -64,8 +63,8 @@ def run(lane, fixture, count):
         try:
             with plasmite.UdpClient(f"udp://127.0.0.1:{peer.getsockname()[1]}") as client:
                 with client.open_pool("source") as pool:
-                    open_follow = pool.follow_views if lane.startswith("view") else pool.follow
-                    with open_follow(plasmite.UdpFollowOptions(start=plasmite.FollowStart.sequence(1))) as stream:
+                    open_follow = pool.follow_view if lane.startswith("view") else pool.follow
+                    with open_follow(since=1) as stream:
                         warm = stream.next_event(timeout_ms=1000)
                         assert warm.seq == 1
                         cpu, thread_cpu, start = time.process_time_ns(), time.thread_time_ns(), time.perf_counter_ns()
@@ -73,7 +72,7 @@ def run(lane, fixture, count):
                         for seq in range(2, count + 2):
                             permit.put(True)
                             event = stream.next_event(timeout_ms=1000)
-                            assert event.seq == seq and event.timestamp_ns == 123456789
+                            assert event.seq == seq and event.time == 123456789
                             if lane == "raw":
                                 checksum += len(event.payload)
                             elif lane == "view-selected":

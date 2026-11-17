@@ -76,7 +76,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             let mut results = Vec::new();
             for (name, path) in names.into_iter().zip(paths) {
                 let pool_ref = PoolRef::path(path);
-                let info = client.create_pool(&pool_ref, options)?;
+                let info = client.create_pool(&pool_ref, options)?.info()?;
                 results.push(pool_info_json(&name, &info));
             }
             if output_mode.is_structured() {

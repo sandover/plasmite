@@ -98,9 +98,9 @@ def main():
             plasmite.Client(directory) as client,
         ):
             with client.create_pool("views", 8 * 1024 * 1024) as pool:
-                seq = pool.append(data).seq
-                message = pool.get_view(seq)
-                old = pool.get(seq)
+                seq = pool.feed(data).seq
+                message = pool._get_view(seq)
+                old = plasmite.parse_message(pool._get_json(seq))
                 view_data, native_data = message.data, old.data
                 expected_sum = sum(data["samples"])
                 checks = {
@@ -111,19 +111,19 @@ def main():
                 }
                 lanes = {
                     "cold_view_field": (
-                        lambda: pool.get_view(seq).data["metrics"]["power"],
+                        lambda: pool._get_view(seq).data["metrics"]["power"],
                         checks["field"],
                     ),
                     "cold_legacy_field": (
-                        lambda: pool.get(seq).data["metrics"]["power"],
+                        lambda: plasmite.parse_message(pool._get_json(seq)).data["metrics"]["power"],
                         checks["field"],
                     ),
                     "cold_view_native": (
-                        lambda: plasmite.to_native(pool.get_view(seq).data),
+                        lambda: plasmite.to_native(pool._get_view(seq).data),
                         checks["native"],
                     ),
                     "cold_legacy_native": (
-                        lambda: pool.get(seq).data,
+                        lambda: plasmite.parse_message(pool._get_json(seq)).data,
                         checks["native"],
                     ),
                     "warm_view_field": (

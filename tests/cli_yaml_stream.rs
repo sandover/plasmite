@@ -37,16 +37,7 @@ fn yaml_follow_delivers_complete_documents_while_still_running() {
     let child = cmd()
         .arg("--dir")
         .arg(temp.path())
-        .args([
-            "follow",
-            "stream",
-            "--format",
-            "yaml",
-            "--tail",
-            "1",
-            "--timeout",
-            "15s",
-        ])
+        .args(["follow", "stream", "--format", "yaml", "--last", "1"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

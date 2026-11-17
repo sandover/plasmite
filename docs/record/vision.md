@@ -1,74 +1,82 @@
 # Vision
 
-Plasmite is the simplest reliable way to coordinate multiple processes with structured messages, without requiring external infrastructure.
+Plasmite is the simplest reliable way to coordinate processes with structured messages, without external infrastructure.
 
 ## North star
 
-A developer should be able to create, inspect, stream, and automate message workflows using plain files and stable JSON contracts in minutes.
+A developer can create, inspect, stream and automate message workflows in minutes, using plain files, JSON and the tools they already know. One small model serves them whether they arrive through the shell or a library, and it stays the same as their work grows.
+
+## The model
+
+A pool is a named pipe that remembers. It's a ring buffer on disk that keeps the most recent messages, up to a fixed size, and drops the oldest when it fills. Writers and readers come and go independently.
+
+Three verbs cover the work: **feed** puts a message into a pool, **follow** waits for new messages, and **fetch** reads messages the pool already holds. Every read starts at a position and moves forward.
+
+Every message has the same four fields: `seq`, `time`, `meta` and `data`. The pool assigns `seq`, which identifies the message and defines its order. `time` records what the clock read when the pool stored the message. `meta` holds Plasmite's metadata, such as tags for filtering, and `data` is a JSON object the application chooses.
 
 ## Target use cases
 
-- Local and host-adjacent process coordination.
-- Script-friendly event logging and replay.
-- Zero-integration process output capture via `plasmite tap`, then filter/replay with `follow`.
-- Lightweight service-to-service messaging for small deployments.
-- Embedded queue semantics through language bindings.
+- Coordinating processes on one host or across nearby hosts.
+- Logging events from scripts and re-reading the history later.
+- Capturing any command's output with a pipe into `feed`, then reading it back with `follow` and `fetch`.
+- Lightweight messaging between services in small deployments.
+- Embedded queues inside applications through the language libraries.
 
-## Product principles
+## Principles
 
-These are invariants, not preferences. Each states a violation condition.
+These are invariants, not preferences. Each states what would violate it.
 
-**Local-first.** Core workflows never require a running daemon, broker, or external service. A developer must be able to create a pool, feed messages, and follow or fetch them with zero configuration beyond the CLI itself. Any feature that makes a network call part of the default path is a violation.
+**Local-first.** Core workflows never need a running daemon, broker or external service. A developer can create a pool, feed messages, and follow or fetch them with no configuration beyond the CLI itself. Any feature that puts a network call on the default path is a violation.
 
-**JSON-first.** Every interface surface provides a stable plain-JSON path for reading and writing messages. CLI commands show readable output in terminals and compact JSON in pipes or files; a global format choice overrides that documented rule. HTTP may expose explicit Lite3 byte endpoints as additive performance paths, but JSON endpoints remain canonical. No interface may require users to understand binary formats to complete normal message workflows.
+**One model.** Every interface offers the same verbs and options under the same names, spelled in each language's style. An operation or option that exists in one interface with no counterpart in the others is a violation. The CLI is one more caller of the library: its text handling, warnings, exit codes and shorthand belong to it as a program and add no new concepts.
 
-**Predictable contracts.** CLI flags, API types, HTTP endpoints, and on-disk format versions are stable within a major version. A CLI script written for one package major version must run unmodified within that major version. The approved 1.2.0 release is an explicit breaking cutover exception: it adopts complete messages and retires the old flags without compatibility modes. Other breaks to an existing flag, type, or endpoint require a major version increment. Each breaking release must state whether it provides migration guidance or retires the old interface without a migration path. Merging a behavior change without a corresponding spec update is a violation.
+**Small pieces, loosely joined.** Plasmite offers an option only when the pool can do the job better than the caller: finding a position, checking tags without unpacking messages, forcing its file to disk. Stopping after a few messages, giving up after a wait, retrying, filtering on fields and recovering from loss belong to the caller, the shell or the language. CLI commands compose with ordinary Unix tools, and `follow` exits as soon as the command downstream stops reading. A flag that repeats what a pipe or a loop already does is a violation.
 
-**Progressive capability.** Remote access and advanced features are always opt-in. The single-host workflow must be fully functional with zero flags beyond pool name. Users must not need to understand remote concepts to do local work. Explicit HTTPS pool refs (`https://host:port/<pool>`) are the opt-in path for remote mode from core commands; loopback HTTP serves credential-free use on the server machine.
+**`seq` is the truth; `time` is an observation.** The pool assigns `seq`, and it alone defines identity and order. `time` records what the clock said, and Plasmite never adjusts it. A guarantee that depends on clock behavior is a violation.
 
-**Operational clarity.** Errors explain what failed and identify the affected resource when known. Add recovery guidance when it helps the user act; a clear error needs no redundant hint.
+**No silent loss.** A reader that falls behind a pool's retention learns exactly which messages it missed and where it can continue. Readers of local and HTTP pools receive every loss as an error; UDP readers receive every skip the server announces. Skipping lost messages without telling the reader is a violation.
 
-## Scope boundaries
+**JSON-first.** Every interface provides a stable plain-JSON path for reading and writing messages. CLI commands print readable output in a terminal and compact JSON in a pipe or file, and a global format choice overrides that rule. Binary formats are optional paths for speed. No normal message workflow may require understanding a binary format.
+
+**Predictable contracts.** CLI flags, library types, HTTP endpoints and on-disk formats stay stable within a major version. A script written for one major version runs unmodified across that major version. Any break to an existing flag, type or endpoint requires a new major version, and that release states whether it provides migration guidance. A behavior change merged without a matching spec update is a violation.
+
+**Progressive capability.** Remote access and advanced features are always opt-in. The single-host workflow works fully with nothing beyond a pool name, and local work never requires understanding remote concepts. An explicit HTTPS pool address (`https://host:port/<pool>`) is the opt-in path to remote pools from core commands, and loopback HTTP serves credential-free use on the server machine.
+
+**Operational clarity.** Errors explain what failed and name the affected resource when known. They add recovery guidance when it helps the user act; a clear error needs no extra hint.
+
+## Scope
 
 In scope:
 
-- Durable bounded pools with concurrent readers/writers.
-- CLI, bindings, HTTP, and optional UDP interfaces over one shared correctness core.
-- Documented stream subscriptions with bounded, temporary state for selection,
-  routing, leases, cancellation, and finite completion.
-- Versioned specs and canonical docs of record for decisions that affect compatibility.
+- Durable bounded pools with concurrent readers and writers.
+- CLI, language libraries, HTTP and optional UDP interfaces over one shared correctness core.
+- Documented stream subscriptions with bounded, temporary state for selection, routing, leases, cancellation and finite completion.
+- Versioned specs and docs of record for every decision that affects compatibility.
 
-Out of scope — these are hard stops, not positioning decisions:
+Out of scope. These are hard stops, not positioning:
 
-- Cluster-scale message broker features. Plasmite will never add distributed coordination, leader election, or consumer groups.
-- Complex schema or type systems beyond the JSON envelope. The envelope (`seq`, `time`, `meta`, `data`) is the full contract; mandatory schema validation or typed fields are violations.
-- Durable reader progress on the server. Plasmite does not persist per-consumer
-  offsets, track per-message reader acknowledgements, retry individual message
-  deliveries, or choose a consumer's recovery policy. Consumers own those
-  decisions. A stream may keep
-  bounded, temporary subscription state to send the selected messages and
-  reclaim resources when the reader closes or disappears. That state expires
-  with the subscription and never changes pool contents or stores durable
-  progress for readers.
-- Transport rules that discard valid received messages to impose an unrequested
-  delivery guarantee. UDP follow exposes matching messages in arrival order,
-  including late messages and duplicates; consumers choose their ordering policy.
-- Implicit behavior. Features that change observable output based on undocumented heuristics violate the JSON-first and predictable-contracts principles.
+- Cluster-scale broker features. Plasmite never adds distributed coordination, leader election or consumer groups.
+- Search and query languages. A pool has a fixed size, so a reader can scan all of it, and each language already filters well. Tags are the only built-in filter.
+- Schema or type systems beyond the message fields. `seq`, `time`, `meta` and `data` are the full contract; mandatory schema validation or typed fields are violations.
+- Durable reader progress on the server. Plasmite doesn't store per-reader positions, track acknowledgements, retry deliveries or choose a reader's recovery policy. Readers own those decisions. A stream may keep bounded, temporary state to send selected messages and reclaim resources when the reader closes or disappears. That state expires with the subscription, never changes pool contents, and never stores reader progress.
+- Transport rules that discard valid received messages to impose a delivery guarantee nobody asked for. A UDP follow delivers matching messages in arrival order, including late messages and duplicates; readers choose their own ordering policy.
+- Implicit behavior. A feature that changes observable output based on undocumented heuristics violates the JSON-first and predictable-contracts principles.
 
 ## Success criteria
 
 These are checkable, not aspirational.
 
-- A user with no prior plasmite knowledge can execute a create/feed/follow round-trip using only `plasmite --help` output.
-- Any script written against the current CLI major version runs without modification within that major version.
-- Message readers and writers share one complete-message shape and matching encodings; default read/write pipes preserve data and tags.
-- Pool operations complete without requiring network access when operating on local pools.
-- CLI errors identify the failure and affected resource, with useful recovery guidance when known.
-- A user can capture and replay any command's stdout/stderr using only `tap` and `follow`, with no changes to the wrapped program.
+- A user with no prior Plasmite knowledge can create a pool, feed a message and follow it using only `plasmite --help`.
+- One shared set of conformance scenarios passes in every language library and the CLI.
+- Any script written against a CLI major version runs unmodified across that major version.
+- Readers and writers share one message shape and matching encodings, and a pipe from `follow` into `feed` preserves `data` and `tags`.
+- Pool operations on local pools complete without network access.
+- A user can capture any command's output and read it back using only `feed` and `follow`, with no changes to the command.
+- CLI errors identify the failure and the affected resource, with recovery guidance when known.
 
-## Strategy implications
+## Strategy
 
-- Keep core storage and validation logic centralized and reusable across all interface surfaces.
-- Use a few documented shared rules: complete messages, syntax-based input detection, and terminal versus pipe output. Use explicit flags only when intent or encoding cannot follow those rules.
-- Treat docs of record as product surface: architecture, vision, and specs must stay coherent with each other and with the running code.
-- When a feature request conflicts with the principles above, the principles win. Features are added; principles are not compromised for convenience.
+- Keep storage and validation logic in one core that every interface reuses.
+- Keep the shared rules few and documented: one message shape, positions for every read, and readable output in a terminal with JSON in a pipe. The CLI adds its own text rules, such as telling whole messages from plain data by their shape. Add an explicit flag only when intent or encoding can't follow those rules.
+- Treat docs of record as product surface. Vision, architecture and specs stay coherent with each other and with the running code.
+- When a feature request conflicts with these principles, the principles win.

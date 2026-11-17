@@ -75,12 +75,12 @@ access, follow [the browser setup steps](#open-pools-in-a-browser).
 
 ```console
 echo '{"text":"hello from Alex"}' | plasmite feed https://pools.example.net:9743/events
-plasmite follow https://pools.example.net:9743/events --tail 1
+plasmite follow https://pools.example.net:9743/events --last 1
 ```
 
 The follow command shows the message, then waits for more. Press Ctrl+C to
 stop it. The owner can read the same message locally with
-`plasmite --dir ./shared follow events --tail 1`.
+`plasmite --dir ./shared follow events --last 1`.
 
 You now have a saved connection. Later `feed`, `follow`, and `duplex`
 commands use it when you name a pool at this server's HTTPS address.
@@ -466,7 +466,7 @@ hidden prompt, then check the connection and send/read a message:
 plasmite access connect https://node.tail123.ts.net:9743
 plasmite access status https://node.tail123.ts.net:9743
 echo '{"text":"hello over the tailnet"}' | plasmite feed https://node.tail123.ts.net:9743/events
-plasmite follow https://node.tail123.ts.net:9743/events --tail 1 --no-follow --format json
+plasmite fetch https://node.tail123.ts.net:9743/events --last 1 --format json
 ```
 
 For IPv6, use a bind such as `[fd7a:115c:a1e0::abcd]:9743`. Plasmite runs one

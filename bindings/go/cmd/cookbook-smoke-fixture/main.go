@@ -1,7 +1,7 @@
 /*
 Purpose: Exercise the Go cookbook snippet path in smoke automation.
 Key Exports: main (command entrypoint).
-Role: Validate local client.pool(), typed append return fields, and not-found handling.
+Role: Validate create-on-open, the feed result, and missing-pool errors.
 Invariants: Runs against local pool directories only; no network usage.
 Invariants: Produces deterministic JSON output for shell assertions.
 Notes: Designed for scripts/cookbook_smoke.sh integration.
@@ -42,19 +42,19 @@ func run() error {
 	}
 	defer client.Close()
 
-	pool, err := client.Pool(plasmite.PoolRefName("cookbook-smoke"), 0)
+	pool, err := client.OpenPool(plasmite.PoolRefName("cookbook-smoke"), plasmite.Create(true))
 	if err != nil {
 		return fmt.Errorf("pool open/create: %w", err)
 	}
 	defer pool.Close()
 
-	msg, err := pool.Append(
+	msg, err := pool.Feed(
 		map[string]any{"task": "resize", "id": 1},
 		[]string{"cookbook"},
 		plasmite.WithDurability(plasmite.DurabilityFast),
 	)
 	if err != nil {
-		return fmt.Errorf("append: %w", err)
+		return fmt.Errorf("feed: %w", err)
 	}
 	if msg.Seq < 1 {
 		return errors.New("expected positive seq")

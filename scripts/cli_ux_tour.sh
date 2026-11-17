@@ -163,16 +163,17 @@ record_case "pool info" zero run_plasmite --dir "${POOL_DIR}" pool info "${POOL_
 record_case "pool info missing" nonzero run_plasmite --dir "${POOL_DIR}" pool info "${MISSING_POOL}"
 
 record_case "feed inline json with tag" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" '{"kind":"inline","ok":true}' --tag ux
-record_case "feed from file" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --file "${WORK_DIR}/good.json"
-record_case "removed errors skip option is rejected" nonzero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --file "${WORK_DIR}/mixed.jsonl" --input-format json --errors skip
+record_case "feed from file" zero bash -c 'input=$1; shift; exec "$@" < "$input"' \
+  _ "${WORK_DIR}/good.json" "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${POOL_MAIN}"
+record_case "removed errors skip option is rejected" nonzero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --input-format json --errors skip
 record_case "fetch existing seq" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1
 record_case "fetch JSON envelope" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1 --format json
 record_case "fetch missing seq" nonzero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 999999
-record_case "follow tail one" zero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --tail 2 --one
-record_case "finite history JSON" zero run_plasmite follow "${POOL_MAIN}" --dir "${POOL_DIR}" --tail 2 --no-follow --format json
-record_case "finite history filtered to no matches" zero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --tail 2 --no-follow --tag unmatched
-record_case "finite history requires selector" nonzero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --no-follow
-record_case "follow timeout on quiet pool" nonzero run_plasmite --dir "${POOL_DIR}" follow "${POOL_AUX}" --timeout 300ms --one
+record_case "follow one from history" zero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --last 2 --one
+record_case "finite history JSON" zero run_plasmite fetch "${POOL_MAIN}" --dir "${POOL_DIR}" --last 2 --format json
+record_case "finite history filtered to no matches" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" --last 2 --tag unmatched
+record_case "finite history defaults to oldest" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}"
+record_case "follow rejects two starting positions" nonzero run_plasmite --dir "${POOL_DIR}" follow "${POOL_AUX}" --since oldest --last 1 --one
 
 record_case "doctor one pool" zero run_plasmite --dir "${POOL_DIR}" doctor "${POOL_MAIN}"
 record_case "doctor all pools" zero run_plasmite --dir "${POOL_DIR}" doctor --all

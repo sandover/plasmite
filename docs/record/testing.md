@@ -29,6 +29,25 @@ There are three top-level commands, ordered by cost and coverage:
   smoke. Run it before merging, tagging, or publishing; main and scheduled CI
   run it on Linux and macOS.
 
+### Plasmite 2.0 contract checks
+
+The [shared read cases](../../tests/fixtures/conformance/reads.json) specify
+pool contents, read options and expected sequences. The Rust and CLI runner
+uses `cargo test --test conformance_v2`. It also opens a pool written by
+Plasmite 1.3.0. The binding test commands run the corresponding read cases:
+
+```sh
+just bindings-go-test
+just bindings-python-test
+just bindings-node-test
+cargo test --test remote_integration
+just abi-test abi-smoke
+```
+
+The remote suite checks that HTTP reports errors and continues across server
+limits. The C tests check option layout, ownership, cancellation and
+retention-gap details.
+
 ### Linux ARM release archives
 
 The GitHub SDK preview targets are `aarch64-unknown-linux-gnu` and
@@ -250,6 +269,28 @@ Run `just cross-artifact-smoke` after building the bindings and CLI. Go
 creates a pool, Node opens a stream that reads a message from a separate
 CLI process, and Node, Python, and the CLI read each other's messages from
 the same file.
+
+### Plasmite 2.0 conformance
+
+Run `just conformance`. The runners read `tests/fixtures/conformance/reads.json`.
+Each read case names its selection through `since` or `last`, optionally
+sets `tags`, and lists the expected sequences or error kind. `seed` sets up
+the starting history. `after_open` adds messages after the reader opens but
+before it pulls its first result. `cli_error` records when the CLI's exact
+sequence shorthand reports a different result from an empty stream.
+
+The Rust runner verifies the opening boundary, live reads and filtered
+retention errors. The CLI runner checks finite reads and the exact sequence
+shorthand.
+
+### Pool file compatibility
+
+`tests/fixtures/pool-v1.3.0.plasmite` is a 16 KiB pool written by the
+`v1.3.0` source at `04db8c011e78d8bef562e6ce2c5fd3030e5fb2d2`.
+It contains sequence 1 with data `{"point":[10,20],"tool":"pen"}` and tags
+`gfx` and `scope:sharedCanvas`, followed by sequence 2 with data
+`{"ready":true}` and tag `system`. Copy the fixture to a temporary directory
+before writing to it in an upgrade test.
 
 ### Owned-view contracts
 

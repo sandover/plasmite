@@ -1,6 +1,6 @@
 //! Generic duplex input, independent replies, and session termination.
 pub mod support;
-use plasmite::api::{Durability, Pool, PoolApiExt, PoolOptions};
+use plasmite::api::{Pool, PoolOptions};
 use support::cli::*;
 
 #[test]
@@ -28,8 +28,15 @@ fn duplex_receives_its_first_send_and_an_independent_reply_after_input_eof() {
         writeln!(child.0.stdin.take().unwrap(), "{}", json!({"seq":900,"time":"2000-01-01T00:00:00Z","meta":{"tags":["request"]},"data":{"from":"alice","request":1}})).unwrap();
         let until = Instant::now() + Duration::from_secs(3);
         let request = loop {
-            match writer.get_message(1) {
-                Ok(message) => break message,
+            match writer.get(1) {
+                Ok(frame) => {
+                    break plasmite::api::Message::from_lite3(
+                        frame.seq,
+                        frame.time,
+                        &frame.payload,
+                    )
+                    .unwrap();
+                }
                 Err(error)
                     if error.kind() == plasmite::api::ErrorKind::NotFound
                         && Instant::now() < until =>
@@ -42,10 +49,9 @@ fn duplex_receives_its_first_send_and_an_independent_reply_after_input_eof() {
         assert_eq!(request.meta.tags, ["request"]);
         // The independent application replies only after seeing the request.
         writer
-            .append_json_now(
+            .feed(
                 &json!({"from":"alice","reply":1}),
-                &["reply".into()],
-                Durability::Fast,
+                plasmite::api::Feed::default().tags(["reply"]),
             )
             .unwrap();
         let status = wait_within(
@@ -158,7 +164,10 @@ fn duplex_input_error_preserves_prior_appends_and_stops_reception() {
         .code(),
         Some(2)
     );
-    assert_eq!(pool.get_message(1).unwrap().data, json!({"n":1}));
+    let frame = pool.get(1).unwrap();
+    let message =
+        plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
+    assert_eq!(message.data, json!({"n":1}));
     assert_eq!(pool.info().unwrap().bounds.newest_seq, Some(1));
 }
 
@@ -170,13 +179,13 @@ fn duplex_closed_stdout_ends_reception_with_input_still_open() {
         PoolOptions::new(1024 * 1024),
     )
     .unwrap();
-    pool.append_json_now(&json!({"ready":true}), &[], Durability::Fast)
+    pool.feed(&json!({"ready":true}), plasmite::api::Feed::default())
         .unwrap();
     let mut child = KillOnDrop(
         cmd()
             .arg("--dir")
             .arg(temp.path())
-            .args(["duplex", "events", "--tail", "1", "--format", "json"])
+            .args(["duplex", "events", "--last", "1", "--format", "json"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -195,7 +204,7 @@ fn duplex_closed_stdout_ends_reception_with_input_still_open() {
     });
     let seed = closed_rx.recv_timeout(Duration::from_secs(3)).unwrap();
     assert_eq!(parse_json(seed.trim())["data"], json!({"ready":true}));
-    pool.append_json_now(&json!({"after_close":true}), &[], Durability::Fast)
+    pool.feed(&json!({"after_close":true}), plasmite::api::Feed::default())
         .unwrap();
     assert_eq!(
         wait_within(&mut child.0, Duration::from_secs(5), "duplex closed stdout").code(),

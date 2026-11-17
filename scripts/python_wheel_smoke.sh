@@ -119,7 +119,7 @@ for variant in abi3 cp310 fallback; do
     wheel_file="$(ls -1 "$WORKDIR/repaired-$variant"/*.whl)"
   fi
   cp "$wheel_file" "$ROOT/bindings/python/dist/"
-  wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite\.dll|libplasmite\.(dylib|so))'
+  wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite2\.dll|libplasmite\.(2\.dylib|so\.2))'
   wheel_has_member "$wheel_file" 'plasmite/_native/plasmite(\.exe)?'
   uv run --no-project --python "$build_python" --with packaging \
     python "$ROOT/scripts/verify_python_wheel_platform.py" "$wheel_file" "$SDK_DIR"
@@ -133,31 +133,33 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from tempfile import TemporaryDirectory
-from plasmite import FollowStart, Client, to_json, to_native, view_from_lite3
+from plasmite import Client, to_json, to_native, view_from_lite3
 from plasmite._views import VIEW_BACKEND
 
 assert VIEW_BACKEND == os.environ["EXPECTED_VIEW_BACKEND"], VIEW_BACKEND
 with TemporaryDirectory() as directory, Client(directory) as client:
-    with client.pool("wheel-smoke", 1024 * 1024) as pool:
-        sent = pool.append({"wheel": True, "values": [1, 2, 3]}, ["package"])
-        received = pool.get(sent.seq)
+    with client.open_pool("wheel-smoke", create=True) as pool:
+        sent = pool.feed({"wheel": True, "values": [1, 2, 3]}, ["package"])
+        with pool.fetch(since=sent.seq) as reader:
+            received = next(reader)
         assert received.data["wheel"] and received.tags == ["package"]
-        view = pool.get_view(sent.seq)
+        with pool.fetch_view(since=sent.seq) as reader:
+            view = next(reader)
         assert isinstance(view.data, Mapping) and isinstance(view.data["values"], Sequence)
         assert to_native(view)["data"] == received.data
         assert json.loads(to_json(view))["data"] == received.data
         child, buffer = view.data["values"], memoryview(view)
         assert buffer.readonly
         assert view_from_lite3(bytes(buffer)).data == received.data
-        produced = pool.append_view({"integer": (1 << 63) - 1, "bytes": b"copy"}, ["nul\0tag"])
+        produced = pool.feed_view({"integer": (1 << 63) - 1, "bytes": b"copy"}, ["nul\0tag"])
         assert to_native(produced.data) == {"integer": (1 << 63) - 1, "bytes": b"copy"}
         assert list(produced.tags) == ["nul\0tag"]
-        forwarded = pool.append_view(produced)
-        assert to_native(forwarded.data) == to_native(produced.data)
-        assert list(forwarded.tags) == list(produced.tags)
-        sliced = pool.append_view({"array": child[::-1], "bytes": produced.data["bytes"][::2]})
-        assert to_native(sliced.data) == {"array": [3, 2, 1], "bytes": b"cp"}
-        with pool.follow_views(start=FollowStart.sequence(sent.seq), max_messages=2) as stream:
+        with pool.fetch_view(since=sent.seq) as stream:
+            forwarded = pool.feed_view(produced)
+            assert to_native(forwarded.data) == to_native(produced.data)
+            assert list(forwarded.tags) == list(produced.tags)
+            sliced = pool.feed_view({"array": child[::-1], "bytes": produced.data["bytes"][::2]})
+            assert to_native(sliced.data) == {"array": [3, 2, 1], "bytes": b"cp"}
             first = next(stream)
             batch = stream.next_batch(4, 1024 * 1024)
             assert first.seq == sent.seq and [item.seq for item in batch] == [produced.seq]
@@ -166,7 +168,7 @@ with TemporaryDirectory() as directory, Client(directory) as client:
             except StopIteration:
                 pass
             else:
-                raise AssertionError("view stream exceeded its message limit")
+                raise AssertionError("finite view reader exceeded its opening boundary")
 
         del view
     gc.collect()

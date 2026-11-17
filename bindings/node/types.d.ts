@@ -29,10 +29,9 @@ export const DEFAULT_POOL_SIZE: number
 
 export interface Lite3Frame {
   seq: bigint
-  timestampNs: bigint
+  time: bigint
   flags: number
   payload: Buffer
-  time: Date
 }
 
 export interface MessageMeta {
@@ -41,8 +40,7 @@ export interface MessageMeta {
 
 export class Message {
   readonly seq: bigint
-  readonly time: Date
-  readonly timeRfc3339: string
+  readonly time: bigint
   readonly data: unknown
   readonly meta: MessageMeta
   readonly raw: Buffer
@@ -63,22 +61,54 @@ export class PlasmiteNativeError extends Error {
   path?: string
   seq?: bigint
   offset?: bigint
+  missing?: bigint
+  nextSeq?: bigint
   cause?: unknown
+}
+
+export interface OpenPoolOptions { create?: boolean }
+export interface PoolInfo {
+  name: string
+  path: string
+  file_size: bigint
+  bounds: { oldest?: bigint; newest?: bigint }
+}
+export interface ReadOptions {
+  since?: number | bigint | string | Instant
+  last?: number | bigint
+  tags?: string[]
+  signal?: AbortSignal
+}
+export interface FeedOptions { tags?: string[]; durability?: Durability }
+declare const instantType: unique symbol
+export interface Instant { readonly [instantType]: true }
+export function at(time: number | bigint): Instant
+export function createPool(poolRef: string, sizeBytes?: number | bigint): Pool
+export function openPool(poolRef: string, options?: OpenPoolOptions): Pool
+export function listPools(): PoolInfo[]
+export function deletePool(poolRef: string): void
+
+export interface Reader<T = Message> extends AsyncIterableIterator<T> {
+  next(): Promise<IteratorResult<T, undefined>>
+  next(wait: number): Promise<IteratorResult<T | undefined, undefined>>
+  return(): Promise<IteratorResult<T, undefined>>
+  close(): void
 }
 
 export class Client {
   constructor(poolDir?: string)
   createPool(poolRef: string, sizeBytes?: number | bigint): Pool
-  openPool(poolRef: string): Pool
-  pool(poolRef: string, sizeBytes?: number | bigint): Pool
+  openPool(poolRef: string, options?: OpenPoolOptions): Pool
+  listPools(): PoolInfo[]
+  deletePool(poolRef: string): void
   close(): void
   [Symbol.dispose](): void
 }
 
-/** Committed identity; timestampNs is unsigned Unix time in nanoseconds. */
-export interface AppendReceipt {
+/** Committed sequence and Unix nanosecond time. */
+export interface FeedReceipt {
   seq: bigint
-  timestampNs: bigint
+  time: bigint
 }
 
 declare const byteViewType: unique symbol
@@ -94,13 +124,12 @@ export type View<T> = T extends Uint8Array ? BytesView
 export interface MessageView<T = unknown> {
   readonly [messageViewType]: true
   readonly seq: bigint
-  readonly timestampNs: bigint
-  readonly timeRfc3339: string
+  readonly time: bigint
   readonly meta: View<{ tags: string[] }>
   readonly data: View<T>
 }
 export type Native<T> = T extends MessageView<infer D>
-  ? { seq: bigint; time: string; meta: { tags: string[] }; data: Native<View<D>> }
+  ? { seq: bigint; time: bigint; meta: { tags: string[] }; data: Native<View<D>> }
   : T extends BytesView ? Uint8Array
   : T extends object ? { -readonly [K in keyof T]: Native<T[K]> } : T
 /** Build independent mutable containers from a view or supported scalar. */
@@ -111,34 +140,20 @@ export function toJson(value: unknown): string
 export function toLite3(message: MessageView): Buffer
 
 export class Pool {
-  /** Acquire an independent immutable snapshot without blocking JavaScript. */
-  getView<T = unknown>(seq: number | bigint): Promise<MessageView<T>>
-  /** Encode native input once; T asserts the resulting data shape without validation. */
-  appendView<T = unknown>(payload: unknown, tags?: readonly string[], durability?: Durability): Promise<MessageView<T>>
-  appendIdentity(payload: unknown, tags?: string[], durability?: Durability): AppendReceipt
-  appendLite3Identity(payload: Buffer, durability?: Durability): AppendReceipt
-  append(payload: unknown, tags?: string[], durability?: Durability): Message
-  appendJson(payload: unknown, tags?: string[], durability?: Durability): Buffer
-  appendLite3(payload: Buffer, durability?: Durability): bigint
-  get(seq: number | bigint): Message
-  getJson(seq: number | bigint): Buffer
-  getLite3(seq: number | bigint): Lite3Frame
-  follow(options?: LocalFollowOptions): AsyncGenerator<Message, void, unknown>
-  followViews<T = unknown>(options?: LocalFollowOptions): AsyncGenerator<MessageView<T>, void, unknown>
-  openFollow(
-    start?: FollowStart,
-    maxMessages?: number | bigint | null,
-    timeoutMs?: number | bigint | null,
-    errorOnGap?: boolean,
-    finite?: boolean,
-  ): Stream
-  openLite3Follow(
-    start?: FollowStart,
-    maxMessages?: number | bigint | null,
-    timeoutMs?: number | bigint | null,
-    errorOnGap?: boolean,
-    finite?: boolean,
-  ): Lite3Stream
+  feedReceipt(value: object | Message, options?: FeedOptions): Promise<FeedReceipt>
+  feedJsonReceipt(payload: Buffer, options?: FeedOptions): FeedReceipt
+  feedLite3Receipt(payload: Buffer, options?: Omit<FeedOptions, "tags">): FeedReceipt
+  feedLite3(payload: Buffer, options?: Omit<FeedOptions, "tags">): Promise<Message>
+  info(): PoolInfo
+  feed(value: object | Message, options?: FeedOptions): Promise<Message>
+  feedJson(payload: Buffer, options?: FeedOptions): Buffer
+  feedView<T = unknown>(value: unknown, options?: FeedOptions): Promise<MessageView<T>>
+  followView<T = unknown>(options?: ReadOptions): Promise<Reader<MessageView<T>>>
+  fetchView<T = unknown>(options?: ReadOptions): Promise<Reader<MessageView<T>>>
+  followLite3(options?: ReadOptions): Promise<Reader<Lite3Frame>>
+  fetchLite3(options?: ReadOptions): Promise<Reader<Lite3Frame>>
+  fetch(options?: ReadOptions): Promise<Reader>
+  follow(options?: ReadOptions): Promise<Reader>
   close(): void
   [Symbol.dispose](): void
 }
@@ -161,27 +176,6 @@ export class Lite3Stream {
   [Symbol.dispose](): void
 }
 
-export interface LocalFollowOptions {
-  start?: FollowStart
-  finite?: boolean
-  maxMessages?: number | bigint
-  timeoutMs?: number | bigint
-  tags?: string[]
-  errorOnGap?: boolean
-  signal?: AbortSignal
-}
-
-export type FollowStart =
-  | { kind: "new" }
-  | { kind: "last"; count: number | bigint }
-  | { kind: "since"; timestampNs: number | bigint }
-  | { kind: "sequence"; seq: number | bigint }
-
-export interface UdpFollowOptions {
-  start?: FollowStart
-  finite?: boolean
-}
-
 export interface UdpWaitOptions {
   signal?: AbortSignal
 }
@@ -190,7 +184,7 @@ export type UdpEvent =
   | {
       kind: "frame"
       seq: bigint
-      timestampNs: bigint
+      time: bigint
       payload: Buffer
       message: Message
     }
@@ -205,14 +199,6 @@ export type UdpEvent =
       retentionGap: boolean
     }
 
-export const FollowStart: {
-  all: () => FollowStart
-  new: () => FollowStart
-  last(count: number | bigint): FollowStart
-  since(timestampNs: number | bigint): FollowStart
-  sequence(seq: number | bigint): FollowStart
-}
-
 export class UdpClient {
   constructor(endpoint: string)
   openPool(poolName: string): UdpPool
@@ -221,10 +207,12 @@ export class UdpClient {
 }
 
 export class UdpPool {
-  sendJson(payload: unknown, tags?: string[]): void
-  sendLite3(payload: Buffer): void
-  follow(options?: UdpFollowOptions): Promise<UdpFollow>
-  followViews<T = unknown>(options?: UdpFollowOptions): Promise<UdpViewFollow<T>>
+  feed(payload: object | Message, options?: FeedOptions): void
+  fetch(options?: ReadOptions): Promise<UdpFollow>
+  follow(options?: ReadOptions): Promise<UdpFollow>
+  followView<T = unknown>(options?: ReadOptions): Promise<UdpViewFollow<T>>
+  fetchView<T = unknown>(options?: ReadOptions): Promise<UdpViewFollow<T>>
+  feedLite3(payload: Buffer): void
   close(): void
   [Symbol.dispose](): void
 }
@@ -240,7 +228,7 @@ export class UdpFollow {
 }
 
 export type UdpViewEvent<T = unknown> =
-  | { kind: "frame"; seq: bigint; timestampNs: bigint; message: MessageView<T> }
+  | { kind: "frame"; seq: bigint; time: bigint; message: MessageView<T> }
   | Exclude<UdpEvent, { kind: "frame" }>
 
 export interface UdpViewFollow<T = unknown> {
@@ -259,35 +247,12 @@ export interface RemoteClientOptions {
   token?: string
 }
 
-export interface RemotePoolInfo {
-  pool: string
-  path: string
-  file_size: number
-  ring_size: number
-  bounds: {
-    oldest_seq: number | null
-    newest_seq: number | null
-  }
-  write_cursor: number
-  index_inline: boolean
-}
+export type RemotePoolInfo = PoolInfo
 
-export interface RemoteFollowOptions {
-  start?: FollowStart
-  finite?: boolean
-  maxMessages?: number | bigint
-  timeoutMs?: number
-  tags?: string[]
-  errorOnGap?: boolean
-  signal?: AbortSignal
-}
-
-/** One binary HTTP observation; requires current-server frame identity headers. */
 export interface RemoteLite3Frame {
   seq: bigint
-  timestampNs: bigint
+  time: bigint
   payload: Buffer
-  time: Date
 }
 
 export class RemoteError extends Error {
@@ -297,6 +262,8 @@ export class RemoteError extends Error {
   path?: string
   seq?: bigint
   offset?: bigint
+  missing?: bigint
+  nextSeq?: bigint
 }
 
 export class RemoteClient {
@@ -304,10 +271,10 @@ export class RemoteClient {
   baseUrl: URL
   token: string | null
   withToken(token: string): RemoteClient
-  createPool(pool: string, sizeBytes: number | bigint): Promise<string>
-  openPool(pool: string): Promise<RemotePool>
+  createPool(pool: string, sizeBytes?: number | bigint): Promise<RemotePool>
+  openPool(pool: string, options?: OpenPoolOptions): Promise<RemotePool>
   poolInfo(pool: string): Promise<RemotePoolInfo>
-  listPools(): Promise<string[]>
+  listPools(): Promise<PoolInfo[]>
   deletePool(pool: string): Promise<void>
 }
 
@@ -316,22 +283,14 @@ export class RemotePool {
   client: RemoteClient
   pool: string
   poolRef(): string
-  appendView<T = unknown>(data: unknown, tags?: readonly string[], durability?: Durability): Promise<MessageView<T>>
-  getView<T = unknown>(seq: number | bigint, options?: { signal?: AbortSignal }): Promise<MessageView<T>>
-  followViews<T = unknown>(options?: RemoteFollowOptions): AsyncGenerator<MessageView<T>, void, unknown>
-  append(
-    data: unknown,
-    tags?: string[],
-    durability?: Durability,
-  ): Promise<Message>
-  get(seq: number | bigint): Promise<Message>
-  appendLite3(payload: Buffer, durability?: Durability): Promise<bigint>
-  getLite3(seq: number | bigint, options?: { signal?: AbortSignal }): Promise<RemoteLite3Frame>
-  followLite3(options?: RemoteFollowOptions): AsyncGenerator<RemoteLite3Frame, void, unknown>
-  follow(options?: RemoteFollowOptions): AsyncGenerator<Message, void, unknown>
+  feedLite3(payload: Buffer, options?: FeedOptions): Promise<Message>
+  feedView<T = unknown>(value: unknown, options?: FeedOptions): Promise<MessageView<T>>
+  followLite3(options?: ReadOptions): Promise<Reader<RemoteLite3Frame>>
+  fetchLite3(options?: ReadOptions): Promise<Reader<RemoteLite3Frame>>
+  info(): Promise<PoolInfo>
+  feed(data: object | Message, options?: FeedOptions): Promise<Message>
+  followView<T = unknown>(options?: ReadOptions): Promise<Reader<MessageView<T>>>
+  fetchView<T = unknown>(options?: ReadOptions): Promise<Reader<MessageView<T>>>
+  fetch(options?: ReadOptions): Promise<Reader>
+  follow(options?: ReadOptions): Promise<Reader>
 }
-
-
-
-export type UdpStart = FollowStart;
-export const UdpStart: typeof FollowStart;

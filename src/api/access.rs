@@ -478,3 +478,7 @@ pub(super) fn load_saved_key(destination: &str) -> ApiResult<Option<AccessKey>> 
 pub(super) fn access_agent(expected_spki: Option<[u8; 32]>) -> ureq::Agent {
     access_tls::agent(expected_spki)
 }
+
+pub(super) fn access_tls_config(expected_spki: Option<[u8; 32]>) -> rustls::ClientConfig {
+    access_tls::client_config(expected_spki, None)
+}

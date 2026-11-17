@@ -9,6 +9,7 @@ Notes: These tests run under `CGO_ENABLED=0` in bindings-go-contract-test.
 package api
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -20,14 +21,13 @@ func TestDecodeMessageNormalizesUTC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode message: %v", err)
 	}
-	if got := msg.Time.Location(); got != time.UTC {
-		t.Fatalf("expected UTC location, got %v", got)
+	want := uint64(time.Date(2026, 2, 18, 2, 0, 0, 0, time.UTC).UnixNano())
+	if msg.Time != want {
+		t.Fatalf("expected %d ns, got %d", want, msg.Time)
 	}
-	if msg.Time.Hour() != 2 {
-		t.Fatalf("expected UTC hour 2, got %d", msg.Time.Hour())
-	}
-	if msg.TimeRFC3339 != "2026-02-18T05:00:00+03:00" {
-		t.Fatalf("unexpected time string: %s", msg.TimeRFC3339)
+	encoded, err := json.Marshal(msg)
+	if err != nil || !strings.Contains(string(encoded), `"time":"2026-02-18T02:00:00.000000000Z"`) {
+		t.Fatalf("encode canonical time: %s (%v)", encoded, err)
 	}
 }
 

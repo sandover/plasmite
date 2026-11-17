@@ -9,8 +9,8 @@ import (
 )
 
 func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "reassigned-wrapper").(*Pool)
-	message, err := pool.AppendView(map[string]any{"object": map[string]any{"power": 7, "label": "north"}, "text": "original text", "blob": []byte{0, 255, 7}, "array": []int{3, 5, 8}}, []string{"original"})
+	pool := newTestPool(t, newTestClient(t), "reassigned-wrapper")
+	message, err := pool.FeedView(map[string]any{"object": map[string]any{"power": 7, "label": "north"}, "text": "original text", "blob": []byte{0, 255, 7}, "array": []int{3, 5, 8}}, []string{"original"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := pool.AppendView(map[string]any{"text": "tiny"}, nil)
+	replacement, err := pool.FeedView(map[string]any{"text": "tiny"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +78,8 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 		t.Fatalf("retained numeric node: %s %v", scalar, err)
 	}
 	// Source Value forwarding must use its captured bytes, too.
-	destination := newTestPool(t, newTestClient(t), "retained-forward").(*Pool)
-	forwarded, err := destination.AppendView(children[0], nil)
+	destination := newTestPool(t, newTestClient(t), "retained-forward")
+	forwarded, err := destination.FeedView(children[0], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,8 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 }
 
 func TestManagedChildKeepsDuplicateProofAfterWrapperReassignment(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "reassigned-duplicate").(*Pool)
-	original, err := pool.AppendView(map[string]any{"ab": 1, "bA": 2}, nil)
+	pool := newTestPool(t, newTestClient(t), "reassigned-duplicate")
+	original, err := pool.FeedView(map[string]any{"ab": 1, "bA": 2}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,11 +101,11 @@ func TestManagedChildKeepsDuplicateProofAfterWrapperReassignment(t *testing.T) {
 		t.Fatal("missing collision key")
 	}
 	copy(encoded[key:key+2], "ab")
-	seq, err := pool.AppendLite3(encoded, DurabilityFast)
+	seq, err := feedLite3Sequence(pool, encoded, DurabilityFast)
 	if err != nil {
 		t.Fatal(err)
 	}
-	message, err := pool.GetView(seq)
+	message, err := pool.getView(seq)
 	if err != nil {
 		t.Fatal(err)
 	}

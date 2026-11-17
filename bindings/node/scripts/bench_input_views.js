@@ -51,12 +51,12 @@ async function measure(name, n, fn) {
 async function retention(pool, data) {
   global.gc?.(); await pause();
   const before = process.memoryUsage();
-  let original = await pool.appendView(data);
+  let original = await pool.feedView(data);
   let backend = valueReference(original.data).backend.owner;
   const payload = { encodedBytes: backend.byteLength(), reportedBackingBytes: backend.retainedBytes() };
   backend = null;
   let views = [];
-  for (let i = 0; i < 16; i++) views.push(await pool.appendView(original));
+  for (let i = 0; i < 16; i++) views.push(await pool.feedView(original));
   original = null;
   global.gc?.(); await pause();
   const retained = process.memoryUsage();
@@ -72,24 +72,24 @@ async function main() {
   const measurements = [];
   try {
     for (const [fixture, data] of Object.entries(fixtures)) {
-      const source = await pool.appendView(data, ['source']);
+      const source = await pool.feedView(data, { tags: ['source'] });
       assert.deepEqual(toNative(source.data), data);
       assert.deepEqual(toNative((await jsonAppend(pool, JSON.stringify(data))).data), data);
       const sourceJson = toJson(source.data);
       const n = fixture === 'array' ? Math.max(10, Math.floor(iterations / 4)) : iterations;
       const lanes = [
-        ['append-field/native', async () => (await pool.appendView(data)).data.metrics.power],
+        ['append-field/native', async () => (await pool.feedView(data)).data.metrics.power],
         ['append-field/stringify-json', async () => (await jsonAppend(pool, JSON.stringify(data))).data.metrics.power],
-        ['append-field/legacy-message', async () => pool.append(data).data.metrics.power],
-        ['append-native-copy/native', async () => toNative((await pool.appendView(data)).data).metrics.power],
+        ['append-field/legacy-message', async () => (await pool.feed(data)).data.metrics.power],
+        ['append-native-copy/native', async () => toNative((await pool.feedView(data)).data).metrics.power],
         ['append-native-copy/stringify-json', async () => toNative((await jsonAppend(pool, JSON.stringify(data))).data).metrics.power],
-        ['append-consumer-field/native', async () => (await consumer.getView((await pool.appendView(data)).seq)).data.metrics.power],
-        ['append-consumer-field/stringify-json', async () => (await consumer.getView((await jsonAppend(pool, JSON.stringify(data))).seq)).data.metrics.power],
-        ['forward-field/native', async () => (await destination.appendView(source)).data.metrics.power],
+        ['append-consumer-field/native', async () => (await consumer._getView((await pool.feedView(data)).seq)).data.metrics.power],
+        ['append-consumer-field/stringify-json', async () => (await consumer._getView((await jsonAppend(pool, JSON.stringify(data))).seq)).data.metrics.power],
+        ['forward-field/native', async () => (await destination.feedView(source)).data.metrics.power],
         ['forward-field/explicit-json', async () => (await jsonAppend(destination, toJson(source.data), ['source'])).data.metrics.power],
-        ['retag-field/native', async () => (await destination.appendView(source, ['changed'])).data.metrics.power],
+        ['retag-field/native', async () => (await destination.feedView(source.data, { tags: ['changed'] })).data.metrics.power],
         ['retag-field/explicit-json', async () => (await jsonAppend(destination, toJson(source.data), ['changed'])).data.metrics.power],
-        ['subtree-length/native', async () => (await destination.appendView({ subset: source.data.samples })).data.subset.length],
+        ['subtree-length/native', async () => (await destination.feedView({ subset: source.data.samples })).data.subset.length],
         ['subtree-length/explicit-json', async () => (await jsonAppend(destination, '{"subset":' + toJson(source.data.samples) + '}')).data.subset.length],
       ];
       const sourceBackend = messageReference(source).backend;
@@ -99,12 +99,12 @@ async function main() {
         const foreign = () => {
           const backend = { ...sourceBackend, encodedBytes: () => sourceBackend.owner.encodedBytes() };
           delete backend.owner;
-          return createMessageView(backend, source.seq, source.timestampNs);
+          return createMessageView(backend, source.seq, source.time);
         };
         const retained = foreign();
         lanes.push(
-          ['foreign-forward/cold-import', async () => (await destination.appendView(foreign())).data.metrics.power],
-          ['foreign-forward/warm-import', async () => (await destination.appendView(retained)).data.metrics.power],
+          ['foreign-forward/cold-import', async () => (await destination.feedView(foreign())).data.metrics.power],
+          ['foreign-forward/warm-import', async () => (await destination.feedView(retained)).data.metrics.power],
         );
       }
       if (toLite3) lanes.push(['encoded-export/copy', async () => toLite3(source).length]);
@@ -118,16 +118,16 @@ async function main() {
       measurements.push({ fixture, jsonBytes: Buffer.byteLength(sourceJson), rows, retention: await retention(destination, data) });
     }
     const exactJson = '{"value":9223372036854775807}', exactData = { value: 9223372036854775807n };
-    assert.equal((await pool.appendView(exactData)).data.value, exactData.value);
+    assert.equal((await pool.feedView(exactData)).data.value, exactData.value);
     assert.equal((await jsonAppend(pool, exactJson)).data.value, exactData.value);
     const exact = [];
     for (let repeat = 0; repeat < repeats; repeat++) {
-      exact.push({ repeat, ...await measure('exact/native', iterations, async () => (await pool.appendView(exactData)).data.value === exactData.value ? 1 : 0) });
+      exact.push({ repeat, ...await measure('exact/native', iterations, async () => (await pool.feedView(exactData)).data.value === exactData.value ? 1 : 0) });
       exact.push({ repeat, ...await measure('exact/explicit-json-text', iterations, async () => (await jsonAppend(pool, exactJson)).data.value === exactData.value ? 1 : 0) });
     }
     const byteData = { bytes: Buffer.alloc(65536, 7) };
-    assert.equal((await pool.appendView(byteData)).data.bytes.length, 65536);
-    const nativeBytes = await measure('native-bytes/no-json-equivalent', iterations, async () => (await pool.appendView(byteData)).data.bytes.length);
+    assert.equal((await pool.feedView(byteData)).data.bytes.length, 65536);
+    const nativeBytes = await measure('native-bytes/no-json-equivalent', iterations, async () => (await pool.feedView(byteData)).data.bytes.length);
     const files = ['index.js', 'views.js', 'input.js', `native/${process.platform}-${process.arch}/index.node`,
       `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.dylib' : process.platform === 'win32' ? 'plasmite.dll' : 'libplasmite.so'}`];
     const result = { node: process.version, platform: process.platform, arch: process.arch, iterations, repeats,

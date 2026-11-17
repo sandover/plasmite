@@ -32,9 +32,9 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/lite3/lib/nibble_base64/base64.c");
 
     if target.contains("apple-darwin") {
-        println!("cargo:rustc-cdylib-link-arg=-Wl,-install_name,@rpath/libplasmite.dylib");
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-install_name,@rpath/libplasmite.2.dylib");
     } else if !target.contains("windows-msvc") {
-        println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libplasmite.so");
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libplasmite.so.2");
     }
 
     if target.contains("apple-darwin") {

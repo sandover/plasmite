@@ -80,8 +80,11 @@ Python 3.10 or newer for the Python package; Go 1.22 or newer, cgo, and
 pkg-config for Go. Rust source installs need the toolchain and C compiler
 described in the [build guide](../building.md#install-the-cli-from-source).
 
-The additive owned-view APIs require matching binding/native assets. Updating
-only a binding while retaining an older `libplasmite` does not add its symbols.
+Install bindings and native libraries from the same major version. The 2.0
+library uses `libplasmite.so.2` on Linux, `libplasmite.2.dylib` on macOS and
+`plasmite2.dll` on Windows. Python, Go and the Node add-on check that the
+loaded library reports major version 2. The npm package places the library
+beside the add-on.
 Node's HTTP `RemoteClient` needs no native addon for views: the npm package
 includes a checked WebAssembly core for encoding and validation. Local pools and
 UDP still need the native addon. The portable backend supports the Node entry
@@ -199,7 +202,7 @@ bin/
 include/
   plasmite.h
 lib/
-  libplasmite.(dylib|so)
+  libplasmite.so.2 or libplasmite.2.dylib
   pkgconfig/
     plasmite.pc
 ```
@@ -209,5 +212,6 @@ lib/
 The `plasmite.pc` file must:
 - Be named `plasmite` (not `libplasmite`)
 - Provide `Cflags: -I...` for `include/plasmite.h`
-- Provide `Libs: -L... -lplasmite`
+- Link the shared library for the current major. In 2.0, use
+  `-L... -l:libplasmite.so.2` on Linux or `-L... -lplasmite.2` on macOS.
 - For Linux SDK artifacts, provide `Libs.private: -lpthread -ldl -lm` so `pkg-config --static --libs plasmite` resolves required system libraries.

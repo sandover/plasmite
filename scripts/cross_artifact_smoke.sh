@@ -48,18 +48,18 @@ smoke_release_tarball() {
   require_file "$extract_dir/lib/pkgconfig/plasmite.pc"
 
   local shared_lib=""
-  if [[ -f "$extract_dir/lib/libplasmite.dylib" ]]; then
-    shared_lib="$extract_dir/lib/libplasmite.dylib"
+  if [[ -f "$extract_dir/lib/libplasmite.2.dylib" ]]; then
+    shared_lib="$extract_dir/lib/libplasmite.2.dylib"
     local dylib_id
     dylib_id="$(otool -D "$shared_lib" | sed -n '2p' | xargs)"
-    if [[ "$dylib_id" != "@rpath/libplasmite.dylib" ]]; then
+    if [[ "$dylib_id" != "@rpath/libplasmite.2.dylib" ]]; then
       echo "unexpected dylib install_name: $dylib_id"
       exit 1
     fi
-  elif [[ -f "$extract_dir/lib/libplasmite.so" ]]; then
-    shared_lib="$extract_dir/lib/libplasmite.so"
+  elif [[ -f "$extract_dir/lib/libplasmite.so.2" ]]; then
+    shared_lib="$extract_dir/lib/libplasmite.so.2"
     if command -v readelf >/dev/null 2>&1; then
-      if ! readelf -d "$shared_lib" | stream_matches 'SONAME.*\[libplasmite\.so\]'; then
+      if ! readelf -d "$shared_lib" | stream_matches 'SONAME.*\[libplasmite\.so\.2\]'; then
         echo "missing or unstable SONAME on $shared_lib"
         exit 1
       fi
@@ -76,18 +76,18 @@ smoke_release_tarball() {
     # Keep local smoke usable on minimal environments that lack pkg-config.
     if [[ "$HAS_RG" -eq 1 ]]; then
       rg -q '^Name: plasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
-      rg -q '^Libs: .* -lplasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
+      rg -q '^Libs: .* -l(plasmite\.2|:libplasmite\.so\.2)$' "$extract_dir/lib/pkgconfig/plasmite.pc"
       rg -q '^Cflags: (-I|.* -I)' "$extract_dir/lib/pkgconfig/plasmite.pc"
     else
       grep -Eq '^Name: plasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
-      grep -Eq '^Libs: .* -lplasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
+      grep -Eq '^Libs: .* -l(plasmite\.2|:libplasmite\.so\.2)$' "$extract_dir/lib/pkgconfig/plasmite.pc"
       grep -Eq '^Cflags: (-I|.* -I)' "$extract_dir/lib/pkgconfig/plasmite.pc"
     fi
   fi
   if [[ "$target" == "armv7-unknown-linux-gnueabihf" ]]; then
     local machine library_machine
     machine="$(readelf -h "$extract_dir/bin/plasmite" | sed -n 's/.*Machine:[[:space:]]*//p')"
-    library_machine="$(readelf -h "$extract_dir/lib/libplasmite.so" | sed -n 's/.*Machine:[[:space:]]*//p')"
+    library_machine="$(readelf -h "$extract_dir/lib/libplasmite.so.2" | sed -n 's/.*Machine:[[:space:]]*//p')"
     [[ "$machine" == ARM && "$library_machine" == ARM ]] || {
       echo "expected ARMv7 CLI and library, got: $machine and $library_machine" >&2
       exit 1
@@ -135,7 +135,7 @@ C
       compiler_flags=(-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard)
     fi
     "$compiler" "${compiler_flags[@]}" -I "$extract_dir/include" "$WORKDIR/sdk-smoke.c" \
-      -L "$extract_dir/lib" -lplasmite -o "$WORKDIR/sdk-smoke"
+      -L "$extract_dir/lib" -l:libplasmite.so.2 -o "$WORKDIR/sdk-smoke"
     if [[ "$target" == "armv7-unknown-linux-gnueabihf" ]]; then
       qemu-arm -L /usr/arm-linux-gnueabihf -E "LD_LIBRARY_PATH=$extract_dir/lib" "$WORKDIR/sdk-smoke" "$WORKDIR"
     else
@@ -152,13 +152,16 @@ if [[ $# -gt 0 ]]; then
   exit 0
 fi
 
+sdk_dir="$WORKDIR/sdk"
+source "$ROOT/scripts/normalize_sdk_layout.sh"
+plasmite_normalize_sdk_dir "$LIB_DIR" "$sdk_dir" "development SDK" >/dev/null
 if [[ "${RUNNER_OS:-}" == "macOS" || "$(uname -s)" == "Darwin" ]]; then
-  export DYLD_LIBRARY_PATH="$LIB_DIR${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+  export DYLD_LIBRARY_PATH="$sdk_dir/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 else
-  export LD_LIBRARY_PATH="$LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH="$sdk_dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-export LIBRARY_PATH="$LIB_DIR${LIBRARY_PATH:+:$LIBRARY_PATH}"
-export PLASMITE_LIB_DIR="$LIB_DIR"
+export LIBRARY_PATH="$sdk_dir/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+export PLASMITE_LIB_DIR="$sdk_dir/lib"
 export PLASMITE_BIN="$LIB_DIR/plasmite"
 export GOCACHE="${GOCACHE:-$ROOT/.scratch/go-build}"
 mkdir -p "$GOCACHE"
@@ -187,7 +190,7 @@ POOL_DIR="$WORKDIR/pools"
   cd "$ROOT/bindings/go"
   PKG_CONFIG=/usr/bin/true \
     CGO_CFLAGS="-I$ROOT/include" \
-    CGO_LDFLAGS="-L$LIB_DIR" \
+    CGO_LDFLAGS="-L$sdk_dir/lib" \
     go run ./cmd/cookbook-smoke-fixture "$POOL_DIR" >/dev/null
 )
 check_pool_version "$POOL_DIR/cookbook-smoke.plasmite"
@@ -197,31 +200,35 @@ check_pool_version "$POOL_DIR/cookbook-smoke.plasmite"
   node - "$POOL_DIR" <<'JS'
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
-const { Client, FollowStart, parseMessage } = require("./bindings/node");
+const { Client } = require("./bindings/node");
 const poolDir = process.argv[2];
-const client = new Client(poolDir);
-const pool = client.openPool("cookbook-smoke");
-try {
-  const seed = pool.get(1n);
-  assert.deepEqual(seed.data, { task: "resize", id: 1 });
-  assert.deepEqual(seed.tags, ["cookbook"]);
-  const stream = pool.openFollow(FollowStart.sequence(2n), 1n, 5000n);
+(async () => {
+  const client = new Client(poolDir);
+  const pool = client.openPool("cookbook-smoke");
   try {
-    execFileSync(process.env.PLASMITE_BIN, [
-      "--dir", poolDir, "feed", "cookbook-smoke", '{"writer":"cli"}', "--tag", "external",
-    ], { timeout: 10000 });
-    const message = parseMessage(stream.nextJson());
-    assert.equal(message.seq, 2n);
-    assert.deepEqual(message.data, { writer: "cli" });
-    assert.deepEqual(message.tags, ["external"]);
+    const history = await pool.fetch({ since: 1n });
+    const { value: seed } = await history.next();
+    await history.return();
+    assert.deepEqual(seed.data, { task: "resize", id: 1 });
+    assert.deepEqual(seed.tags, ["cookbook"]);
+    const stream = await pool.follow();
+    try {
+      execFileSync(process.env.PLASMITE_BIN, [
+        "--dir", poolDir, "feed", "cookbook-smoke", '{"writer":"cli"}', "--tag", "external",
+      ], { timeout: 10000 });
+      const { value: message } = await stream.next(5);
+      assert.equal(message.seq, 2n);
+      assert.deepEqual(message.data, { writer: "cli" });
+      assert.deepEqual(message.tags, ["external"]);
+    } finally {
+      await stream.return();
+    }
+    assert.equal((await pool.feed({ writer: "node" }, { tags: ["handoff"] })).seq, 3n);
   } finally {
-    stream.close();
+    pool.close();
+    client.close();
   }
-  assert.equal(pool.append({ writer: "node" }, ["handoff"]).seq, 3n);
-} finally {
-  pool.close();
-  client.close();
-}
+})().catch(error => { console.error(error); process.exitCode = 1; });
 JS
 )
 
@@ -234,10 +241,11 @@ from plasmite import Client
 
 pool_dir = sys.argv[1]
 with Client(pool_dir) as client, client.open_pool("cookbook-smoke") as pool:
-    message = pool.get(3)
+    with pool.fetch(since=3) as reader:
+        message = next(reader)
     assert message.data == {"writer": "node"}
     assert message.meta.tags == ["handoff"]
-    assert pool.append({"writer": "python"}, ["handoff"]).seq == 4
+    assert pool.feed({"writer": "python"}, ["handoff"]).seq == 4
 
 out = subprocess.check_output(
     [os.environ["PLASMITE_BIN"], "--dir", pool_dir, "fetch", "cookbook-smoke", "4", "--format", "json"],

@@ -1,9 +1,9 @@
 # Plasmite Go Bindings
 
 These bindings wrap the `libplasmite` C ABI via cgo and expose typed Go contracts.
-`Append`, `Get`, and `Follow` return `*Message` values, while Lite3 APIs
-provide raw binary frames. Prefer the additive owned-view methods for selected
-reads, typed decoding and forwarding; existing message methods stay compatible.
+`Feed` returns the committed `*Message`. `Follow` reads new messages and `Fetch`
+reads retained history. Use the view methods for selected reads, typed decoding
+and forwarding encoded data.
 Owned views keep immutable encoded bytes in Go memory and need no per-message
 `Close`. These bindings operate on local pools and UDP endpoints; they do
 not expose the Rust/CLI secure native access-key client. Messages disappear
@@ -69,7 +69,6 @@ package main
 
 import (
     "context"
-    "errors"
     "fmt"
     "time"
 
@@ -83,101 +82,46 @@ func main() {
     }
     defer client.Close()
 
-    pool, err := client.Pool(plasmite.PoolRefName("docs"), 64*1024*1024)
+    pool, err := client.OpenPool("events", plasmite.Create(true))
     if err != nil {
         panic(err)
     }
     defer pool.Close()
 
-    msg, err := pool.Append(
-        map[string]any{"kind": "note", "text": "hi"},
-        []string{"note"},
-        plasmite.WithDurability(plasmite.DurabilityFast),
-    )
+    live, err := pool.Follow(plasmite.Tags("sensor"))
     if err != nil {
         panic(err)
     }
-    fmt.Println(msg.Seq, msg.Tags())
-    fmt.Println(string(msg.Data))
+    defer live.Close()
 
-    fetched, err := pool.Get(msg.Seq)
+    stored, err := pool.Feed(map[string]int{"temperature": 23}, []string{"sensor"})
     if err != nil {
         panic(err)
     }
-    fmt.Println(string(fetched.Data))
-
-    same, err := client.Pool(plasmite.PoolRefName("docs"), 0) // open or create
-    if err != nil {
-        panic(err)
-    }
-    defer same.Close()
-
-    frame, err := pool.GetLite3(msg.Seq)
-    if err != nil {
-        panic(err)
-    }
-    fmt.Println(frame.Seq, frame.Time())
-
-    ctx, cancel := context.WithCancel(context.Background())
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second)
     defer cancel()
-    one := uint64(1)
-    tail, errs := pool.Follow(ctx, plasmite.FollowOptions{
-        Start: plasmite.Sequence(msg.Seq),
-        MaxMessages: &one,
-        Tags:        []string{"note"},
-        Timeout:     100 * time.Millisecond,
-    })
-    for item := range tail {
-        fmt.Println(item.Seq, item.Tags(), string(item.Data))
-    }
-    if err := <-errs; err != nil && !errors.Is(err, context.Canceled) {
+    received, err := live.Next(ctx)
+    if err != nil {
         panic(err)
     }
+    fmt.Println(received.Seq, received.Time, string(received.Data))
+
+    history, err := pool.Fetch(plasmite.Since(stored.Seq))
+    if err != nil {
+        panic(err)
+    }
+    defer history.Close()
+    replayed, err := history.Next(ctx)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(string(replayed.Data))
 }
 ```
 
-`FollowOptions.Tags` applies exact tag matching and composes with other filters
-via AND semantics. `Sequence(seq)` is inclusive; save the last handled sequence
-plus one to resume. Tails retain one native reader across quiet waits.
-`Timeout` bounds each wait; waits also check context cancellation at least every
-50 milliseconds while idle. It does not end the tail on its own. Use a context deadline
-to bound the whole operation, or `MaxMessages` to stop after a chosen number
-of delivered messages.
-
-Local tails continue from the next retained message by default when their
-cursor falls behind the ring buffer. Set `ErrorOnGap` when lost messages must
-stop processing:
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-var handlerErr error
-tail, errs := pool.Follow(ctx, plasmite.FollowOptions{
-    Start: plasmite.Sequence(checkpoint),
-    ErrorOnGap: true,
-})
-for message := range tail {
-    if err := handle(message); err != nil {
-        handlerErr = err
-        cancel() // unblock the producer before waiting for its error channel
-        break
-    }
-    checkpoint = message.Seq + 1
-}
-if err := <-errs; err != nil && !errors.Is(err, context.Canceled) {
-    var plasmiteErr *plasmite.Error
-    if errors.As(err, &plasmiteErr) &&
-        plasmiteErr.Kind == plasmite.ErrorRetentionGap {
-        // Choose a new checkpoint or rebuild state before restarting.
-    }
-}
-if handlerErr != nil {
-    // Report the handler failure; checkpoint still names the unhandled message.
-}
-```
-
-The error channel receives `ErrorRetentionGap` before the first message or
-Lite3 frame after the gap. Tag filters do not conceal the error.
+`Follow` opens on new messages. `Fetch` reads retained history and returns
+`io.EOF` after the last message present at opening. Each `Next` takes a
+context. `Pool.Info` reports the currently retained range.
 
 ### UDP sender and follower
 
@@ -215,13 +159,13 @@ if err != nil {
 }
 defer pool.Close()
 
-follow, err := pool.Follow(udp.NewFollowOptions())
+follow, err := pool.Follow()
 if err != nil {
     panic(err)
 }
 defer follow.Close()
 
-if err := pool.SendJSON(map[string]any{"temperature": 23}, []string{"sensor"}); err != nil {
+if err := pool.Feed(map[string]any{"temperature": 23}, []string{"sensor"}); err != nil {
     panic(err)
 }
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -259,7 +203,7 @@ for an active native read; set a finite stream timeout for bounded shutdown.
 Independent handles may run concurrently, and message values are owned snapshots.
 
 For playback timing, use ordinary streams and an application scheduler; see the
-[next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).
+[2.0 upgrade guide](../../docs/record/upgrading-2.0.md#applications-control-playback-timing).
 
 Native readers transfer their fresh JSON buffer into `Message.Raw` without a
 second copy. `Message.Data` keeps independent storage, so changing Raw does not
@@ -267,28 +211,27 @@ change Data. `api.DecodeMessage` still copies caller-provided raw bytes;
 `api.DecodeOwnedMessage` lets an adapter transfer a fresh buffer explicitly.
 After that transfer, the caller must not mutate or reuse the input slice.
 
-## Numeric append receipts
+## Numeric feed receipts
 
 ```go
-receipt, err := api.AppendIdentity(pool, map[string]any{"temperature": 23.5}, []string{"sensor"})
-// receipt.Seq and receipt.TimestampNs are exact uint64 values.
+receipt, err := pool.FeedReceipt(map[string]any{"temperature": 23.5}, []string{"sensor"})
+// receipt.Seq and receipt.Time are exact uint64 values.
 ```
 
-`api.AppendJSONIdentity` accepts JSON bytes and `api.AppendLite3Identity` accepts
-encoded Lite3 bytes. These helpers return only the committed identity, avoiding
-receipt data decoding. The local backend also provides these methods directly.
-They require the matching C SDK/library. The original `api.Pool` interface gains
-no required methods: unsupported backends return an error before they append.
-Existing append methods keep full Message results where they already did.
+`FeedJSONReceipt` accepts JSON bytes and `FeedLite3Receipt` accepts encoded
+Lite3 bytes. These calls return the committed sequence and time.
 
 ## Managed owned views
 
-`client.Pool` returns the concrete local pool. Its additive `GetView` API retains
-one immutable Lite3 snapshot in Go memory, independently of pool close or record
-overwrite. Ordinary views and child values need no `Close`.
+`FetchView` and `FollowView` give the caller independent immutable Lite3
+snapshots. A view remains valid after the reader closes or the pool overwrites
+the message.
 
 ```go
-message, err := pool.GetView(seq)
+reader, err := pool.FetchView(plasmite.Since(seq))
+if err != nil { return err }
+defer reader.Close()
+message, err := reader.Next(ctx)
 if err != nil { return err }
 var reading struct {
     Sensor string `json:"sensor"`
@@ -306,8 +249,7 @@ power, powerPresent := values[1].Int64()
 fmt.Println(sensor, sensorPresent, power, powerPresent)
 ```
 
-Identity uses `message.Seq()` and `message.TimestampNs()`; `Time()` constructs UTC
-time when requested. `Data()` and `Meta()` return child references. `Decode`
+Identity uses `message.Seq()` and `message.Time()`, which returns Unix nanoseconds. `Data()` and `Meta()` return child references. `Decode`
 builds an independent ordinary value with `encoding/json` semantics. `DataJSON`
 and `JSON` format the data subtree and canonical complete envelope respectively;
 `Meta().JSON()` keeps all stored metadata fields. `Lite3()` returns a detached
@@ -326,19 +268,19 @@ conversion costs and the small-read buffer retention tradeoff.
 
 ## Native producers
 
-`AppendView` walks ordinary Go values into Lite3 and returns their committed
-snapshot. `AppendJSONView` accepts explicit JSON source. Both return Go-managed
-views and preserve legacy `Append`/`AppendJSON` behavior.
+`FeedView` walks ordinary Go values into Lite3 and returns their committed
+snapshot. `FeedJSONView` accepts explicit JSON source. Both return Go-managed
+views.
 
 ```go
-message, err := pool.AppendView(
+message, err := pool.FeedView(
     map[string]any{"sensor": "north", "samples": []byte{0, 127, 255}},
     []string{"sensor"},
 )
 if err != nil { return err }
 
 // Forward the whole encoding and tags, with a new identity.
-forwarded, err := pool.AppendView(message, nil)
+forwarded, err := pool.FeedView(message, nil)
 if err != nil { return err }
 fmt.Println(forwarded.Seq())
 ```
@@ -368,39 +310,34 @@ use the normal Go marshaler interface for explicit JSON conversion.
 
 ## Owned local and UDP streams
 
-`OpenViewFollow` provides pull-based reads through `Next(ctx)` and `Close()`.
-`FollowViews(ctx, options)` provides the same views on a bounded channel. Both use
-`FollowOptions` for sequence, matching-message limits, tags and retention gaps.
-Tags support embedded NUL. `Timeout` keeps the existing tail polling-wait meaning;
-use the context for cancellation or a deadline. The pull stream can outlive its
-source pool. The channel adapter checks `Pool.Close` between native waits and
-defaults to an unbuffered channel. Positive `Buffer` opts into a bounded queue;
-one additional message can await delivery. Cancel its context when stopping
-consumption.
+`FollowView` and `FetchView` return readers with `Next(ctx)` and `Close()`.
+They take the same `Since`, `Last` and `Tags` options as `Follow` and `Fetch`.
+Use the context to set a deadline or cancel a wait. The reader can outlive the
+pool handle.
 
 ```go
-stream, err := pool.OpenViewFollow(local.FollowOptions{Start: local.Sequence(first)})
+stream, err := pool.FollowView(local.Since(first))
 if err != nil { return err }
 defer stream.Close()
 message, err := stream.Next(ctx)
 if err != nil { return err }
 var reading struct { Value int64 }
 if err := message.Decode(&reading); err != nil { return err }
-forwarded, err := destination.AppendView(message, nil)
+forwarded, err := destination.FeedView(message, nil)
 ```
 
-Whole-message `AppendView(message, nil)` retains the exact payload/tags, commits
+Whole-message `FeedView(message, nil)` retains the exact payload and tags, commits
 it with fresh destination identity and shares the immutable Go backing storage.
-A nonnil tag slice replaces the tags; an empty slice clears them. Passing
-`message.Data()` retains the explicit subtree-copy behavior. Independent mutable
+A nonnil tag slice is an error when forwarding a message. Feed `message.Data()`
+to supply new tags. Independent mutable
 exports still copy. An append option can close the destination or reassign the
 caller's source variable without changing the source snapshot already visited.
 
-`udp.Pool.FollowViews` uses the existing `Follow.Next(ctx)`, `Cancel` and `Close`
+`udp.Pool.FollowView` uses the `Follow.Next(ctx)`, `Cancel` and `Close`
 lifecycle. DATA arrives as `*udp.ViewFrame` with an ordinary
 `*local.MessageView` in `View`; Gap and Progress keep their existing types.
-`FollowRaw` returns exact owned payloads with `Message == nil`; `Follow` keeps its
-legacy complete-message conversion. All three retain arrival order, late and
+`FollowLite3` returns the exact owned payload. `Follow` also decodes the message.
+All three retain arrival order, late and
 duplicate packets, server skip/progress records and finite completion. No
 receive adapter infers packet loss or adds retransmission.
 
@@ -414,12 +351,11 @@ forwarded messages remain valid after source pool/follow/stream close.
 [Go stream benchmark coverage and fixed builds](../../docs/performance/language-boundary-results/owned-views/go/streams/README.md)
 separate receive/copy costs, explicit conversion, forwarding and packet pacing.
 
-## Follow defaults and history
+## Follow and fetch
 
-`FollowOptions{}` selects new messages. Follow opens before returning its
-channels. Set `Start` to `All()`, `Last(n)`, `Since(unixNs)` or `Sequence(seq)`
-for explicit history. Sequence selection is inclusive. `Finite: true` stops at
-the opening history boundary and alone selects all retained history. Last N
-counts retained messages before filtering. The same choices apply to
-`FollowLite3`, `FollowViews` and low-level follow openings. UDP options now use
-`Finite` too, so their zero value follows new messages.
+Open a reader with `pool.Follow()` for new messages or `pool.Fetch()` for
+retained history. Pass `Since` or `Last` to select a starting point and use
+`Tags` to require tags. `Since` accepts an inclusive sequence, `"oldest"`,
+a duration, or an instant marked by `At`. Each `Next(ctx)` call uses its own
+context and leaves the reader open if the context expires. Call `Close` when
+you finish reading.

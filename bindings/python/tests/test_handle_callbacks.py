@@ -1,4 +1,3 @@
-from plasmite import FollowStart
 """Finish Python callbacks before borrowing a native handle."""
 
 import ctypes
@@ -59,10 +58,10 @@ class HandleCallbacks(unittest.TestCase):
 
     def test_append_durability(self):
         for method, symbol, payload in [
-            ("append_json", "plsm_pool_append_json", b"{}"),
-            ("append_json_identity", "plsm_pool_append_json_identity", b"{}"),
-            ("append_lite3", "plsm_pool_append_lite3", b"unused"),
-            ("append_lite3_identity", "plsm_pool_append_lite3_identity", b"unused"),
+            ("feed_json", "plsm_pool_feed_json", b"{}"),
+            ("feed_json_receipt", "plsm_pool_feed_json_receipt", b"{}"),
+            ("feed_lite3", "plsm_pool_feed_lite3", b"unused"),
+            ("feed_lite3_receipt", "plsm_pool_feed_lite3_receipt", b"unused"),
         ]:
             with self.subTest(method=method):
                 pool = self.fresh_pool()
@@ -76,7 +75,7 @@ class HandleCallbacks(unittest.TestCase):
                 )
 
     def test_append_tags(self):
-        for method in ["append_json", "append_json_identity"]:
+        for method in ["feed_json", "feed_json_receipt"]:
             with self.subTest(method=method):
                 pool = self.fresh_pool()
                 self.assert_closed_before_native(
@@ -90,8 +89,8 @@ class HandleCallbacks(unittest.TestCase):
 
     def test_get_sequence_and_open_follow_options(self):
         for method, symbol in [
-            ("get_json", "plsm_pool_get_json"),
-            ("get_lite3", "plsm_pool_get_lite3"),
+            ("_get_json", "plsm_internal_pool_get_json"),
+            ("_get_lite3", "plsm_internal_pool_get_lite3"),
         ]:
             with self.subTest(method=method):
                 pool = self.fresh_pool()
@@ -99,26 +98,23 @@ class HandleCallbacks(unittest.TestCase):
                     symbol, lambda: getattr(pool, method)(closing_int(pool.close))
                 )
         for method, symbol in [
-            ("open_follow", "plsm_pool_follow"),
-            ("open_lite3_follow", "plsm_pool_follow_lite3"),
+            ("follow", "plsm_pool_follow"),
+            ("follow_lite3", "plsm_pool_follow_lite3"),
         ]:
-            for gap in [False, True]:
-                with self.subTest(method=method, gap=gap):
-                    pool = self.fresh_pool()
-                    self.assert_closed_before_native(
-                        symbol,
-                        lambda: getattr(pool, method)(
-                            start=FollowStart(3, closing_int(pool.close)), error_on_gap=gap
-                        ),
-                    )
+            with self.subTest(method=method):
+                pool = self.fresh_pool()
+                self.assert_closed_before_native(
+                    symbol, lambda: getattr(pool, method)(since=closing_int(pool.close))
+                )
 
     def test_stream_timeout(self):
         for method, symbol in [
-            ("open_follow", "plsm_stream_next_wait"),
-            ("open_lite3_follow", "plsm_lite3_stream_next_wait"),
+            ("follow", "plsm_stream_next_wait"),
+            ("follow_lite3", "plsm_lite3_stream_next_wait"),
         ]:
             with self.subTest(method=method):
-                with getattr(self.pool, method)() as stream:
+                with getattr(self.pool, method)() as reader:
+                    stream = reader._stream
                     self.assert_closed_before_native(
                         symbol, lambda: stream.next_wait(closing_int(stream.close))
                     )
@@ -157,16 +153,16 @@ class HandleCallbacks(unittest.TestCase):
             (
                 plasmite.UdpPool,
                 plasmite.plsm_udp_pool_t,
-                "send_json",
-                "plsm_udp_pool_send_json",
+                "feed",
+                "plsm_udp_pool_feed_json",
                 "tags",
             ),
             (
                 plasmite.UdpPool,
                 plasmite.plsm_udp_pool_t,
                 "follow",
-                "plsm_udp_pool_follow",
-                "live",
+                "plsm_udp_pool_read",
+                "read_tags",
             ),
             (
                 plasmite.UdpFollow,
@@ -193,11 +189,9 @@ class HandleCallbacks(unittest.TestCase):
 
                     call = lambda: handle.open_pool(Name("pool"))
                 elif args == "tags":
-                    call = lambda: handle.send_json({}, tags=closing_tags(handle.close))
-                elif args == "live":
-                    call = lambda: handle.follow(
-                        plasmite.UdpFollowOptions(finite=closing_int(handle.close))
-                    )
+                    call = lambda: handle.feed({}, tags=closing_tags(handle.close))
+                elif args == "read_tags":
+                    call = lambda: handle.follow(tags=closing_tags(handle.close))
                 else:
                     call = lambda: handle.next_event(closing_int(handle.close))
                 self.assert_closed_before_native(symbol, call)
@@ -217,8 +211,8 @@ class HandleCallbacks(unittest.TestCase):
         self.assertIs(type(value), bytes)
         self.assertEqual(value, b"{}")
         self.assertEqual(
-            self.pool.append_json(Payload(b"{}"), [], plasmite.Durability.FAST),
-            self.pool.get_json(1),
+            self.pool.feed_json(Payload(b"{}"), [], plasmite.Durability.FAST),
+            self.pool._get_json(1),
         )
 
 

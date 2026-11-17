@@ -4,17 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Breaking API change: follow
+### Plasmite 2.0
 
-- Use `follow`/`Follow` in every language binding. Readers now start with new
-  messages by default. Select retained history explicitly: all, last N, a time
-  or an inclusive sequence. Finite mode reads the opening history and exits.
-- Rename HTTP reader routes to `/follow` and `/follow_lite3`. New clients require
-  updated servers. Legacy C stream symbols keep their published behavior;
-  current bindings use the shared follow options and entry points.
-- The maintainer authorizes this breaking transition in 1.x. See the upgrade
-  guide for migration examples and history-selection rules.
-
+- Follow starts with new messages. Fetch reads retained messages and stops at
+  the point it opened. Both accept the same starting positions and tag filters.
+- Feed stores an object or forwards a message's data and tags. It assigns a new
+  sequence and nanosecond timestamp at the destination.
+- Use fetch for finite history and feed's lines input for command output.
+  Follow keeps its one-message option for shell scripts.
+- HTTP pool operations use v2. Local and HTTP readers report the first missing
+  sequence and the first sequence still retained when the pool wraps.
+- Native packages use versioned shared-library filenames. The on-disk pool
+  format remains compatible with 1.x.
 
 ### Immutable views and direct native input
 
@@ -26,7 +27,7 @@ All notable changes to this project will be documented in this file.
   message APIs compatible. Node HTTP pools also support owned views through
   the bundled WebAssembly backend.
 - New view writers reject integers outside signed 64 bits and preserve native
-  bytes. See the [migration guide](docs/record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
+  bytes. See the [migration guide](docs/record/upgrading-2.0.md#keep-encoded-data-with-owned-views)
   for copy boundaries, exact numbers, cleanup and transport limits.
 
 ### Direct JSON reads and floating-point accuracy
@@ -37,13 +38,13 @@ All notable changes to this project will be documented in this file.
 - Rust enables correctly rounded JSON float parsing. Reads preserve stored
   binary64 values instead of adding another rounding step. Applications that
   compare exact floats or serialized text should check the
-  [next-major migration note](docs/record/upgrading-next-major.md#json-reads-preserve-stored-floating-point-values).
+  [2.0 migration note](docs/record/upgrading-2.0.md#json-reads-preserve-stored-floating-point-values).
 
 ### Binary follow filtering
 
 - Binary `follow --tag` over local pools and HTTP now checks tags and data
   readability without building a discarded application-data tree. Structured
-  payloads need fewer allocations; JSON output and jq filters keep full decoding.
+  payloads need fewer allocations. JSON output still decodes data.
   Original bytes and corruption errors retain their existing behavior.
 - Rust adds `Meta::from_lite3` for the same validated metadata read.
 
@@ -94,7 +95,7 @@ and doctor reports use facts captured during validation.
 - **Accept data that fits the encoder limit.** Try the exact allocation cap before
   rejecting a value whose encoded form may fit. Keep the existing memory bound.
 
-The [migration guide](docs/record/upgrading-next-major.md) covers bigint error
+The [migration guide](docs/record/upgrading-2.0.md) covers bigint error
 fields, fallible Rust and Go directory accessors, and explicit recovery of pools
 created under earlier directory fallbacks. Plasmite does not move files or
 search alternate stores automatically. These changes require no pool-file
@@ -119,7 +120,7 @@ format migration.
 - Replace reconstructed retry commands with concise guidance tied to the pool path.
 
 The command/API changes await a major release. Package versions remain unchanged.
-See the [migration guide](docs/record/upgrading-next-major.md) for removed symbols,
+See the [migration guide](docs/record/upgrading-2.0.md) for removed symbols,
 EOF behavior, client/server compatibility, and playback examples.
 
 ### Security maintenance

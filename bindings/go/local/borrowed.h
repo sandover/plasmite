@@ -4,6 +4,9 @@
  * The input is an unexported immutable Go allocation validated once. C retains
  * no pointers. Every pointer-free slot refers to that same allocation. */
 #include "plasmite.h"
+int plsm_internal_pool_get_into(plsm_pool_t *, uint64_t, uint8_t *, size_t, size_t *,
+    uint64_t *, uint32_t *, plsm_error_t **);
+int plsm_internal_pool_get_view(plsm_pool_t *, uint64_t, plsm_message_view_t **, plsm_error_t **);
 typedef struct {
     uint32_t kind, reserved;
     int64_t integer;
@@ -22,7 +25,7 @@ int plsm_go_message_json(const uint8_t *, size_t, const size_t *, size_t, size_t
 typedef struct { int status; plsm_error_t *error; size_t len; uint64_t timestamp; uint32_t flags; } plsm_go_get_result_t;
 static inline plsm_go_get_result_t plsm_go_get_into(plsm_pool_t *pool, uint64_t seq, uint8_t *data, size_t capacity) {
     plsm_go_get_result_t result = {0};
-    result.status = plsm_pool_get_into(pool,seq,data,capacity,&result.len,&result.timestamp,&result.flags,&result.error);
+    result.status = plsm_internal_pool_get_into(pool,seq,data,capacity,&result.len,&result.timestamp,&result.flags,&result.error);
     return result;
 }
 typedef struct { int status; plsm_error_t *error; size_t data,meta; plsm_buf_t proof; } plsm_go_validation_t;
@@ -93,7 +96,7 @@ static inline plsm_go_input_result_t plsm_go_append_input(plsm_pool_t *pool,cons
     result.status=plsm_go_append_nodes(pool,nodes,count,tags,tag_count,durability,&result.owner,&result.error);
     if (result.status) return result;
     result.bytes=plsm_view_bytes(result.owner,&result.len);
-    result.seq=plsm_view_seq(result.owner);result.timestamp=plsm_view_timestamp_ns(result.owner);
+    result.seq=plsm_view_seq(result.owner);result.timestamp=plsm_view_time(result.owner);
     result.data=plsm_view_data(result.owner).offset;
     plsm_value_ref_t meta={0};
     result.status=plsm_value_get(plsm_view_root(result.owner),(const uint8_t *)"meta",4,&meta,&result.error);

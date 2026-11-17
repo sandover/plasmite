@@ -1,7 +1,7 @@
-from plasmite import FollowStart
 """Exercise shared Python handles and close during native operations."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -32,8 +32,8 @@ class ThreadSafetyTests(unittest.TestCase):
             sequences = []
             for index in range(100):
                 value = {"worker": worker, "index": index}
-                appended = self.pool.append(value)
-                self.assertEqual(self.pool.get(appended.seq).data, value)
+                appended = self.pool.feed(value)
+                self.assertEqual(plasmite.parse_message(self.pool._get_json(appended.seq)).data, value)
                 sequences.append(appended.seq)
             return sequences
 
@@ -89,7 +89,7 @@ class ThreadSafetyTests(unittest.TestCase):
             "plasmite._LIB.plsm_pool_open", "plsm_client_free", original,
         )
         try:
-            self.assertEqual(opened.append({"survives": "client close"}).data,
+            self.assertEqual(opened.feed({"survives": "client close"}).data,
                              {"survives": "client close"})
         finally:
             opened.close()
@@ -97,24 +97,24 @@ class ThreadSafetyTests(unittest.TestCase):
             self.client.open_pool("threads")
 
     def test_pool_close_waits_for_get_and_owned_result(self):
-        message = self.pool.append({"owned": True})
+        message = self.pool.feed({"owned": True})
         original = plasmite._buf_to_bytes
         payload = self._assert_close_waits(
-            self.pool, lambda: self.pool.get_json(message.seq),
+            self.pool, lambda: self.pool._get_json(message.seq),
             "plasmite._buf_to_bytes", "plsm_pool_free", original,
         )
         self.assertEqual(plasmite.parse_message(payload).data, {"owned": True})
         with self.assertRaises(plasmite.PlasmiteError):
-            self.pool.get(message.seq)
+            plasmite.parse_message(self.pool._get_json(message.seq))
 
     def test_stream_close_waits_for_native_next(self):
         cases = (
-            (self.pool.open_follow, "next_json", "plsm_stream_next", "plsm_stream_free"),
-            (self.pool.open_lite3_follow, "next", "plsm_lite3_stream_next", "plsm_lite3_stream_free"),
+            (self.pool.follow, "next_json", "plsm_stream_next", "plsm_stream_free"),
+            (self.pool.follow_lite3, "next", "plsm_lite3_stream_next", "plsm_lite3_stream_free"),
         )
         for open_follow, method, native_next, native_free in cases:
             with self.subTest(method=method):
-                stream = open_follow(timeout_ms=20)
+                stream = open_follow()._stream
                 self.addCleanup(stream.close)
                 result = self._assert_close_waits(
                     stream, getattr(stream, method), "plasmite._LIB." + native_next,
@@ -125,14 +125,14 @@ class ThreadSafetyTests(unittest.TestCase):
                     getattr(stream, method)()
 
     def test_stream_close_waits_for_result_copy_and_free(self):
-        message = self.pool.append({"copy": "before close"})
+        message = self.pool.feed({"copy": "before close"})
         cases = (
-            (self.pool.open_follow, "next_json", "_buf_to_bytes", "plsm_stream_free"),
-            (self.pool.open_lite3_follow, "next", "_frame_to_py", "plsm_lite3_stream_free"),
+            (self.pool.follow, "next_json", "_buf_to_bytes", "plsm_stream_free"),
+            (self.pool.follow_lite3, "next", "_frame_to_py", "plsm_lite3_stream_free"),
         )
         for open_follow, method, converter, native_free in cases:
             with self.subTest(method=method):
-                stream = open_follow(start=FollowStart.sequence(message.seq), max_messages=1, timeout_ms=20)
+                stream = open_follow(since=message.seq)._stream
                 self.addCleanup(stream.close)
                 result = self._assert_close_waits(
                     stream, getattr(stream, method), "plasmite." + converter,
@@ -145,17 +145,16 @@ class ThreadSafetyTests(unittest.TestCase):
                     self.assertTrue(result.payload)
 
     def test_tail_yield_does_not_hold_pool_lock(self):
-        first = self.pool.append({"index": 1})
-        tail = self.pool.follow(start=FollowStart.sequence(first.seq), max_messages=2, timeout_ms=50)
+        first = self.pool.feed({"index": 1})
+        tail = self.pool.follow(since=first.seq)
         self.addCleanup(tail.close)
         self.assertEqual(next(tail).data, first.data)
         with ThreadPoolExecutor(max_workers=1) as threads:
-            second = threads.submit(self.pool.append, {"index": 2}).result(timeout=5)
+            second = threads.submit(self.pool.feed, {"index": 2}).result(timeout=5)
             threads.submit(self.pool.close).result(timeout=5)
         # The stream remains usable after its originating Pool handle closes.
         self.assertEqual(next(tail).data, second.data)
-        with self.assertRaises(StopIteration):
-            next(tail)
+        self.assertIsNone(tail.next(timedelta(0)))
 
     def test_failed_client_constructor_can_close_safely(self):
         client = plasmite.Client.__new__(plasmite.Client)
@@ -170,20 +169,20 @@ class ThreadSafetyTests(unittest.TestCase):
         self.assertIsNone(client._ptr)
 
     def test_bounded_waits_keep_position_and_allow_concurrent_cancel(self):
-        for opener in (self.pool.open_follow, self.pool.open_lite3_follow):
+        for opener in (self.pool.follow, self.pool.follow_lite3):
             with self.subTest(opener=opener.__name__):
-                stream = opener(start=FollowStart.sequence(1), max_messages=1)
+                stream = opener(since=1)._stream
                 self.addCleanup(stream.close)
                 status, value = stream.next_wait(0)
                 if status == 0:
-                    self.pool.append({"after_wait": True})
+                    self.pool.feed({"after_wait": True})
                     status, value = stream.next_wait(0)
                 self.assertEqual(status, 1)
                 message = plasmite.parse_message(value) if isinstance(value, bytes) else value
                 self.assertEqual(message.seq, 1)
-                self.assertEqual(stream.next_wait(0)[0], 2)
+                self.assertEqual(stream.next_wait(0)[0], 0)
 
-                quiet = opener(start=FollowStart.sequence(999), timeout_ms=3000)
+                quiet = opener()._stream
                 self.addCleanup(quiet.close)
                 with ThreadPoolExecutor(max_workers=1) as threads:
                     pending = threads.submit(quiet.next_wait, 3000)
@@ -193,11 +192,10 @@ class ThreadSafetyTests(unittest.TestCase):
 
     def test_tail_event_cancels_a_quiet_wait(self):
         cancel = Event()
-        with ThreadPoolExecutor(max_workers=1) as threads:
-            pending = threads.submit(list, self.pool.follow(start=FollowStart.sequence(999), cancel=cancel, timeout_ms=3000))
+        with self.pool.follow(cancel=cancel) as reader, ThreadPoolExecutor(max_workers=1) as threads:
+            pending = threads.submit(list, reader)
             cancel.set()
             self.assertEqual(pending.result(timeout=1), [])
-        self.assertEqual(list(self.pool.follow(start=FollowStart.all(), max_messages=0)), [])
 
 
 if __name__ == "__main__":

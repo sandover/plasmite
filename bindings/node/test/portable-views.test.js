@@ -19,8 +19,8 @@ test('remote-only import stays lazy and the checked artifact needs no runtime im
 test('portable proxies keep natural fields, arrays, stable children and explicit copies', async () => {
   const message = await round({ metrics: { power: 42 }, samples: [{ value: 1 }, { value: 2 }], nil: null });
   assert.equal(message.seq, 7n);
-  assert.equal(message.timestampNs, 1234567890n);
-  assert.equal(message.timeRfc3339, '1970-01-01T00:00:01.23456789Z');
+  assert.equal(message.time, 1234567890n);
+  assert.equal(JSON.parse(toJson(message)).time, '1970-01-01T00:00:01.234567890Z');
   assert.equal(message.data.metrics.power, 42);
   assert.equal(message.data.metrics, message.data.metrics);
   assert.equal({ ...message.data }.metrics, message.data.metrics);

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/scripts/normalize_sdk_layout.sh"
 PLASMITE_BIN="${PLASMITE_BIN:-${ROOT_DIR}/target/debug/plasmite}"
 WORK_DIR="${ROOT_DIR}/tmp/cookbook-smoke"
 POOL_DIR="${WORK_DIR}/pools"
@@ -95,9 +96,10 @@ pool_dir = home / ".plasmite" / "pools"
 pool_path = pool_dir / "cookbook-home.plasmite"
 
 with Client() as client:
-    with client.pool("cookbook-home", 1024 * 1024) as pool:
-        msg = pool.append({"task": "resize", "id": 1}, ["cookbook"], Durability.FAST)
-        pool.get(msg.seq)
+    with client.open_pool("cookbook-home", create=True) as pool:
+        sent = pool.feed({"task": "resize", "id": 1}, ["cookbook"], Durability.FAST)
+        with pool.fetch(since=sent.seq) as reader:
+            msg = next(reader)
         print(json.dumps({"seq": msg.seq, "tags": msg.tags, "data": msg.data}))
 
 if not pool_path.exists():
@@ -129,40 +131,41 @@ const { Client } = require("./index.js");
 const home = os.homedir();
 const poolPath = path.join(home, ".plasmite", "pools", "cookbook-home.plasmite");
 
-const client = new Client();
-let pool = null;
-try {
-  pool = client.pool("cookbook-home", 1024 * 1024);
-  const msg = pool.append({ task: "resize", id: 1 }, ["cookbook"]);
-  pool.get(msg.seq);
-  process.stdout.write(`${JSON.stringify({ seq: Number(msg.seq), tags: msg.tags, data: msg.data })}\n`);
-} finally {
-  if (pool) {
-    pool.close();
+(async () => {
+  const client = new Client();
+  let pool;
+  try {
+    pool = client.openPool("cookbook-home", { create: true });
+    const sent = await pool.feed({ task: "resize", id: 1 }, { tags: ["cookbook"] });
+    const reader = await pool.fetch({ since: sent.seq });
+    const { value: msg } = await reader.next();
+    await reader.return();
+    process.stdout.write(`${JSON.stringify({ seq: Number(msg.seq), tags: msg.tags, data: msg.data })}\n`);
+  } finally {
+    pool?.close();
+    client.close();
   }
-  client.close();
-}
-
-if (!fs.existsSync(poolPath)) {
-  throw new Error(`expected pool to exist: ${poolPath}`);
-}
+  if (!fs.existsSync(poolPath)) throw new Error(`expected pool to exist: ${poolPath}`);
+})().catch(error => { console.error(error); process.exitCode = 1; });
 NODE
   )
   assert_jq_true "${node_home_out}" '.data.task == "resize"' "Node fresh HOME fixture"
   assert_jq_true "${node_home_out}" '.tags == ["cookbook"]' "Node fresh HOME fixture"
 
   local go_cache="${GOCACHE:-${WORK_DIR}/go-cache}"
+  local sdk_dir
+  sdk_dir="$(plasmite_normalize_sdk_dir "${ROOT_DIR}/target/debug" "${WORK_DIR}/sdk" "cookbook SDK")"
   mkdir -p "${go_cache}" "${WORK_DIR}/go-tmp"
   (
     cd "${ROOT_DIR}/bindings/go" && \
       GOCACHE="${go_cache}" \
       GOTMPDIR="${WORK_DIR}/go-tmp" \
-      PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
-      LD_LIBRARY_PATH="${ROOT_DIR}/target/debug:${LD_LIBRARY_PATH:-}" \
-      DYLD_FALLBACK_LIBRARY_PATH="${ROOT_DIR}/target/debug:${DYLD_FALLBACK_LIBRARY_PATH:-}" \
+      PLASMITE_LIB_DIR="${sdk_dir}/lib" \
+      LD_LIBRARY_PATH="${sdk_dir}/lib:${LD_LIBRARY_PATH:-}" \
+      DYLD_LIBRARY_PATH="${sdk_dir}/lib:${DYLD_LIBRARY_PATH:-}" \
       PKG_CONFIG="/usr/bin/true" \
       CGO_CFLAGS="-I${ROOT_DIR}/include" \
-      CGO_LDFLAGS="-L${ROOT_DIR}/target/debug" \
+      CGO_LDFLAGS="-L${sdk_dir}/lib" \
       go run ./cmd/cookbook-smoke-fixture "${fixtures_dir}/go-pools"
   ) >"${go_out}"
   assert_jq_true "${go_out}" '.data.task == "resize"' "Go cookbook fixture"
@@ -202,14 +205,14 @@ mkdir -p "${POOL_DIR}"
 # Produce & Consume
 produce_out="${WORK_DIR}/produce_consume.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed work --create '{"task":"resize","id":1}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow work --tail 1 --one >"${produce_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow work --last 1 --one >"${produce_out}"
 assert_contains "${produce_out}" '"task":"resize"' "Produce & Consume"
 
 # CI Gate
 ci_out="${WORK_DIR}/ci_gate_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create ci >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed ci '{"status":"green","commit":"a1b2c3","suite":"unit"}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow ci --where '.data.status == "green"' --tail 1 --one >"${ci_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" fetch ci --last 1 >"${ci_out}"
 assert_contains "${ci_out}" '"status":"green"' "CI Gate"
 
 # Live Build Progress
@@ -220,7 +223,7 @@ build_out="${WORK_DIR}/live_build_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"test","pct":0}' >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"test","pct":100}' >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"finished","ok":true}' --tag done >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow build --tag done --tail 1 --one >"${build_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow build --tag done --last 1 --one >"${build_out}"
 assert_contains "${build_out}" '"ok":true' "Live Build Progress"
 
 # Multi-Writer Event Bus
@@ -229,7 +232,7 @@ multi_out="${WORK_DIR}/multi_writer_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"api","sha":"f4e5d6"}' --tag deploy >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"api","msg":"latency spike"}' --tag alert >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"web","rps":1420}' --tag metric >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow events --tag alert --tail 3 --no-follow >"${multi_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" fetch events --tag alert --last 3 >"${multi_out}"
 assert_contains "${multi_out}" '"msg":"latency spike"' "Multi-Writer Event Bus"
 
 # Replay & Debug
@@ -238,9 +241,9 @@ replay_filter_out="${WORK_DIR}/replay_debug.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create incidents >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed incidents '{"level":"info","msg":"booting"}' >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed incidents '{"level":"error","msg":"latency spike"}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --replay 0 --since 1m >"${replay_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" fetch incidents --since 1m >"${replay_out}"
 assert_line_count_at_least "${replay_out}" 2 "Replay & Debug"
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --where '.data.level == "error"' --tail 1 --one >"${replay_filter_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" fetch incidents --last 1 >"${replay_filter_out}"
 assert_contains "${replay_filter_out}" '"level":"error"' "Replay & Debug"
 assert_file_non_empty "${replay_filter_out}" "Replay & Debug"
 
@@ -273,7 +276,7 @@ if ! kill -0 "${SERVE_PID}" 2>/dev/null; then
 fi
 
 "${PLASMITE_BIN}" feed "${remote_url}/remote-events" '{"sensor":"temp","value":23.5}' >/dev/null
-"${PLASMITE_BIN}" follow "${remote_url}/remote-events" --tail 1 --one >"${remote_follow_out}"
+"${PLASMITE_BIN}" follow "${remote_url}/remote-events" --last 1 --one >"${remote_follow_out}"
 assert_contains "${remote_follow_out}" '"sensor":"temp"' "Remote Pool Access"
 
 kill "${SERVE_PID}"

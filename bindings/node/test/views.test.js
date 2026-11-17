@@ -59,7 +59,7 @@ test('explicit native conversion builds only the requested subtree', () => {
   native.power = 1;
   assert.equal(m.data.metrics.power, 42);
   assert.equal(backend.nativeCalls(), 1);
-  assert.equal(toNative(m).time, '1970-01-01T00:00:01.23456789Z');
+  assert.equal(toNative(m).time, m.time);
   assert.equal(JSON.parse(toJson(m)).data.metrics.power, 42);
 });
 
@@ -141,15 +141,15 @@ test('fixed root descriptors stay lazy and never repeat immutable lookups', () =
 
 test('timestamp text uses canonical RFC3339 fractions throughout the u64 range', () => {
   for (const [ns, expected] of [
-    [0n, '1970-01-01T00:00:00Z'],
-    [1000000000n, '1970-01-01T00:00:01Z'],
+    [0n, '1970-01-01T00:00:00.000000000Z'],
+    [1000000000n, '1970-01-01T00:00:01.000000000Z'],
     [1n, '1970-01-01T00:00:00.000000001Z'],
-    [1234567890n, '1970-01-01T00:00:01.23456789Z'],
+    [1234567890n, '1970-01-01T00:00:01.234567890Z'],
     [18446744073709551615n, '2554-07-21T23:34:33.709551615Z'],
   ]) {
     const view = createMessageView(owner({}), 1n, ns);
-    assert.equal(view.timeRfc3339, expected);
-    assert.equal(toNative(view).time, expected);
+    assert.equal(JSON.parse(toJson(view)).time, expected);
+    assert.equal(toNative(view).time, view.time);
     assert.equal(JSON.parse(toJson(view)).time, expected);
   }
 });

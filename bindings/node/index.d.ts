@@ -19,13 +19,13 @@ export const enum ErrorKind {
   Io = 8,
   RetentionGap = 9
 }
-export interface AppendReceipt {
+export interface FeedReceipt {
   seq: bigint
-  timestampNs: bigint
+  time: bigint
 }
 export interface Lite3Frame {
   seq: bigint
-  timestampNs: bigint
+  time: bigint
   flags: number
   payload: Buffer
 }
@@ -39,7 +39,7 @@ export interface StreamWait {
 export interface UdpEvent {
   kind: string
   seq?: bigint
-  timestampNs?: bigint
+  time?: bigint
   payload?: Buffer
   message?: Buffer
   first?: bigint
@@ -70,7 +70,7 @@ export declare class NativeView {
   encodedBytes(): Buffer
   root(): unknown
   get seq(): bigint
-  get timestampNs(): bigint
+  get time(): bigint
   lookup(node: number, key: string): unknown
   has(node: number, key: string): boolean
   at(node: number, index: number): unknown
@@ -87,20 +87,22 @@ export declare class NativeCursor {
 export declare class Client {
   constructor(poolDir: string)
   createPool(poolRef: string, sizeBytes: number | bigint): Pool
-  openPool(poolRef: string): Pool
+  openPool(poolRef: string, create?: boolean | undefined | null): Pool
+  listPoolsJson(): Buffer
+  deletePool(poolRef: string): void
   close(): void
 }
 export declare class Pool {
   prepareAppend(durability: Durability): NativeAppendTarget
-  appendJson(payload: Buffer, tags: Array<string>, durability: Durability): Buffer
-  appendLite3(payload: Buffer, durability: Durability): bigint
-  appendJsonIdentity(payload: Buffer, tags: Array<string>, durability: Durability): AppendReceipt
-  appendLite3Identity(payload: Buffer, durability: Durability): AppendReceipt
+  infoJson(): Buffer
+  feedJson(payload: Buffer, tags: Array<string>, durability: Durability): Buffer
+  openRead(finite: boolean, kind: number, value: bigint, tags: Array<string>, view?: boolean | undefined | null): Stream
+  openLite3Read(finite: boolean, kind: number, value: bigint, tags: Array<string>): Lite3Stream
+  feedLite3(payload: Buffer, durability: Durability): Buffer
+  feedJsonReceipt(payload: Buffer, tags: Array<string>, durability: Durability): FeedReceipt
+  feedLite3Receipt(payload: Buffer, durability: Durability): FeedReceipt
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
-  openFollow(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, startKind: number, finite: boolean): Stream
-  openLite3Follow(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, startKind: number, finite: boolean): Lite3Stream
-  openViewFollow(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, tags: Array<string>, startKind: number, finite: boolean): Stream
   getView(seq: number | bigint): Promise<unknown>
   close(): void
 }
@@ -122,9 +124,9 @@ export declare class UdpClient {
   close(): void
 }
 export declare class UdpPool {
-  sendJson(payload: Buffer, tags: Array<string>): void
-  sendLite3(payload: Buffer): void
-  follow(startKind: number, startValue: number | bigint, live: boolean, owned?: boolean | undefined | null): Promise<UdpFollow>
+  feedLite3(payload: Buffer): void
+  feedJson(payload: Buffer, tags: Array<string>, durability: Durability): void
+  follow(startKind: number, startValue: number | bigint, live: boolean, owned: boolean, tags: Array<string>): Promise<UdpFollow>
   close(): void
 }
 export declare class UdpFollow {

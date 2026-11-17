@@ -377,6 +377,7 @@ jobs:
           cargo test --release --bin plasmite serve_service::windows::tests -- --test-threads=1
           cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access --test udp_input --test udp_client --test udp_transport --test udp_transport_cli --test cli_yaml --test cli_yaml_stream -- --test-threads=1
       - name: Local pool roundtrip smoke
+        timeout-minutes: 1
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -390,8 +391,8 @@ jobs:
           Set-Content -Path $payloadPath -Value '{"ci":"windows-smoke"}' -NoNewline
           try {
             & $exe --dir $dir pool create $pool
-            & $exe --dir $dir feed $pool -f $payloadPath
-            $out = & $exe --dir $dir follow $pool --format json --tail 1 --one --timeout 2s
+            Get-Content -Raw $payloadPath | & $exe --dir $dir feed $pool
+            $out = & $exe --dir $dir follow $pool --format json --last 1 --one
             if (-not ($out -match '"ci":"windows-smoke"')) {
               throw "Roundtrip payload marker missing from follow output."
             }

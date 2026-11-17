@@ -1,7 +1,7 @@
 //! Purpose: Define public message types and append/get/tail helpers for the API.
 //! Exports: `Message`, `Meta` (including validated `Meta::from_lite3`), `FollowOptions`, `Follow`, `Lite3Follow`.
 //! Role: Stable message envelope aligned with the CLI contract.
-//! Invariants: Message fields mirror CLI JSON; time is RFC3339 UTC.
+//! Invariants: Message time holds Unix nanoseconds; text uses RFC 3339 UTC.
 //! Invariants: Follow streams preserve ordering and avoid unbounded buffering.
 #![allow(clippy::result_large_err)]
 
@@ -37,7 +37,7 @@ impl Meta {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Message {
     pub seq: u64,
-    pub time: String,
+    pub time: u64,
     pub meta: Meta,
     pub data: Value,
 }
@@ -48,15 +48,15 @@ impl Message {
         let (meta, data) = decode_payload(payload)?;
         Ok(Self {
             seq,
-            time: format_ts(timestamp_ns)?,
+            time: timestamp_ns,
             meta,
             data,
         })
     }
 
-    /// Return the message timestamp in nanoseconds since the Unix epoch.
-    pub fn timestamp_ns(&self) -> Result<u64, Error> {
-        parse_timestamp_ns(&self.time)
+    /// Format the stored instant for a text envelope.
+    pub fn time_rfc3339(&self) -> String {
+        format_ts(self.time).expect("u64 Unix nanoseconds fit in RFC 3339")
     }
 }
 
@@ -77,13 +77,17 @@ pub(super) fn parse_timestamp_ns(time: &str) -> Result<u64, Error> {
 #[derive(Clone, Debug)]
 pub struct FollowOptions {
     /// New messages by default; select retained history explicitly.
+    #[cfg(test)]
     pub start: super::FollowStart,
     /// Continue after history. False stops at the opening upper bound; alone it selects all history.
+    #[cfg(test)]
     pub live: bool,
     pub max_messages: Option<usize>,
     pub tags: Vec<String>,
     pub poll_interval: Duration,
+    #[cfg(test)]
     pub timeout: Option<Duration>,
+    #[cfg(test)]
     pub notify: bool,
     pub gap_policy: GapPolicy,
     /// Stop a blocking tail when its caller withdraws access.
@@ -100,12 +104,16 @@ pub enum GapPolicy {
 impl FollowOptions {
     pub fn new() -> Self {
         Self {
+            #[cfg(test)]
             start: super::FollowStart::New,
+            #[cfg(test)]
             live: true,
             max_messages: None,
             tags: Vec::new(),
             poll_interval: Duration::from_millis(50),
+            #[cfg(test)]
             timeout: None,
+            #[cfg(test)]
             notify: true,
             gap_policy: GapPolicy::Continue,
             cancel: None,
@@ -119,6 +127,184 @@ impl Default for FollowOptions {
     }
 }
 
+/// An inclusive read position.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Since {
+    Oldest,
+    Seq(u64),
+    At(u64),
+    Ago(Duration),
+}
+
+impl std::str::FromStr for Since {
+    type Err = Error;
+
+    fn from_str(text: &str) -> Result<Self, Error> {
+        let text = text.trim();
+        if text == "oldest" {
+            return Ok(Self::Oldest);
+        }
+        if !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return text.parse().map(Self::Seq).map_err(|err| {
+                Error::new(ErrorKind::Usage)
+                    .with_message("sequence is out of range")
+                    .with_source(err)
+            });
+        }
+        if let Some(nanos) = crate::since::parse_relative_ns(text) {
+            return Ok(Self::Ago(Duration::from_nanos(nanos)));
+        }
+        crate::since::parse_rfc3339_ns(text)
+            .map(Self::At)
+            .map_err(|err| {
+                Error::new(ErrorKind::Usage)
+                    .with_message("since requires a sequence, oldest, duration or RFC 3339 time")
+                    .with_source(err)
+            })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum ReadStart {
+    Default,
+    Since(Since),
+    Last(u64),
+}
+
+/// Options shared by follow and fetch. Tags all have to match.
+#[derive(Clone, Debug)]
+pub struct Read {
+    pub(super) start: ReadStart,
+    pub(super) tags: Vec<String>,
+    pub(super) cancel: Option<Arc<AtomicBool>>,
+    pub(super) until: Option<u64>,
+}
+
+impl Read {
+    pub fn new() -> Self {
+        Self {
+            start: ReadStart::Default,
+            tags: Vec::new(),
+            cancel: None,
+            until: None,
+        }
+    }
+
+    pub fn since(position: Since) -> Self {
+        Self {
+            start: ReadStart::Since(position),
+            ..Self::new()
+        }
+    }
+
+    pub fn last(count: u64) -> Self {
+        Self {
+            start: ReadStart::Last(count),
+            ..Self::new()
+        }
+    }
+
+    pub fn tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn cancel(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(flag);
+        self
+    }
+
+    /// Keep the original end boundary when an HTTP stream continues.
+    #[doc(hidden)]
+    pub fn until(mut self, seq: u64) -> Self {
+        self.until = Some(seq);
+        self
+    }
+}
+
+impl Default for Read {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Options for storing or forwarding one message.
+#[derive(Clone, Debug, Default)]
+pub struct Feed {
+    tags: Option<Vec<String>>,
+    durability: Durability,
+}
+
+impl Feed {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = Some(tags.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn durability(mut self, durability: Durability) -> Self {
+        self.durability = durability;
+        self
+    }
+}
+
+/// A feed either stores data or forwards a complete message.
+pub enum FeedInput<'a> {
+    Data(&'a Value),
+    Message(&'a Message),
+}
+
+impl<'a> From<&'a Value> for FeedInput<'a> {
+    fn from(value: &'a Value) -> Self {
+        Self::Data(value)
+    }
+}
+
+impl<'a> From<&'a Message> for FeedInput<'a> {
+    fn from(message: &'a Message) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl Feed {
+    pub(super) fn resolve<'a>(
+        &'a self,
+        input: FeedInput<'a>,
+    ) -> Result<(&'a Value, &'a [String], Durability), Error> {
+        let (data, tags) = match input {
+            FeedInput::Data(data) => (data, self.tags.as_deref().unwrap_or_default()),
+            FeedInput::Message(message) => {
+                if self.tags.is_some() {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("tags cannot accompany a forwarded message"));
+                }
+                (&message.data, message.meta.tags.as_slice())
+            }
+        };
+        if !data.is_object() {
+            return Err(Error::new(ErrorKind::Usage).with_message("message data must be an object"));
+        }
+        Ok((data, tags, self.durability))
+    }
+
+    pub(super) fn encoded_durability(&self) -> Result<Durability, Error> {
+        if self.tags.is_some() {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("tags cannot accompany a forwarded message"));
+        }
+        Ok(self.durability)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FeedReceipt {
+    pub seq: u64,
+    pub time: u64,
+}
+
 pub struct Follow<'a>(TailReader<'a>);
 
 /// A pull-based stream of independent immutable Lite3 snapshots.
@@ -127,8 +313,151 @@ pub struct Follow<'a>(TailReader<'a>);
 pub struct ViewFollow<'a>(TailReader<'a>);
 
 impl Pool {
+    /// Store data or forward a message using a new sequence and wall-clock time.
+    pub fn feed<'a>(
+        &mut self,
+        input: impl Into<FeedInput<'a>>,
+        options: Feed,
+    ) -> Result<Message, Error> {
+        let (data, tags, durability) = options.resolve(input.into())?;
+        self.append_json_now(data, tags, durability)
+    }
+
+    /// Store an application object from JSON text.
+    pub fn feed_json(&mut self, json: &[u8], options: Feed) -> Result<Message, Error> {
+        let data: Value = serde_json::from_slice(json).map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("invalid JSON object")
+                .with_source(err)
+        })?;
+        self.feed(&data, options)
+    }
+
+    /// Forward a complete Lite3 envelope with a fresh identity.
+    pub fn feed_lite3(&mut self, bytes: &[u8], options: Feed) -> Result<Message, Error> {
+        self.append_lite3_with_receipt_now(bytes, options.encoded_durability()?)
+    }
+
+    /// Forward a complete Lite3 envelope without decoding the stored result.
+    pub fn feed_lite3_receipt(
+        &mut self,
+        bytes: &[u8],
+        options: Feed,
+    ) -> Result<FeedReceipt, Error> {
+        let (seq, time) = self.append_lite3_identity_now(bytes, options.encoded_durability()?)?;
+        Ok(FeedReceipt { seq, time })
+    }
+
+    /// Forward an immutable message view while retaining its encoded payload.
+    pub fn feed_view(
+        &mut self,
+        view: &crate::view::MessageView,
+        options: Feed,
+    ) -> Result<crate::view::MessageView, Error> {
+        self.append_view_now(view, options.encoded_durability()?)
+    }
+
+    /// Open a reader on new messages unless the caller explicitly selects history.
+    pub fn follow(&self, read: Read) -> Result<Follow<'_>, Error> {
+        self.open_read(read, true).map(Follow)
+    }
+
+    /// Open a reader whose last possible sequence is fixed when it opens.
+    pub fn fetch(&self, read: Read) -> Result<Follow<'_>, Error> {
+        self.open_read(read, false).map(Follow)
+    }
+
+    pub fn follow_view(&self, read: Read) -> Result<ViewFollow<'_>, Error> {
+        self.open_read(read, true).map(ViewFollow)
+    }
+
+    pub fn fetch_view(&self, read: Read) -> Result<ViewFollow<'_>, Error> {
+        self.open_read(read, false).map(ViewFollow)
+    }
+
+    pub fn follow_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error> {
+        self.open_read(read, true).map(Lite3Follow)
+    }
+
+    pub fn fetch_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error> {
+        self.open_read(read, false).map(Lite3Follow)
+    }
+
+    fn open_read(&self, read: Read, live: bool) -> Result<TailReader<'_>, Error> {
+        Ok(TailReader {
+            pool: self,
+            state: self.read_state(read, live)?,
+        })
+    }
+
+    pub(crate) fn read_state(&self, read: Read, live: bool) -> Result<TailState, Error> {
+        let mut cursor = Cursor::new();
+        let (first, upper) = {
+            let _lock = self.read_lock()?;
+            let header = self.header_locked()?;
+            let oldest = header.oldest_seq.max(1);
+            let newest = header.newest_seq;
+            let next = newest.checked_add(1);
+            let first = match read.start {
+                ReadStart::Default if live => next,
+                ReadStart::Default | ReadStart::Since(Since::Oldest) => Some(oldest),
+                ReadStart::Last(0) => next,
+                ReadStart::Last(count) => Some(newest.saturating_sub(count - 1).max(oldest)),
+                ReadStart::Since(Since::Seq(seq)) => {
+                    if seq == 0 || next.is_some_and(|next| seq > next) {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("since must be a positive sequence at or before the next unwritten message"));
+                    }
+                    Some(seq)
+                }
+                ReadStart::Since(Since::At(time)) => cursor.seek_time_locked(self, time)?.or(next),
+                ReadStart::Since(Since::Ago(duration)) => {
+                    let nanos = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+                    let time = now_ns()?.saturating_sub(nanos);
+                    cursor.seek_time_locked(self, time)?.or(next)
+                }
+            };
+            if let Some(first) = first {
+                if first < oldest {
+                    return Err(Error::retention_gap(first, oldest));
+                }
+                if Some(first) == next {
+                    cursor.seek_to(header.head_off as usize);
+                }
+            }
+            if read.until.is_some_and(|until| live || until > newest) {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("invalid fetch continuation boundary"));
+            }
+            (first, (!live).then_some(read.until.unwrap_or(newest)))
+        };
+        let options = FollowOptions {
+            #[cfg(test)]
+            live,
+            tags: read.tags,
+            gap_policy: GapPolicy::Error,
+            cancel: read.cancel,
+            ..FollowOptions::new()
+        };
+        Ok(TailState {
+            cursor,
+            options,
+            seen: 0,
+            deadline: None,
+            notify: open_for_pool(self),
+            expected_seq: first,
+            terminated: first.is_none()
+                || upper.zip(first).is_some_and(|(last, first)| first > last),
+            upper,
+            since_ns: None,
+            startup_error: None,
+            check_retention_before_reading: true,
+        })
+    }
+
     /// Follow validated owned views without constructing JSON or native data trees.
-    pub fn follow_views(&self, options: FollowOptions) -> ViewFollow<'_> {
+    #[cfg(test)]
+    pub(crate) fn follow_views(&self, options: FollowOptions) -> ViewFollow<'_> {
         ViewFollow(TailReader::new(self, options))
     }
 }
@@ -152,6 +481,7 @@ pub(crate) struct TailState {
     upper: Option<u64>,
     since_ns: Option<u64>,
     startup_error: Option<Error>,
+    check_retention_before_reading: bool,
 }
 
 pub(crate) enum TailOutcome<T> {
@@ -162,6 +492,7 @@ pub(crate) enum TailOutcome<T> {
 }
 
 impl<'a> TailReader<'a> {
+    #[cfg(test)]
     fn new(pool: &'a Pool, options: FollowOptions) -> Self {
         Self {
             pool,
@@ -178,6 +509,7 @@ impl<'a> TailReader<'a> {
 }
 
 impl TailState {
+    #[cfg(test)]
     pub(crate) fn new(pool: &Pool, options: FollowOptions) -> Self {
         let deadline = options.timeout.map(|duration| Instant::now() + duration);
         let mut cursor = Cursor::new();
@@ -209,6 +541,13 @@ impl TailState {
                         since_ns = Some(time);
                         oldest
                     }
+                    FollowStart::Ago(nanos) => {
+                        match now_ns() {
+                            Ok(now) => since_ns = Some(now.saturating_sub(nanos)),
+                            Err(err) => startup_error = Some(err),
+                        }
+                        oldest
+                    }
                     FollowStart::Sequence(0) => oldest,
                     FollowStart::Sequence(seq) => seq,
                 });
@@ -235,6 +574,7 @@ impl TailState {
             upper,
             since_ns,
             startup_error,
+            check_retention_before_reading: false,
         }
     }
 
@@ -255,13 +595,24 @@ impl TailState {
         wait: Option<Duration>,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
     ) -> Result<TailOutcome<T>, Error> {
-        self.next_wait_using(wait, |cursor| cursor.next(pool), select)
+        let check_retention = self.check_retention_before_reading;
+        let result = self.next_wait_using(
+            wait,
+            |cursor, expected| {
+                cursor.next_checked(pool, if check_retention { expected } else { None })
+            },
+            select,
+        );
+        if result.is_err() && check_retention {
+            self.terminated = true;
+        }
+        result
     }
 
     fn next_wait_using<T>(
         &mut self,
         wait: Option<Duration>,
-        mut acquire: impl FnMut(&mut Cursor) -> Result<CursorResult, Error>,
+        mut acquire: impl FnMut(&mut Cursor, Option<u64>) -> Result<CursorResult, Error>,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
     ) -> Result<TailOutcome<T>, Error> {
         if let Some(error) = self.startup_error.take() {
@@ -311,7 +662,7 @@ impl TailState {
             }
             polled = true;
 
-            match acquire(&mut self.cursor)? {
+            match acquire(&mut self.cursor, self.expected_seq)? {
                 CursorResult::Message(frame) => {
                     if self.upper.is_some_and(|upper| frame.seq > upper) {
                         self.terminated = true;
@@ -333,10 +684,7 @@ impl TailState {
                     }
                     // Sequence space cannot advance after the last u64 value.
                     self.terminated = frame.seq == u64::MAX || self.upper == Some(frame.seq);
-                    if self
-                        .since_ns
-                        .is_some_and(|since| frame.timestamp_ns < since)
-                    {
+                    if self.since_ns.is_some_and(|since| frame.time < since) {
                         if self.terminated {
                             return Ok(TailOutcome::Finished);
                         }
@@ -400,12 +748,11 @@ impl TailState {
         if max_bytes == 0 {
             return Err(Error::new(ErrorKind::Usage).with_message("byte bound must be positive"));
         }
-        let minimum_seq = self.expected_seq;
         self.next_wait_using(
             wait,
-            |cursor| {
+            |cursor, expected| {
                 let _lock = pool.read_lock()?;
-                cursor.next_locked_bounded(pool, max_bytes, minimum_seq)
+                cursor.next_locked_bounded(pool, max_bytes, expected)
             },
             select,
         )
@@ -428,11 +775,11 @@ impl TailState {
         });
         let cancel = self.options.cancel.clone();
         let deadline = self.deadline;
-        let expected_at_start = self.expected_seq;
+        let upper = self.upper;
         let mut frames = std::collections::VecDeque::new();
         let first = self.next_wait_using(
             wait,
-            |cursor| {
+            |cursor, expected| {
                 // Filtering may reject the first record. Reuse only companions
                 // acquired by this explicit call, committing one checkpoint at a time.
                 if let Some((frame, checkpoint)) = frames.pop_front() {
@@ -442,9 +789,9 @@ impl TailState {
                 // One lock covers the first snapshot and all available companions.
                 // Conversion never runs inside this lock.
                 let _lock = pool.read_lock()?;
-                let first = cursor.next_locked_bounded(pool, max_bytes, expected_at_start)?;
+                let first = cursor.next_locked_bounded(pool, max_bytes, expected)?;
                 if let CursorResult::Message(frame) = &first {
-                    if expected_at_start.is_some_and(|expected| frame.seq < expected) {
+                    if expected.is_some_and(|expected| frame.seq < expected) {
                         return Ok(first);
                     }
                     let mut used = frame.payload.len();
@@ -459,6 +806,9 @@ impl TailState {
                         }
                         match ahead.next_locked_bounded(pool, max_bytes - used, None) {
                             Ok(CursorResult::Message(frame)) => {
+                                if upper.is_some_and(|upper| frame.seq > upper) {
+                                    break;
+                                }
                                 used += frame.payload.len();
                                 frames.push_back((frame, ahead.clone()));
                             }
@@ -481,7 +831,7 @@ impl TailState {
         };
         let mut items = vec![first];
         for (frame, checkpoint) in frames {
-            if self.batch_stopped() {
+            if self.terminated || self.batch_stopped() {
                 break;
             }
             let mut expected = self.expected_seq;
@@ -490,7 +840,7 @@ impl TailState {
                 Ok(process) => process,
                 Err(_) => break,
             };
-            let terminal = frame.seq == u64::MAX;
+            let terminal = frame.seq == u64::MAX || self.upper == Some(frame.seq);
             let item = if process {
                 match select(frame, &self.options.tags) {
                     Ok(item) => item,
@@ -535,13 +885,21 @@ impl Follow<'_> {
     }
 }
 
+impl Iterator for Follow<'_> {
+    type Item = Result<Message, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_message().transpose()
+    }
+}
+
 impl ViewFollow<'_> {
     pub fn next_view(&mut self) -> Result<Option<crate::view::MessageView>, Error> {
         self.0.next(|frame, required| {
             let view = crate::view::MessageView::from_owned(
                 frame.payload,
                 frame.seq,
-                frame.timestamp_ns,
+                frame.time,
                 frame.flags,
             )?;
             if !required.is_empty() {
@@ -574,20 +932,66 @@ impl Iterator for ViewFollow<'_> {
 
 impl Lite3Follow<'_> {
     pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
-        self.0.next(|frame, tags| {
-            if tags.is_empty() {
-                let doc = Lite3DocRef::new(&frame.payload);
-                let (ofs, count) = meta_tags(doc)?;
-                for index in 0..count {
-                    meta_tag(doc, ofs, index)?;
-                }
-                validate_data(doc)?;
-                Ok(Some(frame))
-            } else {
-                let meta = Meta::from_lite3(&frame.payload)?;
-                Ok(has_required_tags(&meta.tags, tags).then_some(frame))
+        self.0.next(select_lite3_frame)
+    }
+
+    /// Poll the reader without moving its end boundary or imposing a stream timeout.
+    #[doc(hidden)]
+    pub fn poll(&mut self, wait: Duration) -> Result<ReadPoll, Error> {
+        let result = self
+            .0
+            .state
+            .next_wait(self.0.pool, Some(wait), select_lite3_frame);
+        match result {
+            Ok(TailOutcome::Item(frame)) => Ok(ReadPoll::Message(frame)),
+            Ok(TailOutcome::WaitExpired) => Ok(ReadPoll::Waiting),
+            Ok(TailOutcome::Finished) => Ok(ReadPoll::Complete),
+            Ok(TailOutcome::Cancelled) => Ok(ReadPoll::Cancelled),
+            Err(err) => {
+                self.0.state.terminated = true;
+                Err(err)
             }
-        })
+        }
+    }
+
+    /// Return the next unexamined sequence and the opening end of a finite read.
+    #[doc(hidden)]
+    pub fn position(&self) -> (Option<u64>, Option<u64>) {
+        (self.0.state.expected_seq, self.0.state.upper)
+    }
+}
+
+#[doc(hidden)]
+pub enum ReadPoll {
+    Message(FrameRef),
+    Waiting,
+    Complete,
+    Cancelled,
+}
+
+pub(crate) fn select_lite3_frame(
+    frame: FrameRef,
+    tags: &[String],
+) -> Result<Option<FrameRef>, Error> {
+    if tags.is_empty() {
+        let doc = Lite3DocRef::new(&frame.payload);
+        let (ofs, count) = meta_tags(doc)?;
+        for index in 0..count {
+            meta_tag(doc, ofs, index)?;
+        }
+        validate_data(doc)?;
+        Ok(Some(frame))
+    } else {
+        let meta = Meta::from_lite3(&frame.payload)?;
+        Ok(has_required_tags(&meta.tags, tags).then_some(frame))
+    }
+}
+
+impl Iterator for Lite3Follow<'_> {
+    type Item = Result<FrameRef, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_frame().transpose()
     }
 }
 
@@ -604,13 +1008,7 @@ pub(crate) fn observe_sequence(
         return Ok(false);
     }
     if available_seq > expected && policy == GapPolicy::Error {
-        let last_missing = available_seq - 1;
-        return Err(Error::new(ErrorKind::RetentionGap)
-            .with_message(format!(
-                "messages {expected}-{last_missing} are no longer retained; the next available message is {available_seq}"
-            ))
-            .with_hint("Inspect current pool bounds, then reopen the tail or rebuild from an authoritative source.")
-            .with_seq(expected));
+        return Err(Error::retention_gap(expected, available_seq));
     }
     *expected_seq = available_seq.checked_add(1);
     Ok(true)
@@ -639,20 +1037,7 @@ fn wait_interval(deadline: Option<Instant>, poll_interval: Duration) -> Duration
     }
 }
 
-pub trait PoolApiExt {
-    /// Encode native data and assign a timestamp from the system clock.
-    fn append_value_now<T: serde::Serialize + ?Sized>(
-        &mut self,
-        data: &T,
-        tags: &[&str],
-        durability: Durability,
-    ) -> Result<crate::view::MessageView, Error>
-    where
-        Self: Sized,
-    {
-        self.append_value(data, tags, AppendOptions::new(now_ns()?, durability))
-    }
-
+pub(crate) trait PoolApiExt {
     /// Forward a checked snapshot with a fresh identity and system timestamp.
     fn append_view_now(
         &mut self,
@@ -663,6 +1048,7 @@ pub trait PoolApiExt {
     }
 
     /// Encode native data once and retain the committed immutable encoding.
+    #[cfg(test)]
     fn append_value<T: serde::Serialize + ?Sized>(
         &mut self,
         data: &T,
@@ -687,14 +1073,10 @@ pub trait PoolApiExt {
     }
 
     /// Copy one snapshot and validate it once, retaining its encoded bytes.
+    #[cfg(test)]
     fn get_view(&self, seq: u64) -> Result<crate::view::MessageView, Error> {
         let frame = self.get_lite3(seq)?;
-        crate::view::MessageView::from_owned(
-            frame.payload,
-            frame.seq,
-            frame.timestamp_ns,
-            frame.flags,
-        )
+        crate::view::MessageView::from_owned(frame.payload, frame.seq, frame.time, frame.flags)
     }
 
     fn append_json(
@@ -713,6 +1095,7 @@ pub trait PoolApiExt {
 
     /// Append and return only the committed sequence and Unix timestamp in nanoseconds.
     /// The identity comes from this commit; it never requires a later pool read.
+    #[cfg(test)]
     fn append_json_identity(
         &mut self,
         data: &Value,
@@ -721,15 +1104,6 @@ pub trait PoolApiExt {
     ) -> Result<(u64, u64), Error> {
         let seq = self.append_json(data, tags, options)?.seq;
         Ok((seq, options.timestamp_ns))
-    }
-
-    fn append_json_identity_now(
-        &mut self,
-        data: &Value,
-        tags: &[String],
-        durability: Durability,
-    ) -> Result<(u64, u64), Error> {
-        self.append_json_identity(data, tags, AppendOptions::new(now_ns()?, durability))
     }
 
     /// Append validated binary input and return its committed numeric identity.
@@ -753,9 +1127,6 @@ pub trait PoolApiExt {
     /// Validate and append a pre-encoded Lite3 payload without re-encoding it.
     fn append_lite3(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error>;
 
-    /// Append a pre-encoded Lite3 payload with a generated timestamp.
-    fn append_lite3_now(&mut self, payload: &[u8], durability: Durability) -> Result<u64, Error>;
-
     /// Append the original Lite3 bytes and return a receipt prepared from input.
     /// A concurrent overwrite cannot remove the receipt after a successful append.
     fn append_lite3_with_receipt(
@@ -764,11 +1135,10 @@ pub trait PoolApiExt {
         options: AppendOptions,
     ) -> Result<Message, Error> {
         let (meta, data) = decode_payload(payload)?;
-        let time = format_ts(options.timestamp_ns)?;
         let seq = self.append_lite3(payload, options)?;
         Ok(Message {
             seq,
-            time,
+            time: options.timestamp_ns,
             meta,
             data,
         })
@@ -783,15 +1153,20 @@ pub trait PoolApiExt {
         self.append_lite3_with_receipt(payload, AppendOptions::new(now_ns()?, durability))
     }
 
+    #[cfg(test)]
     fn get_message(&self, seq: u64) -> Result<Message, Error>;
 
     /// Fetch the raw Lite3 payload for a sequence number.
     fn get_lite3(&self, seq: u64) -> Result<FrameRef, Error>;
 
-    fn follow(&self, options: FollowOptions) -> Follow<'_>;
+    #[doc(hidden)]
+    #[cfg(test)]
+    fn follow_legacy(&self, options: FollowOptions) -> Follow<'_>;
 
     /// Follow frames without JSON decoding.
-    fn follow_lite3(&self, options: FollowOptions) -> Lite3Follow<'_>;
+    #[doc(hidden)]
+    #[cfg(test)]
+    fn follow_lite3_legacy(&self, options: FollowOptions) -> Lite3Follow<'_>;
 }
 
 impl PoolApiExt for Pool {
@@ -804,6 +1179,7 @@ impl PoolApiExt for Pool {
         Ok(view.with_identity(seq, options.timestamp_ns, 0))
     }
 
+    #[cfg(test)]
     fn append_json_identity(
         &mut self,
         data: &Value,
@@ -825,7 +1201,7 @@ impl PoolApiExt for Pool {
         let seq = self.append_with_options(payload.as_slice(), options)?;
         Ok(Message {
             seq,
-            time: format_ts(options.timestamp_ns)?,
+            time: options.timestamp_ns,
             meta: Meta {
                 tags: tags.to_vec(),
             },
@@ -849,12 +1225,7 @@ impl PoolApiExt for Pool {
         self.append_with_options(payload, options)
     }
 
-    fn append_lite3_now(&mut self, payload: &[u8], durability: Durability) -> Result<u64, Error> {
-        let timestamp_ns = now_ns()?;
-        let options = AppendOptions::new(timestamp_ns, durability);
-        self.append_lite3(payload, options)
-    }
-
+    #[cfg(test)]
     fn get_message(&self, seq: u64) -> Result<Message, Error> {
         let frame = self.get(seq)?;
         message_from_frame(&frame)
@@ -864,17 +1235,19 @@ impl PoolApiExt for Pool {
         self.get(seq)
     }
 
-    fn follow(&self, options: FollowOptions) -> Follow<'_> {
+    #[cfg(test)]
+    fn follow_legacy(&self, options: FollowOptions) -> Follow<'_> {
         Follow(TailReader::new(self, options))
     }
 
-    fn follow_lite3(&self, options: FollowOptions) -> Lite3Follow<'_> {
+    #[cfg(test)]
+    fn follow_lite3_legacy(&self, options: FollowOptions) -> Lite3Follow<'_> {
         Lite3Follow(TailReader::new(self, options))
     }
 }
 
 pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
-    Message::from_lite3(frame.seq, frame.timestamp_ns, &frame.payload)
+    Message::from_lite3(frame.seq, frame.time, &frame.payload)
 }
 
 /// Produce the existing wire envelope while borrowing data from this owned frame.
@@ -889,12 +1262,8 @@ pub(crate) fn message_json_from_frame(frame: &FrameRef) -> Result<Vec<u8>, Error
         .key_offset("data")
         .map_err(|err| err.with_message("missing data"))?;
     let data = crate::core::lite3::JsonValue::new(doc, offset)?;
-    let wire = crate::interface_wire::MessageWire::new(
-        frame.seq,
-        format_ts(frame.timestamp_ns)?,
-        tags,
-        data,
-    );
+    let wire =
+        crate::interface_wire::MessageWire::new(frame.seq, format_ts(frame.time)?, tags, data);
     serde_json::to_vec(&wire).map_err(payload_json_error)
 }
 
@@ -996,14 +1365,14 @@ pub(crate) fn now_ns() -> Result<u64, Error> {
 }
 
 pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
-    use time::format_description::well_known::Rfc3339;
+    use time::format_description::well_known::Iso8601;
     let ts =
         time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128).map_err(|err| {
             Error::new(ErrorKind::Internal)
                 .with_message("invalid timestamp")
                 .with_source(err)
         })?;
-    ts.format(&Rfc3339).map_err(|err| {
+    ts.format(&Iso8601::DEFAULT).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("timestamp format failed")
             .with_source(err)
@@ -1025,6 +1394,49 @@ mod tests {
     use std::time::Duration;
     use tempfile::tempdir;
 
+    #[test]
+    fn v2_time_start_keeps_later_sequences_after_a_clock_step() {
+        use super::{Read, ReadPoll, Since};
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("clock.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        for time in [10, 30, 20] {
+            pool.append_json(
+                &json!({"time": time}),
+                &[],
+                AppendOptions::new(time, Durability::Fast),
+            )
+            .unwrap();
+        }
+        let read = Read::since(Since::At(25));
+        let messages = pool
+            .fetch(read)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            messages
+                .iter()
+                .map(|msg| (msg.seq, msg.time))
+                .collect::<Vec<_>>(),
+            [(2, 30), (3, 20)]
+        );
+
+        let reader = Pool::open(&path).unwrap();
+        let mut live = reader.follow_lite3(Read::since(Since::At(100))).unwrap();
+        pool.append_json(
+            &json!({"live": true}),
+            &[],
+            AppendOptions::new(21, Durability::Fast),
+        )
+        .unwrap();
+        assert!(matches!(
+            live.poll(std::time::Duration::ZERO).unwrap(),
+            ReadPoll::Message(frame) if frame.seq == 4
+        ));
+    }
+
     fn batch_pool(path: &std::path::Path) -> Pool {
         let mut pool = Pool::create(path, PoolOptions::new(1024 * 1024)).unwrap();
         for value in 1..=4 {
@@ -1041,12 +1453,12 @@ mod tests {
         let path = directory.path().join("follow.plasmite");
         let pool = batch_pool(&path);
         let mut writer = Pool::open(&path).unwrap();
-        let mut live = pool.follow(FollowOptions::default());
+        let mut live = pool.follow_legacy(FollowOptions::default());
         writer
             .append_json_now(&json!({"value": 5}), &[], Durability::Fast)
             .unwrap();
         assert_eq!(live.next_message().unwrap().unwrap().seq, 5);
-        let mut finite = pool.follow(FollowOptions {
+        let mut finite = pool.follow_legacy(FollowOptions {
             start: FollowStart::Last(2),
             live: false,
             ..Default::default()
@@ -1069,18 +1481,50 @@ mod tests {
             all.map(|m| m.unwrap().seq).collect::<Vec<_>>(),
             vec![1, 2, 3, 4, 5, 6]
         );
-        let mut empty = pool.follow(FollowOptions {
+        let mut empty = pool.follow_legacy(FollowOptions {
             start: FollowStart::Last(0),
             live: false,
             ..Default::default()
         });
         assert!(empty.next_message().unwrap().is_none());
-        let mut since = pool.follow(FollowOptions {
+        let mut since = pool.follow_legacy(FollowOptions {
             start: FollowStart::Since(u64::MAX),
             live: false,
             ..Default::default()
         });
         assert!(since.next_message().unwrap().is_none());
+    }
+
+    #[test]
+    fn bounded_fetch_reports_loss_of_its_entire_opening_range() {
+        use super::Read;
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("bounded-gap.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(16384)).unwrap();
+        for _ in 0..3 {
+            writer
+                .feed(&serde_json::json!({"n": 0}), Default::default())
+                .unwrap();
+        }
+        let pool = Pool::open(&path).unwrap();
+        let mut single = pool.read_state(Read::default(), false).unwrap();
+        let mut batch = pool.read_state(Read::default(), false).unwrap();
+        for _ in 0..40 {
+            writer
+                .feed(
+                    &serde_json::json!({"padding": "x".repeat(1024)}),
+                    Default::default(),
+                )
+                .unwrap();
+        }
+        let select = |frame: super::FrameRef, _: &[String]| Ok(Some(frame.seq));
+        let one = single.next_wait_bounded(&pool, Some(Duration::ZERO), usize::MAX, select);
+        let many = batch.next_batch_wait(&pool, Some(Duration::ZERO), 4, usize::MAX, select);
+        for error in [one.err().unwrap(), many.err().unwrap()] {
+            assert_eq!(error.kind(), ErrorKind::RetentionGap);
+            assert_eq!(error.missing(), Some(1));
+            assert!(error.next_seq().unwrap() > 3);
+        }
     }
 
     #[test]
@@ -1239,7 +1683,7 @@ mod tests {
         let compare = |payload: Vec<u8>| {
             let frame = crate::api::FrameRef {
                 seq: u64::MAX,
-                timestamp_ns: u64::MAX,
+                time: u64::MAX,
                 flags: 0,
                 payload,
             };
@@ -1251,7 +1695,7 @@ mod tests {
                 (Ok(message), Ok(bytes)) => {
                     let wire = crate::interface_wire::MessageWire::new(
                         message.seq,
-                        message.time,
+                        message.time_rfc3339(),
                         message.meta.tags,
                         message.data,
                     );
@@ -1309,7 +1753,8 @@ mod tests {
             .append_with_options(payload.as_slice(), options)
             .unwrap();
         let message = pool.get_message(seq).unwrap();
-        assert_eq!(message.time, "1970-01-01T00:00:00.000000123Z");
+        assert_eq!(message.time, 123);
+        assert_eq!(message.time_rfc3339(), "1970-01-01T00:00:00.000000123Z");
         assert_eq!(message.meta.tags, tags);
         assert_eq!(message.data, data);
 
@@ -1364,9 +1809,13 @@ mod tests {
             start: crate::api::FollowStart::all(),
             ..Default::default()
         };
-        let frame = pool.follow_lite3(options).next_frame().unwrap().unwrap();
+        let frame = pool
+            .follow_lite3_legacy(options)
+            .next_frame()
+            .unwrap()
+            .unwrap();
         assert_eq!(frame.seq, 1);
-        assert_eq!(frame.timestamp_ns, 123);
+        assert_eq!(frame.time, 123);
         assert_eq!(frame.payload, payload.as_slice());
         super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 0));
         pool.get_message(1).unwrap();
@@ -1385,14 +1834,17 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            pool.follow_lite3(options.clone())
+            pool.follow_lite3_legacy(options.clone())
                 .next_frame()
                 .unwrap_err()
                 .kind(),
             ErrorKind::Corrupt
         );
         assert_eq!(
-            pool.follow(options).next_message().unwrap_err().kind(),
+            pool.follow_legacy(options)
+                .next_message()
+                .unwrap_err()
+                .kind(),
             ErrorKind::Corrupt
         );
     }
@@ -1415,10 +1867,10 @@ mod tests {
             start: crate::api::FollowStart::Sequence(u64::MAX),
             ..Default::default()
         };
-        let mut raw = pool.follow_lite3(options.clone());
+        let mut raw = pool.follow_lite3_legacy(options.clone());
         assert_eq!(raw.next_frame().unwrap().unwrap().seq, u64::MAX);
         assert!(raw.next_frame().unwrap().is_none());
-        let mut decoded = pool.follow(options);
+        let mut decoded = pool.follow_legacy(options);
         assert_eq!(decoded.next_message().unwrap().unwrap().seq, u64::MAX);
         assert!(decoded.next_message().unwrap().is_none());
     }
@@ -1461,7 +1913,7 @@ mod tests {
             assert_eq!(seq, index as u64 + 1);
             match pool.get_lite3(seq) {
                 Ok(frame) => {
-                    assert_eq!(frame.timestamp_ns, timestamp);
+                    assert_eq!(frame.time, timestamp);
                     assert_eq!(message_from_frame(&frame).unwrap().data["writer"], writer);
                 }
                 Err(error) => {
@@ -1491,7 +1943,7 @@ mod tests {
             )
             .expect("append with receipt");
         assert_eq!(receipt.seq, 1);
-        assert_eq!(receipt.time, "1970-01-01T00:00:00.000000123Z");
+        assert_eq!(receipt.time, 123);
         assert_eq!(pool.get_lite3(1).expect("raw").payload, payload.as_slice());
         for _ in 0..32 {
             pool.append_json_now(&data, &[], Durability::Fast)
@@ -1529,7 +1981,7 @@ mod tests {
         };
         options.start = crate::api::FollowStart::Sequence(seq);
         options.max_messages = Some(1);
-        let mut tail = pool.follow_lite3(options);
+        let mut tail = pool.follow_lite3_legacy(options);
         let frame = tail.next_frame().expect("tail").expect("frame");
         assert_eq!(frame.seq, seq);
         assert_eq!(frame.payload, payload.as_slice());
@@ -1547,8 +1999,8 @@ mod tests {
             timeout: Some(Duration::from_secs(1)),
             ..Default::default()
         };
-        let mut first_tail = first.follow(options.clone());
-        let mut second_tail = second.follow(options);
+        let mut first_tail = first.follow_legacy(options.clone());
+        let mut second_tail = second.follow_legacy(options);
         let ready = std::sync::Barrier::new(3);
         std::thread::scope(|scope| {
             let one = scope.spawn(|| {
@@ -1581,8 +2033,8 @@ mod tests {
         };
         options.notify = false;
         options.timeout = Some(Duration::from_secs(2));
-        let mut json = reader.follow(options.clone());
-        let mut lite3 = reader.follow_lite3(options);
+        let mut json = reader.follow_legacy(options.clone());
+        let mut lite3 = reader.follow_lite3_legacy(options);
         std::thread::scope(|scope| {
             scope.spawn(|| {
                 writer
@@ -1624,8 +2076,8 @@ mod tests {
         options.start = crate::api::FollowStart::Sequence(first.seq);
         options.max_messages = Some(1);
         options.tags = vec!["keep".to_string()];
-        let mut raw = pool.follow_lite3(options.clone());
-        let mut tail = pool.follow(options);
+        let mut raw = pool.follow_lite3_legacy(options.clone());
+        let mut tail = pool.follow_legacy(options);
         let message = tail.next_message().expect("tail").expect("message");
         assert_eq!(message.seq, second.seq);
         assert_eq!(message.data, json!({"n": 2}));
@@ -1656,8 +2108,8 @@ mod tests {
             ..Default::default()
         };
         options.cancel = Some(cancel.clone());
-        let mut json = pool.follow(options.clone());
-        let mut lite3 = pool.follow_lite3(options);
+        let mut json = pool.follow_legacy(options.clone());
+        let mut lite3 = pool.follow_lite3_legacy(options);
         assert_eq!(json.next_message().unwrap().unwrap().seq, 1);
         assert_eq!(lite3.next_frame().unwrap().unwrap().seq, 1);
         cancel.store(true, Ordering::Release);
@@ -1670,12 +2122,17 @@ mod tests {
         };
         expired.timeout = Some(Duration::ZERO);
         assert!(
-            pool.follow(expired.clone())
+            pool.follow_legacy(expired.clone())
                 .next_message()
                 .unwrap()
                 .is_none()
         );
-        assert!(pool.follow_lite3(expired).next_frame().unwrap().is_none());
+        assert!(
+            pool.follow_lite3_legacy(expired)
+                .next_frame()
+                .unwrap()
+                .is_none()
+        );
     }
 
     fn append_until_oldest_after(pool: &mut Pool, seq: u64) {
@@ -1717,8 +2174,8 @@ mod tests {
         };
         strict_options.start = crate::api::FollowStart::Sequence(first.seq);
         strict_options.gap_policy = GapPolicy::Error;
-        let mut strict_lite3 = strict_reader.follow_lite3(strict_options.clone());
-        let mut strict = strict_reader.follow(strict_options);
+        let mut strict_lite3 = strict_reader.follow_lite3_legacy(strict_options.clone());
+        let mut strict = strict_reader.follow_legacy(strict_options);
         assert_eq!(
             strict
                 .next_message()
@@ -1734,7 +2191,7 @@ mod tests {
             ..Default::default()
         };
         continuing_options.start = crate::api::FollowStart::Sequence(first.seq);
-        let mut continuing = continuing_reader.follow(continuing_options);
+        let mut continuing = continuing_reader.follow_legacy(continuing_options);
         assert_eq!(
             continuing
                 .next_message()
@@ -1804,7 +2261,7 @@ mod tests {
         strict_options.start = crate::api::FollowStart::Sequence(first.seq);
         strict_options.tags = vec!["never".to_string()];
         strict_options.gap_policy = GapPolicy::Error;
-        let mut strict = strict_reader.follow(strict_options);
+        let mut strict = strict_reader.follow_legacy(strict_options);
         let err = strict.next_message().expect_err("stale start must fail");
         assert_eq!(err.kind(), ErrorKind::RetentionGap);
         assert_eq!(err.seq(), Some(first.seq));
@@ -1816,7 +2273,7 @@ mod tests {
         };
         implicit_options.max_messages = Some(1);
         implicit_options.gap_policy = GapPolicy::Error;
-        let mut implicit = implicit_reader.follow(implicit_options);
+        let mut implicit = implicit_reader.follow_legacy(implicit_options);
         let message = implicit
             .next_message()
             .expect("implicit read")
@@ -1842,7 +2299,7 @@ mod tests {
         };
         options.start = crate::api::FollowStart::Sequence(first.seq);
         options.gap_policy = GapPolicy::Error;
-        let mut tail = reader.follow_lite3(options);
+        let mut tail = reader.follow_lite3_legacy(options);
         let err = tail.next_frame().expect_err("stale Lite3 start must fail");
         assert_eq!(err.kind(), ErrorKind::RetentionGap);
         assert_eq!(err.seq(), Some(first.seq));
@@ -1895,7 +2352,7 @@ mod tests {
         options.max_messages = Some(expected.len());
         options.gap_policy = GapPolicy::Error;
         options.notify = false;
-        let mut tail = pool.follow(options);
+        let mut tail = pool.follow_legacy(options);
         let mut tailed = Vec::with_capacity(expected.len());
         for _ in 0..expected.len() {
             tailed.push(

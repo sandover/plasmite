@@ -42,7 +42,7 @@ pub unsafe extern "C" fn plsm_go_view_info(
             .offset(),
         duplicate_count: view.duplicate_offsets().len(),
         seq: view.seq,
-        timestamp_ns: view.timestamp_ns,
+        timestamp_ns: view.time,
     }
 }
 #[unsafe(no_mangle)]

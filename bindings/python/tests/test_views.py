@@ -25,7 +25,7 @@ class Views(unittest.TestCase):
             "__proto__": {"value": 2},
             "to_native": "payload",
         }
-        self.message = self.pool.get_view(self.pool.append(self.data).seq)
+        self.message = self.pool._get_view(self.pool.feed(self.data).seq)
 
     def tearDown(self):
         self.pool.close()
@@ -45,7 +45,7 @@ class Views(unittest.TestCase):
 
         with patch.object(_views.backend, "get") as get:
             with self.assertRaisesRegex(plasmite.PlasmiteError, "closed"):
-                pool.get_view(Sequence(1))
+                pool._get_view(Sequence(1))
             get.assert_not_called()
 
     def test_index_callback_finishes_before_view_handle_borrow(self):
@@ -71,7 +71,7 @@ class Views(unittest.TestCase):
 
         with patch.object(_views.backend, "get") as get:
             with self.assertRaisesRegex(plasmite.PlasmiteError, "closed"):
-                pool.get_view(Sequence())
+                pool._get_view(Sequence())
             get.assert_not_called()
 
     def test_protocols_and_missing(self):
@@ -127,14 +127,18 @@ class Views(unittest.TestCase):
         self.assertEqual(child["x"], "hello")
         envelope = plasmite.to_native(self.message)
         self.assertEqual(envelope["data"], self.data)
-        self.assertEqual(json.loads(plasmite.to_json(self.message)), envelope)
+        self.assertEqual(envelope["time"], self.message.time)
+        encoded = plasmite.to_json(self.message)
+        serialized = json.loads(encoded)
+        self.assertEqual(plasmite.parse_message(encoded.encode()).time, envelope["time"])
+        self.assertEqual({**serialized, "time": envelope["time"]}, envelope)
         self.assertEqual(
             json.loads(json.dumps(self.message.data, default=plasmite.to_native)),
             self.data,
         )
         payload = bytes(buffer)
         rebuilt = plasmite.view_from_lite3(
-            bytearray(payload), self.message.seq, self.message.timestamp_ns
+            bytearray(payload), self.message.seq, self.message.time
         )
         self.assertEqual(rebuilt.data, self.data)
         self.pool.close()
@@ -165,7 +169,7 @@ class Views(unittest.TestCase):
 
         from plasmite import _views
 
-        message = self.pool.get_view(self.message.seq)
+        message = self.pool._get_view(self.message.seq)
         before = sys.getrefcount(message) if _views.VIEW_BACKEND == "native" else None
         child = message.data["nested"]
         if before is not None:
@@ -180,7 +184,7 @@ class Views(unittest.TestCase):
         self.assertEqual(math.copysign(1, self.message.data["zero"]), -1)
         payload = {"padding": "x" * 32768}
         for _ in range(40):
-            self.pool.append(payload)
+            self.pool.feed(payload)
         self.assertEqual(self.message.data["nested"]["x"], "hello")
 
     def test_native_byte_leaf_retains_readonly_owner(self):
@@ -189,7 +193,7 @@ class Views(unittest.TestCase):
         from plasmite import _views_fallback as ffi
 
         ffi._configure()
-        seq = self.pool.append({"blob": "abc"}).seq
+        seq = self.pool.feed({"blob": "abc"}).seq
         owner = ffi.get(ctypes.cast(self.pool._ptr, ctypes.c_void_p).value, seq)
         ref = ffi.Ref()
         ffi._call(
@@ -219,20 +223,20 @@ class Views(unittest.TestCase):
         self.assertEqual(plasmite.to_native(message.meta), {"tags": [], "extra": 7})
         expected = {
             "seq": 7,
-            "time": "1970-01-01T00:00:00.1234Z",
+            "time": "1970-01-01T00:00:00.123400000Z",
             "meta": {"tags": []},
             "data": {"value": 1},
         }
-        self.assertEqual(plasmite.to_native(message), expected)
+        self.assertEqual(plasmite.to_native(message), {**expected, "time": 123400000})
         self.assertEqual(json.loads(plasmite.to_json(message)), expected)
 
     def test_canonical_timestamp_keeps_exact_nanoseconds(self):
         payload = bytes(memoryview(self.message))
         for timestamp in [0, 1, 100, 123400000, 123456789]:
             message = plasmite.view_from_lite3(payload, 1, timestamp)
-            self.assertEqual(message.timestamp_ns, timestamp)
+            self.assertEqual(message.time, timestamp)
             self.assertEqual(
-                json.loads(plasmite.to_json(message))["time"], message.time_rfc3339
+                json.loads(plasmite.to_json(message))["time"], f"1970-01-01T00:00:00.{timestamp:09d}Z"
             )
 
     def test_bytes_subclass_cannot_change_the_handed_off_buffer_length(self):
@@ -265,7 +269,7 @@ class Views(unittest.TestCase):
             plasmite.view_from_lite3(b"bad")
         for seq in [-1, 1 << 64, "1"]:
             with self.assertRaises(ValueError):
-                self.pool.get_view(seq)
+                self.pool._get_view(seq)
 
 
 if __name__ == "__main__":

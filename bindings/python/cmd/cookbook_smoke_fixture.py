@@ -1,7 +1,7 @@
 """
 Purpose: Exercise the Python cookbook snippet path in smoke automation.
 Key Exports: main (script entrypoint).
-Role: Validate local client.pool(), typed append return fields, and not-found handling.
+Role: Validate create-on-open, the feed result, and missing-pool errors.
 Invariants: Runs against local pool directories only; no network usage.
 Invariants: Produces deterministic JSON output for shell assertions.
 Notes: Designed for scripts/cookbook_smoke.sh integration.
@@ -26,8 +26,8 @@ def main() -> int:
     pool_dir.mkdir(parents=True, exist_ok=True)
 
     with Client(str(pool_dir)) as client:
-        with client.pool("cookbook-smoke", 1024 * 1024) as pool:
-            msg = pool.append({"task": "resize", "id": 1}, ["cookbook"], Durability.FAST)
+        with client.open_pool("cookbook-smoke", create=True) as pool:
+            msg = pool.feed({"task": "resize", "id": 1}, ["cookbook"], Durability.FAST)
             if msg.seq < 1:
                 raise RuntimeError("expected positive seq")
             if msg.tags != ["cookbook"]:

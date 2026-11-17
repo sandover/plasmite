@@ -24,7 +24,7 @@ async function main() {
   try {
     for (let call=0;call<2;call++) {
       const cpu=process.cpuUsage(), started=process.hrtime.bigint();
-      const message=await pool.appendView(input);
+      const message=await pool.feedView(input);
       if (message.data.metrics.power!==42) throw new Error('payload mismatch');
       const elapsedUs=Number(process.hrtime.bigint()-started)/1000, used=process.cpuUsage(cpu);
       rows.push({call,elapsedUs,cpuUs:used.user+used.system,memory:process.memoryUsage()});

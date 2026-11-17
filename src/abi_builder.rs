@@ -233,7 +233,7 @@ pub extern "C" fn plsm_builder_copy_value(
 }
 #[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
-pub extern "C" fn plsm_pool_append_builder(
+pub extern "C" fn plsm_pool_feed_builder_view(
     pool: *mut plsm_pool,
     builder: *mut plsm_builder,
     durability: u32,
@@ -260,7 +260,7 @@ pub extern "C" fn plsm_pool_append_builder(
                 view.bytes(),
                 crate::api::AppendOptions::new(time, durability),
             )?;
-            view.timestamp_ns = time;
+            view.time = time;
             publish(view, out)
         })(),
         err,
@@ -548,7 +548,7 @@ mod tests {
         bytes[0] = b'X';
         let mut view = std::ptr::null();
         assert_eq!(
-            plsm_pool_append_builder(pool, builder, 0, &mut view, &mut err),
+            plsm_pool_feed_builder_view(pool, builder, 0, &mut view, &mut err),
             0
         );
         assert_eq!(unsafe { plsm_view_seq(view) }, 1);

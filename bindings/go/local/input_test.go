@@ -17,7 +17,7 @@ type inputJSONHook struct{ run func() ([]byte, error) }
 func (hook inputJSONHook) MarshalJSON() ([]byte, error) { return hook.run() }
 
 func TestNativeAppendKeepsTypesAndCommittedSnapshot(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "native-input").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "native-input")
 	source := []byte{0, 255, 3}
 	calls := 0
 	value := map[string]any{
@@ -25,12 +25,12 @@ func TestNativeAppendKeepsTypesAndCommittedSnapshot(t *testing.T) {
 		"bytes": source, "empty": []byte{}, "nil": []byte(nil), "text": "a\x00é",
 		"hook": inputJSONHook{run: func() ([]byte, error) { calls++; return []byte(`{"value":7}`), nil }},
 	}
-	view, err := pool.AppendView(value, []string{"tag\x00tail"})
+	view, err := pool.FeedView(value, []string{"tag\x00tail"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 || view.Seq() == 0 || view.TimestampNs() == 0 {
-		t.Fatalf("receipt/callback %d %d %d", view.Seq(), view.TimestampNs(), calls)
+	if calls != 1 || view.Seq() == 0 || view.Time() == 0 {
+		t.Fatalf("receipt/callback %d %d %d", view.Seq(), view.Time(), calls)
 	}
 	source[0] = 7
 	selector, err := Prepare("/integer", "/float", "/negative", "/bytes", "/empty", "/nil", "/hook/value", "/text")
@@ -76,7 +76,7 @@ func TestNativeAppendKeepsTypesAndCommittedSnapshot(t *testing.T) {
 	}
 }
 func TestNativeAppendSnapshotsBytesAndHookBuffersAtVisit(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "visit-input").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "visit-input")
 	shared := []byte("ab")
 	raw := []byte(`{"value":1}`)
 	calls := 0
@@ -86,7 +86,7 @@ func TestNativeAppendSnapshotsBytesAndHookBuffersAtVisit(t *testing.T) {
 		B     inputJSONHook `json:"b"`
 		Later []byte        `json:"later"`
 	}{First: shared, A: inputJSONHook{run: func() ([]byte, error) { calls++; return raw, nil }}, B: inputJSONHook{run: func() ([]byte, error) { calls++; shared[0] = 'z'; raw[len(raw)-2] = '2'; return []byte(`true`), nil }}, Later: shared}
-	view, err := pool.AppendView(&value, nil)
+	view, err := pool.FeedView(&value, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,10 +107,10 @@ func TestNativeAppendSnapshotsBytesAndHookBuffersAtVisit(t *testing.T) {
 	}
 }
 func TestNativeAppendPreservesMapSnapshotAndCloseReentrancy(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "map-input").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "map-input")
 	value := map[string]any{"a": []byte("before"), "c": 7}
 	value["b"] = inputJSONHook{run: func() ([]byte, error) { value["c"] = 99; return []byte(`true`), nil }}
-	view, err := pool.AppendView(value, nil)
+	view, err := pool.FeedView(value, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,25 +123,25 @@ func TestNativeAppendPreservesMapSnapshotAndCloseReentrancy(t *testing.T) {
 		t.Fatalf("map snapshot %#v %v", decoded, err)
 	}
 	closing := inputJSONHook{run: func() ([]byte, error) { pool.Close(); return []byte(`{}`), nil }}
-	if _, err = pool.AppendView(map[string]any{"hook": closing}, nil); !errors.Is(err, ErrClosed) {
+	if _, err = pool.FeedView(map[string]any{"hook": closing}, nil); !errors.Is(err, ErrClosed) {
 		t.Fatalf("reentrant close %v", err)
 	}
 }
 func TestNativeAppendRejectsBeforePublicationAndForwardsViews(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "guard-input").(*Pool)
-	first, err := pool.AppendView(map[string]any{"value": 7}, nil)
+	pool := newTestPool(t, newTestClient(t), "guard-input")
+	first, err := pool.FeedView(map[string]any{"value": 7}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, value := range []any{map[string]any{"large": uint64(math.MaxUint64)}, map[string]any{"bad": math.Inf(1)}, []int{1}, map[string]any{"bad": make(chan int)}} {
-		if _, err = pool.AppendView(value, nil); err == nil {
+		if _, err = pool.FeedView(value, nil); err == nil {
 			t.Fatalf("accepted %#v", value)
 		}
 	}
-	if _, err = pool.AppendJSONView([]byte(`{"value":9223372036854775808}`), nil); err == nil {
+	if _, err = pool.FeedJSONView([]byte(`{"value":9223372036854775808}`), nil); err == nil {
 		t.Fatal("accepted large raw integer")
 	}
-	forwarded, err := pool.AppendView(first.Data(), []string{"forward"})
+	forwarded, err := pool.FeedView(first.Data(), []string{"forward"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,11 +153,11 @@ func TestNativeAppendRejectsBeforePublicationAndForwardsViews(t *testing.T) {
 	if !bytes.Equal(left, right) {
 		t.Fatalf("forward %s %s", left, right)
 	}
-	large, err := pool.AppendView(map[string]any{"text": strings.Repeat("x", 100_000)}, nil)
+	large, err := pool.FeedView(map[string]any{"text": strings.Repeat("x", 100_000)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.AppendView(large.Data(), nil); err != nil {
+	if _, err = pool.FeedView(large.Data(), nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -183,7 +183,7 @@ func (value *inputPointerHook) MarshalJSON() ([]byte, error) {
 }
 
 func TestNativeAppendUsesGoFieldAndKeyRules(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "go-idioms").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "go-idioms")
 	values := []any{
 		struct {
 			*inputEmbedded
@@ -227,7 +227,7 @@ func TestNativeAppendUsesGoFieldAndKeyRules(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := pool.AppendView(value, nil)
+		view, err := pool.FeedView(value, nil)
 		if err != nil {
 			t.Fatalf("%T: %v", value, err)
 		}
@@ -246,7 +246,7 @@ func TestNativeAppendUsesGoFieldAndKeyRules(t *testing.T) {
 			t.Fatalf("%T: got %s want %s", value, actual, expected)
 		}
 	}
-	view, err := pool.AppendView(struct {
+	view, err := pool.FeedView(struct {
 		Dash string `json:"-,omitempty"`
 	}{"dash"}, nil)
 	if err != nil {
@@ -272,26 +272,26 @@ func nativeInputChain(containers int) map[string]any {
 	return root
 }
 func TestNativeAppendChecksAbsoluteDepthAcrossSources(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "input-depth").(*Pool)
-	valid, err := pool.AppendView(nativeInputChain(31), nil)
+	pool := newTestPool(t, newTestClient(t), "input-depth")
+	valid, err := pool.FeedView(nativeInputChain(31), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.AppendView(valid.Data(), nil); err != nil {
+	if _, err = pool.FeedView(valid.Data(), nil); err != nil {
 		t.Fatalf("root source copy: %v", err)
 	}
 	for _, value := range []any{nativeInputChain(32), map[string]any{"nested": valid.Data()}, map[string]any{"hook": inputJSONHook{run: func() ([]byte, error) { return json.Marshal(nativeInputChain(31)) }}}} {
-		if _, err = pool.AppendView(value, nil); err == nil {
+		if _, err = pool.FeedView(value, nil); err == nil {
 			t.Fatal("accepted excessive absolute depth")
 		}
 	}
 }
-func TestNativeAppendOptionsCannotMutatePriorSnapshots(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "option-input").(*Pool)
+func TestNativeFeedOptionsCannotMutatePriorSnapshots(t *testing.T) {
+	pool := newTestPool(t, newTestClient(t), "option-input")
 	raw := []byte(`{"value":1}`)
 	tags := []string{"before"}
-	option := func(config *api.AppendConfig) { raw[len(raw)-2] = '2'; tags[0] = "after" }
-	view, err := pool.AppendJSONView(raw, tags, option)
+	option := func(config *api.FeedConfig) { raw[len(raw)-2] = '2'; tags[0] = "after" }
+	view, err := pool.FeedJSONView(raw, tags, option)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestNativeAppendOptionsCannotMutatePriorSnapshots(t *testing.T) {
 }
 
 func TestNativeAppendPackedScalarsPreserveTypesSnapshotsAndHooks(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "packed-input").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "packed-input")
 	integers := []int{1, 2, 3}
 	reals := []float64{math.Copysign(0, -1), 1e20}
 	flags := []bool{true, false}
@@ -316,7 +316,7 @@ func TestNativeAppendPackedScalarsPreserveTypesSnapshotsAndHooks(t *testing.T) {
 		flags[0] = false
 		return []byte(`0`), nil
 	}}
-	view, err := pool.AppendView(struct {
+	view, err := pool.FeedView(struct {
 		Integers []int         `json:"integers"`
 		Reals    []float64     `json:"reals"`
 		Flags    []bool        `json:"flags"`
@@ -352,7 +352,7 @@ func TestNativeAppendPackedScalarsPreserveTypesSnapshotsAndHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hooked, err := pool.AppendView(struct {
+	hooked, err := pool.FeedView(struct {
 		Values []inputPointerHook `json:"values"`
 	}{custom}, nil)
 	if err != nil {
@@ -369,7 +369,7 @@ func TestNativeAppendPackedScalarsPreserveTypesSnapshotsAndHooks(t *testing.T) {
 		t.Fatalf("hook mismatch got %s want %s", actual, expected)
 	}
 	for _, bad := range []any{[]float64{math.Inf(1)}, []float32{float32(math.NaN())}, []uint64{math.MaxUint64}} {
-		if _, err = pool.AppendView(map[string]any{"bad": bad}, nil); err == nil {
+		if _, err = pool.FeedView(map[string]any{"bad": bad}, nil); err == nil {
 			t.Fatalf("accepted %v", bad)
 		}
 	}

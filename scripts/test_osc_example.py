@@ -101,7 +101,7 @@ class OscExampleTests(unittest.TestCase):
             self.assertIsNone(receiver.poll())
             self.assertIsNone(feeder.poll())
             stored = subprocess.run(
-                command + ["follow", "osc", "--tail", "3", "--no-follow", "--format", "json"],
+                command + ["fetch", "osc", "--last", "3", "--format", "json"],
                 check=True, capture_output=True, text=True, timeout=10,
             )
             messages = [json.loads(line) for line in stored.stdout.splitlines()]
@@ -111,12 +111,6 @@ class OscExampleTests(unittest.TestCase):
                 {"address": "/future", "args": [9]},
             ])
             self.assertEqual([item["meta"]["tags"] for item in messages], [["osc"], ["osc"], ["osc"]])
-            filtered = subprocess.run(
-                command + ["follow", "osc", "--tail", "3", "--no-follow", "--format", "json",
-                           "--where", '.data.address == "/fader/1"'],
-                check=True, capture_output=True, text=True, timeout=10,
-            )
-            self.assertEqual(json.loads(filtered.stdout)["data"]["args"], [0.75])
             stop(receiver)
             self.assertEqual(feeder.wait(timeout=10), 0)
 

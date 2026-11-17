@@ -37,6 +37,11 @@ async function measure(name, run) {
   return { name, operations, elapsedMs, clientCpuUs: used.user + used.system,
     serverCpuMs: serverStart === null ? null : serverEnd - serverStart };
 }
+async function first(read) {
+  const reader = await read;
+  try { return (await reader.next()).value; }
+  finally { await reader.return(); }
+}
 async function main() {
   const client = new RemoteClient(baseUrl), poolName = 'bench-http-' + crypto.randomBytes(6).toString('hex');
   await client.createPool(poolName, 64 * 1024 * 1024);
@@ -45,8 +50,8 @@ async function main() {
   const pool = await client.openPool(poolName), measurements = [];
   try {
     for (const [fixture, data] of Object.entries(fixtures)) {
-      const prepared = await source.append(data), frame = await source.getLite3(prepared.seq);
-      const url = new URL(`/v0/pools/${poolName}/append_lite3`, baseUrl);
+      const prepared = await source.feed(data), frame = await first(source.fetchLite3({ since: prepared.seq }));
+      const url = new URL(`/v2/pools/${poolName}/feed`, baseUrl);
       async function appendReceipt(identity) {
         const response = await fetch(url, { method: 'POST', body: frame.payload, headers: {
           'Content-Type': 'application/x-plasmite-lite3',
@@ -67,16 +72,16 @@ async function main() {
         ['encoded-append/full-json-receipt', () => appendReceipt(false)],
       ];
       if (process.env.RECEIPT_ONLY !== '1') {
-        const sourceView = await source.getView(prepared.seq);
+        const sourceView = await first(source.fetchView({ since: prepared.seq }));
         lanes.push(
-        ['forward-selected/view', async () => (await pool.appendView(sourceView)).data.metrics.power],
-        ['forward-selected/json', async () => (await pool.append(data)).data.metrics.power],
-        ['append-selected/view', async () => (await pool.appendView(data)).data.metrics.power],
-        ['append-selected/json', async () => (await pool.append(data)).data.metrics.power],
-        ['get-selected/view', async () => (await source.getView(prepared.seq)).data.metrics.power],
-        ['get-selected/json', async () => (await source.get(prepared.seq)).data.metrics.power],
-        ['get-native/view', async () => toNative((await source.getView(prepared.seq)).data).metrics.power],
-        ['get-native/json', async () => (await source.get(prepared.seq)).data.metrics.power],
+        ['forward-selected/view', async () => (await pool.feedView(sourceView)).data.metrics.power],
+        ['forward-selected/json', async () => (await pool.feed(data)).data.metrics.power],
+        ['append-selected/view', async () => (await pool.feedView(data)).data.metrics.power],
+        ['append-selected/json', async () => (await pool.feed(data)).data.metrics.power],
+        ['get-selected/view', async () => (await first(source.fetchView({ since: prepared.seq }))).data.metrics.power],
+        ['get-selected/json', async () => (await first(source.fetch({ since: prepared.seq }))).data.metrics.power],
+        ['get-native/view', async () => toNative((await first(source.fetchView({ since: prepared.seq }))).data).metrics.power],
+        ['get-native/json', async () => (await first(source.fetch({ since: prepared.seq }))).data.metrics.power],
       );
       }
       for (const [, run] of lanes) for (let i = 0; i < 5; i++) assert.equal(await run(), 42);
@@ -85,7 +90,7 @@ async function main() {
         for (const [name, run] of repeat % 2 ? [...lanes].reverse() : lanes) rows.push({ repeat, ...await measure(name, run) });
       }
       // Verify all data outside selected-field timing, including array/text contents.
-      assert.deepEqual((await source.get(prepared.seq)).data, data);
+      assert.deepEqual((await first(source.fetch({ since: prepared.seq }))).data, data);
       measurements.push({ fixture, encodedBytes: frame.payload.length, rows });
     }
     const hashes = {};

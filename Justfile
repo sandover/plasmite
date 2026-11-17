@@ -18,6 +18,10 @@ clippy:
 test:
 	cargo test
 
+# Run the shared 2.0 conformance cases against the available runners.
+conformance:
+	cargo test --test conformance_v2
+
 # Verify the pinned Lite3 snapshot without accessing the network.
 verify-lite3:
 	./scripts/verify-lite3.sh
@@ -51,6 +55,7 @@ check-release-targets:
 # Run Go bindings tests with repo-local caches.
 bindings-go-test:
 	cargo build -p plasmite
+	@case "$(uname -s)" in Darwin) ln -sf libplasmite.dylib target/debug/libplasmite.2.dylib ;; Linux) ln -sf libplasmite.so target/debug/libplasmite.so.2 ;; esac
 	mkdir -p "${GOCACHE:-tmp/go-cache}" tmp/go-tmp
 	cd bindings/go && GOCACHE="${GOCACHE:-$(pwd)/../../tmp/go-cache}" GOTMPDIR="$(pwd)/../../tmp/go-tmp" PLASMITE_LIB_DIR="$(pwd)/../../target/debug" LD_LIBRARY_PATH="$(pwd)/../../target/debug:${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(pwd)/../../target/debug:${DYLD_LIBRARY_PATH:-}" PKG_CONFIG="/usr/bin/true" CGO_CFLAGS="-I$(pwd)/../../include" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
 

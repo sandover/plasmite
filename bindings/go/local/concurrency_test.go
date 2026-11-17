@@ -13,53 +13,22 @@ import (
 	"github.com/sandover/plasmite/bindings/go/api"
 )
 
-// Follow owns a hidden goroutine that reads an independent stream. Applications cannot
-// serialize its pool access with foreground native calls or Close themselves.
-func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
+func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "concurrent")
-	seed, err := pool.Append(map[string]any{"seed": true}, nil)
+	seed, err := pool.Feed(map[string]any{"seed": true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame, err := pool.GetLite3(seed.Seq)
+	frame, err := pool.getLite3(seed.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	opts := FollowOptions{Start: Sequence(seed.Seq), Timeout: 2 * time.Millisecond, Buffer: 8}
-	out, tailErrors := pool.Follow(ctx, opts)
-	lite3Out, lite3Errors := pool.FollowLite3(ctx, opts)
-	select {
-	case message := <-out:
-		if message == nil || message.Seq != seed.Seq {
-			t.Fatalf("JSON tail did not read seed: %#v", message)
-		}
-	case <-ctx.Done():
-		t.Fatal("JSON tail did not start")
-	}
-	select {
-	case received := <-lite3Out:
-		if received == nil || received.Seq != seed.Seq || !bytes.Equal(received.Payload, frame.Payload) {
-			t.Fatalf("Lite3 tail did not read seed: %#v", received)
-		}
-	case <-ctx.Done():
-		t.Fatal("Lite3 tail did not start")
-	}
-	go func() {
-		for range out {
-		}
-	}()
-	go func() {
-		for range lite3Out {
-		}
-	}()
-
-	// A stream that has already opened retains its independent native handle.
-	timeout := uint64(500)
-	independent, err := pool.OpenFollow(Sequence(seed.Seq), uint64Ptr(1), &timeout)
+	// A reader that has already opened retains its independent native handle.
+	independent, err := pool.Fetch(Since(seed.Seq))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,35 +55,35 @@ func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 	}
 	var firstAppend sync.Once
 	work(func() error {
-		message, err := pool.Append(map[string]any{"foreground": true}, nil)
+		message, err := pool.Feed(map[string]any{"foreground": true}, nil)
 		if err != nil {
 			return err
 		}
 		firstAppend.Do(func() { close(readyToClose) })
-		read, err := pool.Get(message.Seq)
+		read, err := getTestMessage(pool, message.Seq)
 		if err == nil && read.Seq != message.Seq {
 			return fmt.Errorf("JSON read changed sequence: %d != %d", read.Seq, message.Seq)
 		}
 		return err
 	})
 	work(func() error {
-		seq, err := pool.AppendLite3(frame.Payload, DurabilityFast)
+		seq, err := feedLite3Sequence(pool, frame.Payload, DurabilityFast)
 		if err != nil {
 			return err
 		}
-		read, err := pool.GetLite3(seq)
+		read, err := pool.getLite3(seq)
 		if err == nil && (read.Seq != seq || !bytes.Equal(read.Payload, frame.Payload)) {
 			return fmt.Errorf("Lite3 read changed appended frame")
 		}
 		return err
 	})
 	work(func() error {
-		stream, err := pool.OpenLite3Follow(Sequence(seed.Seq), uint64Ptr(1), &timeout)
+		stream, err := pool.FetchLite3(Since(seed.Seq))
 		if err != nil {
 			return err
 		}
 		defer stream.Close()
-		read, err := stream.Next()
+		read, err := stream.Next(ctx)
 		if err == nil && read.Seq != seed.Seq {
 			return fmt.Errorf("independent Lite3 stream changed sequence")
 		}
@@ -139,80 +108,20 @@ func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 	for err := range workerErrors {
 		t.Fatalf("foreground native operation: %v", err)
 	}
-	for _, errs := range []<-chan error{tailErrors, lite3Errors} {
-		select {
-		case err := <-errs:
-			if !errors.Is(err, ErrClosed) {
-				t.Fatalf("tail after pool close: expected ErrClosed, got %v", err)
-			}
-		case <-ctx.Done():
-			t.Fatal("tail did not stop after pool close")
-		}
-	}
-	raw, err := independent.NextJSON()
-	if err != nil {
-		t.Fatalf("existing stream invalidated by pool close: %v", err)
-	}
-	message, err := api.DecodeMessage(raw)
+	message, err := independent.Next(ctx)
 	if err != nil || message.Seq != seed.Seq {
-		t.Fatalf("existing stream changed message: %#v, %v", message, err)
+		t.Fatalf("existing stream after pool close: %#v, %v", message, err)
 	}
-	if _, err := pool.Get(seed.Seq); !errors.Is(err, ErrClosed) {
+
+	if _, err := getTestMessage(pool, seed.Seq); !errors.Is(err, ErrClosed) {
 		t.Fatalf("read after close: expected ErrClosed, got %v", err)
-	}
-}
-
-func TestTailBoundedWaitsCancelAndCountMatches(t *testing.T) {
-	client := newTestClient(t)
-	pool := newTestPool(t, client, "bounded-tail")
-	for i := 0; i < 5; i++ {
-		tag := "skip"
-		if i == 3 || i == 4 {
-			tag = "keep"
-		}
-		if _, err := pool.Append(map[string]any{"i": i}, []string{tag}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
-	defer stop()
-	out, errs := pool.Follow(ctx, FollowOptions{Start: All(), Tags: []string{"keep"}, MaxMessages: uint64Ptr(2), Timeout: time.Millisecond})
-	var sequences []uint64
-	for message := range out {
-		sequences = append(sequences, message.Seq)
-	}
-	for err := range errs {
-		t.Fatal(err)
-	}
-	if fmt.Sprint(sequences) != "[4 5]" {
-		t.Fatalf("matching limit returned %v", sequences)
-	}
-
-	for _, raw := range []bool{false, true} {
-		ctx, cancel := context.WithCancel(context.Background())
-		opts := FollowOptions{Start: Sequence(6), Timeout: 10 * time.Second}
-		var errs <-chan error
-		if raw {
-			_, errs = pool.FollowLite3(ctx, opts)
-		} else {
-			_, errs = pool.Follow(ctx, opts)
-		}
-		cancel()
-		select {
-		case err := <-errs:
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("cancel: %v", err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("quiet tail ignored cancellation")
-		}
 	}
 }
 
 func TestNativeWaitExpiryKeepsTheCursor(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "wait-position")
-	stream, err := pool.(*Pool).openFollow(Sequence(1), uint64Ptr(1), nil, true)
+	stream, err := pool.openRead(false, false, []api.ReadOption{Since(uint64(1))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +129,7 @@ func TestNativeWaitExpiryKeepsTheCursor(t *testing.T) {
 	if _, status, err := stream.nextWait(0); err != nil || status != 0 {
 		t.Fatalf("initial poll: %d %v", status, err)
 	}
-	seed, err := pool.Append(map[string]any{"waited": true}, nil)
+	seed, err := pool.Feed(map[string]any{"waited": true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,8 +141,8 @@ func TestNativeWaitExpiryKeepsTheCursor(t *testing.T) {
 	if err != nil || message.Seq != seed.Seq {
 		t.Fatalf("checkpoint changed: %v %v", message, err)
 	}
-	if _, status, err := stream.nextWait(0); err != nil || status != 2 {
-		t.Fatalf("completion: %d %v", status, err)
+	if _, status, err := stream.nextWait(0); err != nil || status != 0 {
+		t.Fatalf("quiet follow: %d %v", status, err)
 	}
 }
 
@@ -291,22 +200,23 @@ func TestStreamsConcurrentReadAndClose(t *testing.T) {
 		t.Run(fmt.Sprintf("lite3=%v", lite3), func(t *testing.T) {
 			client := newTestClient(t)
 			pool := newTestPool(t, client, "idle")
-			timeout := uint64(30)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
 			var next func() error
 			var closeStream func()
 			if lite3 {
-				stream, err := pool.OpenLite3Follow(NewPosition(), nil, &timeout)
+				stream, err := pool.FollowLite3()
 				if err != nil {
 					t.Fatal(err)
 				}
-				next = func() error { _, err := stream.Next(); return err }
+				next = func() error { _, err := stream.Next(ctx); return err }
 				closeStream = stream.Close
 			} else {
-				stream, err := pool.OpenFollow(NewPosition(), nil, &timeout)
+				stream, err := pool.Follow()
 				if err != nil {
 					t.Fatal(err)
 				}
-				next = func() error { _, err := stream.NextJSON(); return err }
+				next = func() error { _, err := stream.Next(ctx); return err }
 				closeStream = stream.Close
 			}
 			defer closeStream()

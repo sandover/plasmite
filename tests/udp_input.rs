@@ -1,9 +1,9 @@
 //! Real-process UDP input checks using loopback sockets and ordinary pool readers.
 
-use plasmite::api::{Pool, PoolApiExt};
+use plasmite::api::Pool;
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -391,11 +391,16 @@ fn newest_sequence(path: &Path) -> TestResult<Option<u64>> {
 }
 
 fn message(path: &Path, seq: u64) -> TestResult<plasmite::api::Message> {
-    Ok(Pool::open(path)?.get_message(seq)?)
+    let frame = Pool::open(path)?.get(seq)?;
+    Ok(plasmite::api::Message::from_lite3(
+        frame.seq,
+        frame.time,
+        &frame.payload,
+    )?)
 }
 
 fn raw_lite3(path: &Path, seq: u64) -> TestResult<Vec<u8>> {
-    Ok(Pool::open(path)?.get_lite3(seq)?.payload)
+    Ok(Pool::open(path)?.get(seq)?.payload)
 }
 
 fn cli_lite3_fixture(home: &TestHome, pool_dir: &Path) -> TestResult<Vec<u8>> {
@@ -499,24 +504,24 @@ fn assert_local_http_health(pool_dir: &Path) -> TestResult<()> {
 
 fn assert_http_pool_readers(pool_dir: &Path, lite3: &[u8]) -> TestResult<()> {
     let address = local_http_address(pool_dir)?;
-    let json_response = ureq::get(&format!("http://{address}/v0/pools/json/messages/1")).call()?;
-    let json_message: Value = serde_json::from_str(&json_response.into_string()?)?;
-    assert_eq!(json_message["message"]["data"]["sample"], 81);
-    assert_eq!(
-        json_message["message"]["meta"]["tags"],
-        json!(["sensor", " udp ", "sensor"])
-    );
+    use plasmite::api::{PoolRef, Read as ReadOptions, RemoteClient, Since};
+    let client = RemoteClient::new(format!("http://{address}"))?;
+    let options = ReadOptions::since(Since::Seq(1));
+    let json_pool = client.open_pool(&PoolRef::name("json"), false)?;
+    let json_message = json_pool
+        .fetch(options.clone())?
+        .next_message()?
+        .expect("message");
+    assert_eq!(json_message.data["sample"], 81);
+    assert_eq!(json_message.meta.tags, ["sensor", " udp ", "sensor"]);
 
-    let lite_response =
-        ureq::get(&format!("http://{address}/v0/pools/lite/messages/1/lite3")).call()?;
-    assert_eq!(lite_response.header("plasmite-seq"), Some("1"));
-    assert_eq!(
-        lite_response.header("content-type"),
-        Some("application/x-plasmite-lite3")
-    );
-    let mut lite_bytes = Vec::new();
-    lite_response.into_reader().read_to_end(&mut lite_bytes)?;
-    assert_eq!(lite_bytes, lite3);
+    let lite_pool = client.open_pool(&PoolRef::name("lite"), false)?;
+    let frame = lite_pool
+        .fetch_lite3(options)?
+        .next_frame()?
+        .expect("frame");
+    assert_eq!(frame.seq, 1);
+    assert_eq!(frame.payload, lite3);
     Ok(())
 }
 
@@ -614,7 +619,7 @@ fn one_server_appends_mixed_formats_and_keeps_receiving_after_bad_datagrams() ->
     assert_eq!(json_message.data["sample"], json!(81));
     assert_eq!(json_message.data["text"], "before\0after");
     assert_eq!(json_message.meta.tags, ["sensor", " udp ", "sensor"]);
-    assert!(!json_message.time.is_empty());
+    assert!(json_message.time > 0);
     let lite_message = message(&home.pool_path(&home.pool_dir, "lite"), 1)?;
     assert_eq!(lite_message.data["fixture"], "udp");
     assert_eq!(lite_message.data["sample"], 41);

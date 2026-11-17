@@ -14,6 +14,16 @@ fn agent_with_capture(
     expected_spki: Option<[u8; 32]>,
     captured: Option<Arc<Mutex<Option<Vec<u8>>>>>,
 ) -> ureq::Agent {
+    ureq::builder()
+        .tls_config(Arc::new(client_config(expected_spki, captured)))
+        .redirects(0)
+        .build()
+}
+
+pub(super) fn client_config(
+    expected_spki: Option<[u8; 32]>,
+    captured: Option<Arc<Mutex<Option<Vec<u8>>>>>,
+) -> rustls::ClientConfig {
     let provider = ureq::rustls::crypto::ring::default_provider();
     let _ = ureq::rustls::crypto::ring::default_provider().install_default();
     let verifier = PinnedServerCertVerifier {
@@ -21,14 +31,10 @@ fn agent_with_capture(
         supported: provider.signature_verification_algorithms,
         captured,
     };
-    let tls_config = ureq::rustls::ClientConfig::builder()
+    ureq::rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
-        .with_no_client_auth();
-    ureq::builder()
-        .tls_config(Arc::new(tls_config))
-        .redirects(0)
-        .build()
+        .with_no_client_auth()
 }
 
 /// Obtain the leaf certificate only after rustls has checked the destination,

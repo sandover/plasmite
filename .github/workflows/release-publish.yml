@@ -366,9 +366,9 @@ jobs:
           sudo cp -f include/plasmite.h /usr/local/include/
           sudo cp -f lib/pkgconfig/plasmite.pc /usr/local/lib/pkgconfig/
           # macOS
-          sudo cp -f lib/libplasmite.dylib /usr/local/lib/ 2>/dev/null || true
+          sudo cp -f lib/libplasmite.2.dylib /usr/local/lib/ 2>/dev/null || true
           # Linux
-          sudo cp -f lib/libplasmite.so /usr/local/lib/ 2>/dev/null || true
+          sudo cp -f lib/libplasmite.so.2 /usr/local/lib/ 2>/dev/null || true
           \`\`\`
 
           ### From source

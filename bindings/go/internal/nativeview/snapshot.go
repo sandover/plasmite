@@ -5,7 +5,10 @@ package nativeview
 /*
 #cgo pkg-config: plasmite
 #cgo CFLAGS: -I${SRCDIR}/../../../../include
-#cgo LDFLAGS: -lplasmite
+#cgo darwin LDFLAGS: -lplasmite.2
+#cgo linux LDFLAGS: -l:libplasmite.so.2
+#cgo windows LDFLAGS: -lplasmite2
+#include <stdlib.h>
 #include "owner.h"
 */
 import "C"
@@ -16,6 +19,31 @@ import (
 	"slices"
 	"unsafe"
 )
+
+// TagSpans preserves embedded NUL and keeps each span valid until cleanup.
+func TagSpans(tags []string) (unsafe.Pointer, func()) {
+	if len(tags) == 0 {
+		return nil, func() {}
+	}
+	var bytes []byte
+	for _, tag := range tags {
+		bytes = append(bytes, tag...)
+	}
+	storage := C.CBytes(append(bytes, 0))
+	spans := make([]C.plsm_text_t, len(tags))
+	offset := 0
+	for i, tag := range tags {
+		spans[i].data = (*C.uint8_t)(unsafe.Add(storage, offset))
+		spans[i].len = C.size_t(len(tag))
+		offset += len(tag)
+	}
+	var pin runtime.Pinner
+	pin.Pin(&spans[0])
+	return unsafe.Pointer(&spans[0]), func() {
+		pin.Unpin()
+		C.free(storage)
+	}
+}
 
 // Snapshot contains only private Go allocations and relative checked offsets.
 // Binding code must keep Bytes and Duplicates immutable after transfer.

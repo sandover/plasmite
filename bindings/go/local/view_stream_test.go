@@ -12,13 +12,13 @@ import (
 )
 
 func TestViewStreamsFilterMatchingLimitsAndKeepOwners(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "stream-views").(*Pool)
+	pool := newTestPool(t, newTestClient(t), "stream-views")
 	for _, tag := range []string{"skip", "α\x00β", "skip", "α\x00β"} {
-		if _, err := pool.AppendView(map[string]any{"exact": int64(math.MaxInt64), "negative": math.Copysign(0, -1), "blob": []byte{0, 255}}, []string{tag}); err != nil {
+		if _, err := pool.FeedView(map[string]any{"exact": int64(math.MaxInt64), "negative": math.Copysign(0, -1), "blob": []byte{0, 255}}, []string{tag}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stream, err := pool.OpenViewFollow(FollowOptions{Start: Sequence(1), MaxMessages: uint64Ptr(2), Tags: []string{"α\x00β"}})
+	stream, err := pool.FetchView(Tags("α\x00β"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,8 +52,8 @@ func TestViewStreamsFilterMatchingLimitsAndKeepOwners(t *testing.T) {
 }
 
 func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "duplicate-stream").(*Pool)
-	original, err := pool.AppendView(map[string]any{"ab": 1, "bA": 2}, nil)
+	pool := newTestPool(t, newTestClient(t), "duplicate-stream")
+	original, err := pool.FeedView(map[string]any{"ab": 1, "bA": 2}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,11 +63,11 @@ func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
 		t.Fatal("missing fixture key")
 	}
 	copy(encoded[key:key+2], "ab")
-	seq, err := pool.AppendLite3(encoded, DurabilityFast)
+	seq, err := feedLite3Sequence(pool, encoded, DurabilityFast)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := pool.OpenViewFollow(FollowOptions{Start: Sequence(seq), MaxMessages: uint64Ptr(1)})
+	stream, err := pool.FetchView(Since(seq))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +95,8 @@ func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
 }
 
 func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
-	pool := newTestPool(t, newTestClient(t), "idle-views").(*Pool)
-	stream, err := pool.OpenViewFollow(FollowOptions{Start: All()})
+	pool := newTestPool(t, newTestClient(t), "idle-views")
+	stream, err := pool.FollowView()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,54 +121,39 @@ func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("close blocked")
 	}
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	out, errs := pool.FollowViews(ctx2, FollowOptions{Start: All(), Buffer: 0})
-	cancel2()
-	for range out {
-	}
-	if err = <-errs; !errors.Is(err, context.Canceled) {
-		t.Fatalf("wrong channel cancel: %v", err)
-	}
 	for i := 0; i < 800; i++ {
-		if _, err := pool.AppendView(map[string]any{"padding": string(bytes.Repeat([]byte{'x'}, 2048))}, nil); err != nil {
+		if _, err := pool.FeedView(map[string]any{"padding": string(bytes.Repeat([]byte{'x'}, 2048))}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	strict, err := pool.OpenViewFollow(FollowOptions{Start: Sequence(1), ErrorOnGap: true})
-	if err != nil {
-		t.Fatal(err)
+	_, err = pool.FollowView(Since(uint64(1)))
+	var native *Error
+	if !errors.As(err, &native) || native.Kind != ErrorRetentionGap {
+		t.Fatalf("wrong gap: %v", err)
 	}
-	defer strict.Close()
-	if _, err = strict.Next(context.Background()); err == nil {
-		t.Fatal("missing retention gap")
-	} else {
-		var native *Error
-		if !errors.As(err, &native) || native.Kind != ErrorRetentionGap {
-			t.Fatalf("wrong gap: %v", err)
-		}
-	}
+
 }
 
 func TestWholeViewForwardingSharesProofAndRetagsExplicitly(t *testing.T) {
 	client := newTestClient(t)
-	sourcePool := newTestPool(t, client, "forward-source").(*Pool)
-	destination := newTestPool(t, client, "forward-target").(*Pool)
-	source, err := sourcePool.AppendView(map[string]any{"value": int64(math.MaxInt64), "blob": []byte{0, 255}}, []string{"keep"})
+	sourcePool := newTestPool(t, client, "forward-source")
+	destination := newTestPool(t, client, "forward-target")
+	source, err := sourcePool.FeedView(map[string]any{"value": int64(math.MaxInt64), "blob": []byte{0, 255}}, []string{"keep"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = destination.AppendView(map[string]any{}, nil); err != nil {
+	if _, err = destination.FeedView(map[string]any{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	expected := source.Lite3()
-	forwarded, err := destination.AppendView(source, nil)
+	forwarded, err := destination.FeedView(source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if forwarded.Seq() != 2 || !bytes.Equal(forwarded.Lite3(), expected) || &forwarded.encoded[0] != &source.encoded[0] {
 		t.Fatal("whole forwarding copied/changed the sealed payload or identity")
 	}
-	cleared, err := destination.AppendView(source, []string{})
+	cleared, err := destination.FeedView(source.Data(), []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,15 +165,15 @@ func TestWholeViewForwardingSharesProofAndRetagsExplicitly(t *testing.T) {
 		t.Fatalf("explicit empty tags retained %v", metadata.Tags)
 	}
 	// Apply options after the source snapshot, outside the destination mutex.
-	moved, err := destination.AppendView(source, nil, func(config *api.AppendConfig) { *source = MessageView{} })
+	moved, err := destination.FeedView(source, nil, func(config *api.FeedConfig) { *source = MessageView{} })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(moved.Lite3(), expected) {
 		t.Fatal("option reassignment changed the earlier source")
 	}
-	closing := newTestPool(t, client, "forward-close").(*Pool)
-	if _, err = closing.AppendView(forwarded, nil, func(*api.AppendConfig) { closing.Close() }); !errors.Is(err, ErrClosed) {
+	closing := newTestPool(t, client, "forward-close")
+	if _, err = closing.FeedView(forwarded, nil, func(*api.FeedConfig) { closing.Close() }); !errors.Is(err, ErrClosed) {
 		t.Fatalf("reentrant forward close: %v", err)
 	}
 	sourcePool.Close()

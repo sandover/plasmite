@@ -18,7 +18,7 @@ async function main() {
   const measurements = [];
   try {
     for (const [fixture, data] of Object.entries(fixtures)) {
-      for (let i = 0; i < 30; i++) await pool.appendView(data);
+      for (let i = 0; i < 30; i++) await pool.feedView(data);
       const rows = [];
       for (let repeat = 0; repeat < 5; repeat++) {
         const target = pool._inner.prepareAppend(0);

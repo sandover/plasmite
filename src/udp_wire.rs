@@ -29,6 +29,7 @@ pub enum Start {
     New,
     Last(u64),
     Since(u64),
+    Ago(u64),
     Sequence(u64),
 }
 
@@ -100,6 +101,10 @@ pub struct Skip {
 pub struct Failure {
     pub kind: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub missing: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_seq: Option<u64>,
 }
 
 pub fn header(op: u8, id: Id) -> Vec<u8> {

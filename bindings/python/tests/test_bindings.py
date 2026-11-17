@@ -7,9 +7,9 @@ Notes: Uses temporary directories and avoids global state.
 """
 
 from __future__ import annotations
-from plasmite import FollowStart
 
 import json
+from datetime import timedelta
 import os
 import socket
 import subprocess
@@ -41,11 +41,9 @@ from plasmite import (
     PlasmiteError,
     RetentionGapError,
     UdpClient,
-    UdpFollowOptions,
     UdpFrame,
     UdpGap,
     UdpProgress,
-    FollowStart,
     parse_message,
 )
 
@@ -68,13 +66,13 @@ class BindingTests(unittest.TestCase):
 
     def _fill_past(self, pool: Any, seq: int) -> None:
         for n in range(10_000):
-            pool.append(
+            pool.feed(
                 {"n": n, "padding": "x" * 4096},
                 ["drop"],
                 Durability.FAST,
             )
             try:
-                pool.get(seq)
+                parse_message(pool._get_json(seq))
             except NotFoundError:
                 return
         self.fail(f"pool did not overwrite sequence {seq}")
@@ -92,32 +90,29 @@ class BindingTests(unittest.TestCase):
     def test_numeric_append_receipts_match_stored_frames(self) -> None:
         with self._client_pool("identities") as (_, pool):
             value = {"nested": [1, {"text": "hello"}]}
-            first = pool.append_identity(value, ["tag"], Durability.FLUSH)
-            self.assertIsInstance(first, plasmite.AppendReceipt)
+            first = pool.feed_receipt(value, ["tag"], Durability.FLUSH)
+            self.assertIsInstance(first, plasmite.FeedReceipt)
             self.assertEqual(first.seq, 1)
-            stored = pool.get_lite3(first.seq)
-            self.assertEqual(first.timestamp_ns, stored.timestamp_ns)
-            self.assertGreater(first.timestamp_ns, 2**53)
+            stored = pool._get_lite3(first.seq)
+            self.assertEqual(first.time, stored.time)
+            self.assertGreater(first.time, 2**53)
             value["nested"].clear()
-            self.assertEqual(pool.get(first.seq).data, {"nested": [1, {"text": "hello"}]})
-            second = pool.append_lite3_identity(bytearray(stored.payload), Durability.FAST)
+            self.assertEqual(parse_message(pool._get_json(first.seq)).data, {"nested": [1, {"text": "hello"}]})
+            second = pool.feed_lite3_receipt(bytearray(stored.payload), Durability.FAST)
             self.assertEqual(second.seq, 2)
-            self.assertEqual(second.timestamp_ns, pool.get_lite3(2).timestamp_ns)
+            self.assertEqual(second.time, pool._get_lite3(2).time)
             with self.assertRaises(PlasmiteError):
-                pool.append_json_identity(b"bad", [], Durability.FAST)
+                pool.feed_json_receipt(b"bad", [], Durability.FAST)
             with self.assertRaises(PlasmiteError):
-                pool.append_lite3_identity(b"bad", Durability.FAST)
-            self.assertEqual(pool.append_identity({}).seq, 3)
-            with mock.patch.object(plasmite._LIB, "plsm_pool_append_json_identity", None):
-                with self.assertRaises(NotImplementedError):
-                    pool.append_identity({})
-            self.assertEqual(pool.append_identity({}).seq, 4)
+                pool.feed_lite3_receipt(b"bad", Durability.FAST)
+            self.assertEqual(pool.feed_receipt({}).seq, 3)
+
 
     def test_append_get_large_payload(self) -> None:
         with self._client_pool("big") as (_, pool):
             payload = {"blob": "0123456789abcdef" * 4096}
             tags = ["alpha", "beta", "gamma"]
-            msg_bytes = pool.append_json(
+            msg_bytes = pool.feed_json(
                 json.dumps(payload).encode("utf-8"), tags, Durability.FAST
             )
             message = parse_message(msg_bytes)
@@ -127,52 +122,48 @@ class BindingTests(unittest.TestCase):
             self.assertEqual(message.meta.tags, tags)
             self.assertEqual(message.tags, tags)
             self.assertEqual(message.raw, msg_bytes)
-            self.assertIsNotNone(message.time.tzinfo)
+            self.assertIsInstance(message.time, int)
 
-            get_bytes = pool.get_json(message.seq)
+            get_bytes = pool._get_json(message.seq)
             fetched = parse_message(get_bytes)
             self.assertEqual(fetched.data, payload)
-            get_alias = pool.get(message.seq)
+            get_alias = parse_message(pool._get_json(message.seq))
             self.assertIsInstance(get_alias, Message)
             self.assertEqual(get_alias.seq, fetched.seq)
 
     def test_message_time_fraction_widths_and_raw_precision(self) -> None:
-        for fraction, micros in [("1", 100000), ("123", 123000), ("12345", 123450), ("123456", 123456), ("123456789", 123456)]:
+        for fraction in ("1", "123", "12345", "123456", "123456789"):
             with self.subTest(fraction=fraction):
-                payload = json.dumps({"seq": 1, "time": f"2026-10-14T12:34:56.{fraction}Z", "meta": {"tags": []}, "data": {}}).encode()
+                payload = json.dumps({"seq": 1, "time": f"1970-01-01T01:00:00.{fraction}+01:00", "meta": {"tags": []}, "data": {}}).encode()
                 message = parse_message(payload)
-                self.assertEqual(message.time.microsecond, micros)
-                self.assertEqual(message.time.utcoffset().total_seconds(), 0)
+                self.assertEqual(message.time, int(fraction.ljust(9, "0")))
                 self.assertEqual(message.raw, payload)
-                with mock.patch("plasmite.sys.version_info", (3, 10)):
-                    legacy = parse_message(payload)
-                self.assertEqual(legacy.time, message.time)
 
     def test_append_borrows_immutable_input_and_keeps_owned_results(self) -> None:
         with self._client_pool("buffers") as (_, pool):
             payload = bytearray(b'{"text":"caf\\u00e9","values":[0,1,2]}')
-            raw = pool.append_json(memoryview(payload), [], Durability.FAST)
+            raw = pool.feed_json(memoryview(payload), [], Durability.FAST)
             payload[:] = b"x" * len(payload)
             expected = {"text": "caf\u00e9", "values": [0, 1, 2]}
             self.assertEqual(parse_message(raw).data, expected)
-            frame = pool.get_lite3(1)
+            frame = pool._get_lite3(1)
             # Lite3 contains zero bytes; a C string argument must preserve length.
             self.assertIn(b"\0", frame.payload)
-            self.assertEqual(pool.append_lite3(frame.payload, Durability.FAST), 2)
-            self.assertEqual(pool.get(2).data, expected)
+            self.assertEqual(pool.feed_lite3(frame.payload, Durability.FAST).seq, 2)
+            self.assertEqual(parse_message(pool._get_json(2)).data, expected)
             with self.assertRaises(PlasmiteError):
-                pool.append_json(b'{"x":1}\0{"x":2}', [], Durability.FAST)
+                pool.feed_json(b'{"x":1}\0{"x":2}', [], Durability.FAST)
         self.assertEqual(parse_message(raw).data, expected)
 
     def test_default_pool_size_constant_matches_core_default(self) -> None:
         self.assertEqual(plasmite.DEFAULT_POOL_SIZE_BYTES, 1024 * 1024)
 
-    def test_client_pool_creates_then_reopens(self) -> None:
+    def test_create_on_open_preserves_pool(self) -> None:
         with self._new_client() as client:
-            first = client.pool("work", TEST_POOL_SIZE_BYTES)
-            second = client.pool("work", 2 * TEST_POOL_SIZE_BYTES)
-            first_msg = first.append({"kind": "one"}, ["alpha"])
-            second_msg = second.get(first_msg.seq)
+            first = client.open_pool("work", create=True)
+            second = client.open_pool("work", create=True)
+            first_msg = first.feed({"kind": "one"}, ["alpha"])
+            second_msg = parse_message(second._get_json(first_msg.seq))
             self.assertEqual(second_msg.data["kind"], "one")
             first.close()
             second.close()
@@ -219,53 +210,43 @@ class BindingTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"USERPROFILE" if os.name == "nt" else "HOME": str(home)}, clear=False):
             client = Client()
-            pool = client.pool("work", TEST_POOL_SIZE_BYTES)
-            msg = pool.append({"kind": "one"}, ["alpha"])
+            pool = client.open_pool("work", create=True)
+            msg = pool.feed({"kind": "one"}, ["alpha"])
             self.assertEqual(msg.data["kind"], "one")
             pool.close()
             client.close()
 
         self.assertTrue(expected_pool_path.exists())
 
-    def test_tail_timeout_and_close(self) -> None:
-        with self._client_pool("tail") as (_, pool):
-            stream = pool.open_follow(start=FollowStart.sequence(9999), max_messages=1, timeout_ms=10)
-            self.assertIsNone(stream.next_json())
-            stream.close()
-            stream.close()
+    def test_follow_timeout_and_close(self) -> None:
+        with self._client_pool("live") as (_, pool):
+            reader = pool.follow()
+            self.assertIsNone(reader.next(timedelta(milliseconds=10)))
+            reader.close()
+            reader.close()
 
     def test_stream_and_lite3_stream_iterators(self) -> None:
         with self._client_pool("iter") as (_, pool):
-            first = pool.append({"kind": "one"}, ["iter"])
-            pool.append({"kind": "two"}, ["iter"])
-            pool.append({"kind": "three"}, ["iter"])
+            first = pool.feed({"kind": "one"}, ["iter"])
+            pool.feed({"kind": "two"}, ["iter"])
+            pool.feed({"kind": "three"}, ["iter"])
 
-            stream = pool.open_follow(
-                start=FollowStart.sequence(first.seq), max_messages=3, timeout_ms=50
-            )
-            seen = [parse_message(raw).data["kind"] for raw in stream]
-            self.assertEqual(seen, ["one", "two", "three"])
-            self.assertIsNone(stream.next_json())
-            stream.close()
+            with pool.fetch(since=first.seq) as reader:
+                self.assertEqual([item.data["kind"] for item in reader], ["one", "two", "three"])
 
-            frame_seed = pool.get_lite3(first.seq)
-            seq2 = pool.append_lite3(frame_seed.payload, Durability.FAST)
-            pool.append_lite3(frame_seed.payload, Durability.FAST)
-
-            lite3_stream = pool.open_lite3_follow(
-                start=FollowStart.sequence(seq2), max_messages=2, timeout_ms=50
-            )
-            frame_seqs = [frame.seq for frame in lite3_stream]
-            self.assertEqual(frame_seqs, [seq2, seq2 + 1])
-            self.assertIsNone(lite3_stream.next())
-            lite3_stream.close()
+            frame_seed = pool._get_lite3(first.seq)
+            seq2 = pool.feed_lite3(frame_seed.payload).seq
+            pool.feed_lite3(frame_seed.payload)
+            with pool.fetch_lite3(since=seq2) as reader:
+                self.assertEqual([frame.seq for frame in reader], [seq2, seq2 + 1])
 
     def test_tail_filters_by_tags(self) -> None:
         with self._client_pool("tail-tags") as (_, pool):
-            pool.append_json(b'{"kind":"drop"}', ["drop"], Durability.FAST)
-            pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
+            pool.feed_json(b'{"kind":"drop"}', ["drop"], Durability.FAST)
+            pool.feed_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
 
-            results = list(pool.follow(start=FollowStart.all(), max_messages=1, timeout_ms=50, tags=["keep"]))
+            with pool.fetch(tags=["keep"]) as reader:
+                results = list(reader)
             self.assertEqual(len(results), 1)
             message = results[0]
             self.assertIsInstance(message, Message)
@@ -274,61 +255,37 @@ class BindingTests(unittest.TestCase):
     def test_tail_can_fail_when_retention_overtakes_filtered_consumer(self) -> None:
         with self._new_client() as client:
             pool = client.create_pool("tail-gap", 64 * 1024)
-            first = pool.append({"kind": "first"}, ["keep"])
+            first = pool.feed({"kind": "first"}, ["keep"])
             self._fill_past(pool, first.seq)
 
             with self.assertRaises(RetentionGapError) as raised:
-                next(
-                    pool.follow(
-                        start=FollowStart.sequence(first.seq),
-                        timeout_ms=50,
-                        tags=["never"],
-                        error_on_gap=True,
-                    )
-                )
+                pool.follow(since=first.seq, tags=["never"])
             self.assertEqual(raised.exception.kind, ErrorKind.RETENTION_GAP)
-            self.assertEqual(raised.exception.seq, first.seq)
+            self.assertEqual(raised.exception.missing, first.seq)
 
-            continuing = next(
-                pool.follow(
-                    start=FollowStart.sequence(first.seq),
-                    max_messages=1,
-                    timeout_ms=50,
-                )
-            )
+            with pool.follow(since=raised.exception.next_seq) as reader:
+                continuing = next(reader)
             self.assertGreater(continuing.seq, first.seq)
             pool.close()
 
-    def test_open_follow_reports_first_unread_sequence_after_overwrite(self) -> None:
+    def test_follow_reports_first_unread_sequence_after_overwrite(self) -> None:
         with self._new_client() as client, client.create_pool("slow-reader", 64 * 1024) as pool:
-            seed = pool.append({"kind": "seed"})
-            with pool.open_follow(start=FollowStart.sequence(seed.seq), timeout_ms=500, error_on_gap=True) as stream:
-                self.assertEqual(parse_message(stream.next_json()).seq, seed.seq)
-                lost = pool.append({"kind": "lost"})
+            seed = pool.feed({"kind": "seed"})
+            with pool.follow(since=seed.seq) as reader:
+                self.assertEqual(next(reader).seq, seed.seq)
+                lost = pool.feed({"kind": "lost"})
                 self._fill_past(pool, lost.seq)
                 with self.assertRaises(RetentionGapError) as raised:
-                    stream.next_json()
-                self.assertEqual(raised.exception.seq, lost.seq)
-                self.assertIsNone(stream.next_json())
+                    next(reader)
+                self.assertEqual(raised.exception.missing, lost.seq)
 
-    def test_lite3_stream_can_fail_on_retention_gap(self) -> None:
-        with self._new_client() as client:
-            pool = client.create_pool("lite3-gap", 64 * 1024)
-            first = pool.append({"kind": "first"}, [])
+    def test_lite3_reader_reports_retention_gap_at_open(self) -> None:
+        with self._new_client() as client, client.create_pool("lite3-gap", 64 * 1024) as pool:
+            first = pool.feed({"kind": "first"})
             self._fill_past(pool, first.seq)
-
-            stream = pool.open_lite3_follow(
-                start=FollowStart.sequence(first.seq),
-                timeout_ms=50,
-                error_on_gap=True,
-            )
-            try:
-                with self.assertRaises(RetentionGapError) as raised:
-                    stream.next()
-                self.assertEqual(raised.exception.seq, first.seq)
-            finally:
-                stream.close()
-                pool.close()
+            with self.assertRaises(RetentionGapError) as raised:
+                pool.fetch_lite3(since=first.seq)
+            self.assertEqual(raised.exception.missing, first.seq)
 
     def test_closed_handles_error(self) -> None:
         client = self._new_client()
@@ -336,7 +293,7 @@ class BindingTests(unittest.TestCase):
         pool.close()
 
         with self.assertRaises(PlasmiteError):
-            pool.append_json(b"{}", [], Durability.FAST)
+            pool.feed_json(b"{}", [], Durability.FAST)
 
         client.close()
         with self.assertRaises(PlasmiteError):
@@ -344,44 +301,38 @@ class BindingTests(unittest.TestCase):
 
     def test_lite3_append_get_stream(self) -> None:
         with self._client_pool("lite3") as (_, pool):
-            msg_bytes = pool.append_json(
+            msg_bytes = pool.feed_json(
                 json.dumps({"x": 1}).encode("utf-8"), ["alpha"], Durability.FAST
             )
             message = parse_message(msg_bytes)
-            frame = pool.get_lite3(message.seq)
+            frame = pool._get_lite3(message.seq)
             self.assertIsInstance(frame, Lite3Frame)
-            self.assertIsNotNone(frame.time.tzinfo)
+            self.assertEqual(frame.time, message.time)
             self.assertGreater(len(frame.payload), 0)
 
-            seq2 = pool.append_lite3(frame.payload, Durability.FAST)
-            frame2 = pool.get_lite3(seq2)
+            seq2 = pool.feed_lite3(frame.payload, Durability.FAST).seq
+            frame2 = pool._get_lite3(seq2)
             self.assertEqual(frame2.payload, frame.payload)
 
-            stream = pool.open_lite3_follow(
-                start=FollowStart.sequence(seq2), max_messages=1, timeout_ms=50
-            )
-            next_frame = stream.next()
-            self.assertIsNotNone(next_frame)
-            assert next_frame is not None
-            self.assertEqual(next_frame.seq, seq2)
-            self.assertEqual(next_frame.payload, frame.payload)
-            self.assertIsNone(stream.next())
-            stream.close()
+            with pool.fetch_lite3(since=seq2) as reader:
+                frame = next(reader)
+                self.assertEqual(frame.seq, seq2)
+                self.assertEqual(frame.payload, frame2.payload)
+                with self.assertRaises(StopIteration):
+                    next(reader)
 
     def test_lite3_invalid_payload(self) -> None:
         with self._client_pool("lite3-bad") as (_, pool):
             with self.assertRaises(PlasmiteError):
-                pool.append_lite3(b"\x01", Durability.FAST)
+                pool.feed_lite3(b"\x01", Durability.FAST)
 
     def test_context_manager_lifecycle(self) -> None:
         with self._new_client() as client:
             with client.create_pool("ctx", TEST_POOL_SIZE_BYTES) as pool:
-                msg = pool.append_json(b'{"x":1}', [], Durability.FAST)
+                msg = pool.feed_json(b'{"x":1}', [], Durability.FAST)
                 parsed = parse_message(msg)
-                with pool.open_follow(
-                    start=FollowStart.sequence(parsed.seq), max_messages=1, timeout_ms=50
-                ) as stream:
-                    self.assertIsNotNone(stream.next_json())
+                with pool.fetch(since=parsed.seq) as reader:
+                    self.assertEqual(next(reader).seq, parsed.seq)
 
         with self.assertRaises(PlasmiteError):
             client.create_pool("after-close", TEST_POOL_SIZE_BYTES)
@@ -389,30 +340,133 @@ class BindingTests(unittest.TestCase):
     def test_validation_errors_are_deterministic(self) -> None:
         with self._new_client() as client:
             pool = client.create_pool("validation", TEST_POOL_SIZE_BYTES)
-            with self.assertRaises(ValueError):
-                pool.append_json(b"", [], Durability.FAST)
+            with self.assertRaises(plasmite.UsageError):
+                pool.feed_json(b"", [], Durability.FAST)
             invalid_payload = "{}"
             with self.assertRaises(TypeError):
-                pool.append_json(invalid_payload, [], Durability.FAST)
+                pool.feed_json(invalid_payload, [], Durability.FAST)
             with self.assertRaises(ValueError):
-                pool.get_json(-1)
+                pool._get_json(-1)
             pool.close()
             with self.assertRaises(PlasmiteError):
-                pool.get_json(1)
+                pool._get_json(1)
 
     def test_follow_starts_now_and_history_is_explicit(self):
         with self._new_client() as client, client.create_pool("follow-choice", TEST_POOL_SIZE_BYTES) as pool:
-            pool.append({"n": 1}, ["skip"])
-            pool.append({"n": 2}, ["keep"])
-            with pool.open_follow() as stream:
-                self.assertEqual(stream.next_wait(0)[0], 0)
-                appended = pool.append({"n": 3}, ["keep"])
-                status, raw = stream.next_wait(100)
-                self.assertEqual(status, 1)
-                self.assertEqual(json.loads(raw)["seq"], appended.seq)
-            self.assertEqual([m.seq for m in pool.follow(start=FollowStart.last(2), finite=True)], [2, 3])
-            self.assertEqual([m.seq for m in pool.follow_views(start=FollowStart.all(), finite=True)], [1, 2, 3])
-            self.assertEqual(list(pool.follow(start=FollowStart.last(0), finite=True)), [])
+            pool.feed({"n": 1}, ["skip"])
+            pool.feed({"n": 2}, ["keep"])
+            with pool.follow() as reader:
+                self.assertIsNone(reader.next(timedelta(0)))
+                appended = pool.feed({"n": 3}, ["keep"])
+                self.assertEqual(reader.next(timedelta(milliseconds=100)).seq, appended.seq)
+            with pool.fetch(last=2) as reader:
+                self.assertEqual([m.seq for m in reader], [2, 3])
+            with pool.fetch_view() as reader:
+                self.assertEqual([m.seq for m in reader], [1, 2, 3])
+            with pool.fetch(last=0) as reader:
+                self.assertEqual(list(reader), [])
+
+    def test_v2_listener_and_pool_lifecycle(self):
+        from datetime import timedelta
+
+        with self._new_client() as client:
+            self.assertEqual(client.list_pools(), [])
+            with client.open_pool("listener", create=True) as pool:
+                self.assertEqual(pool.info()["bounds"], {})
+                old = pool.feed({"n": 1}, tags=["keep"])
+                with pool.follow(tags=["keep"]) as reader:
+                    self.assertIsNone(reader.next(timedelta(0)))
+                    pool.feed({"n": 2})
+                    new = pool.feed({"n": 3}, tags=["keep"])
+                    self.assertEqual(next(reader).seq, new.seq)
+                self.assertEqual(pool.info()["bounds"], {"oldest": old.seq, "newest": new.seq})
+                self.assertEqual(len(client.list_pools()), 1)
+                with pool.fetch(since=new.seq, tags=["keep"]) as reader:
+                    forwarded = pool.feed(new)
+                    self.assertEqual(forwarded.tags, new.tags)
+                    self.assertEqual([m.seq for m in reader], [new.seq])
+                with self.assertRaises(plasmite.UsageError):
+                    pool.feed(new, tags=[])
+                view = pool.feed_view(new)
+                self.assertEqual(list(view.tags), new.tags)
+                with self.assertRaises(plasmite.UsageError):
+                    pool.feed_view(view, tags=[])
+                with self.assertRaises(plasmite.UsageError):
+                    pool.fetch(since="oldest", last=1)
+                with pool.fetch(since=plasmite.at(0)) as reader:
+                    self.assertEqual(next(reader).seq, old.seq)
+            client.delete_pool("listener")
+            self.assertEqual(client.list_pools(), [])
+
+    def test_shared_2_0_conformance(self):
+        from shutil import copyfile
+
+        fixture = REPO_ROOT / "tests/fixtures/conformance/reads.json"
+        cases = json.loads(fixture.read_text(encoding="utf8"))
+
+        def seed(pool, records):
+            for msg in records:
+                pool.feed(msg["data"], tags=msg["tags"])
+
+        def check_error(kind, call):
+            with self.assertRaises(PlasmiteError) as caught:
+                call()
+            self.assertEqual(caught.exception.kind.name.replace("_", "").lower(), kind.lower())
+            return caught.exception
+
+        with self._new_client() as client:
+            check_error(cases["pools"]["missing"], lambda: client.open_pool("events"))
+            with client.open_pool("events", create=True) as pool:
+                check_error(cases["pools"]["existing"], lambda: client.create_pool("events"))
+                check_error(cases["pools"]["non_object_feed"], lambda: pool.feed([]))
+                seed(pool, cases["seed"])
+                for single, reads in [(False, cases["fetch"]), (True, cases["single_fetch"])]:
+                    for case in reads:
+                        with self.subTest(case=case["name"]):
+                            options = {key: case[key] for key in ("since", "last", "tags") if key in case}
+                            if "error" in case:
+                                check_error(case["error"], lambda: pool.fetch(**options))
+                                continue
+                            with pool.fetch(**options) as reader:
+                                if single:
+                                    message = next(reader, None)
+                                    got = [] if message is None else [message.seq]
+                                else:
+                                    got = [message.seq for message in reader]
+                            self.assertEqual(got, case["expect"])
+                case = cases["fetch_snapshot"]
+                with pool.fetch() as reader:
+                    seed(pool, case["after_open"])
+                    self.assertEqual([message.seq for message in reader], case["expect"])
+            client.delete_pool("events")
+
+            for case in cases["follow"]:
+                with self.subTest(case=case["name"]):
+                    with client.create_pool("follow") as pool:
+                        seed(pool, cases["seed"])
+                        options = {key: case[key] for key in ("since", "last", "tags") if key in case}
+                        cancel = threading.Event()
+                        with pool.follow(**options, cancel=cancel) as reader:
+                            seed(pool, case.get("after_open", []))
+                            from datetime import timedelta
+                            got = [reader.next(timedelta(seconds=2)).seq for _ in case["expect"]]
+                            self.assertEqual(got, case["expect"])
+                            cancel.set()
+                            self.assertIsNone(next(reader, None))
+                    client.delete_pool("follow")
+
+            retained = cases["retention"]
+            with client.create_pool("small", retained["size"]) as pool:
+                for i in range(retained["inserts"]):
+                    pool.feed({"i": i, "pad": "x" * retained["padding_bytes"]})
+                gap = check_error(retained["error"],
+                                  lambda: pool.fetch(since=retained["since"], tags=retained["tags"]))
+                self.assertEqual(gap.missing, retained["since"])
+                self.assertEqual(gap.next_seq, pool.info()["bounds"]["oldest"])
+            previous = cases["previous_release"]
+            copyfile(REPO_ROOT / previous["fixture"], self.pool_dir / "previous.plasmite")
+            with client.open_pool("previous") as pool, pool.fetch() as reader:
+                self.assertEqual([{"data": m.data, "tags": m.tags} for m in reader], previous["messages"])
 
     def test_unsigned_64_bit_arguments_do_not_wrap(self) -> None:
         overflow = (1 << 64) + 1
@@ -422,21 +476,21 @@ class BindingTests(unittest.TestCase):
             self.assertFalse((self.pool_dir / "wrapped-size.plasmite").exists())
 
             with client.create_pool("no-wrap", TEST_POOL_SIZE_BYTES) as pool:
-                message = pool.append({"kind": "first"}, [])
+                message = pool.feed({"kind": "first"}, [])
                 self.assertEqual(message.seq, 1)
                 with self.assertRaisesRegex(ValueError, "seq must fit"):
-                    pool.get(overflow)
+                    parse_message(pool._get_json(overflow))
                 with self.assertRaisesRegex(ValueError, "seq must fit"):
-                    pool.get_lite3(overflow)
+                    pool._get_lite3(overflow)
 
-                for open_follow in (pool.open_follow, pool.open_lite3_follow):
-                    for argument in ("start", "max_messages", "timeout_ms"):
-                        with self.subTest(stream=open_follow.__name__, argument=argument):
-                            with self.assertRaisesRegex(ValueError, f"{'seq' if argument == 'start' else argument} must fit"):
-                                open_follow(**{argument: FollowStart.sequence(overflow) if argument == "start" else overflow})
+                for open_reader in (pool.follow, pool.follow_lite3):
+                    for argument in ("since", "last"):
+                        with self.subTest(reader=open_reader.__name__, argument=argument):
+                            with self.assertRaisesRegex(plasmite.UsageError, f"{argument} must fit"):
+                                open_reader(**{argument: overflow})
 
                 with self.assertRaises(NotFoundError):
-                    pool.get_json((1 << 64) - 1)
+                    pool._get_json((1 << 64) - 1)
 
     def test_error_subclasses_are_raised(self) -> None:
         with self._new_client() as client:
@@ -458,7 +512,7 @@ class BindingTests(unittest.TestCase):
 
             with client.create_pool("damaged", TEST_POOL_SIZE_BYTES) as pool:
                 with self.assertRaises(NotFoundError) as missing_message:
-                    pool.get(42)
+                    parse_message(pool._get_json(42))
                 self.assertEqual(missing_message.exception.seq, 42)
                 self.assertIsNone(missing_message.exception.path)
 
@@ -479,8 +533,8 @@ class BindingTests(unittest.TestCase):
         from plasmite import MessageView
         with self._new_client() as client:
             with self._new_pool(client, "udp-order") as pool:
-                message = pool.append({"value": 17}, ["tag"])
-                payload = pool.get_lite3(message.seq).payload
+                message = pool.feed({"value": 17}, ["tag"])
+                payload = pool._get_lite3(message.seq).payload
         base = 1 << 53
         timestamp = 1_700_000_000_000_000_001
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as peer:
@@ -521,15 +575,15 @@ class BindingTests(unittest.TestCase):
             try:
                 with UdpClient(f"udp://127.0.0.1:{peer.getsockname()[1]}") as client:
                     with client.open_pool("sensors") as pool:
-                        open_follow = pool.follow_views if views else pool.follow
-                        with open_follow(UdpFollowOptions(start=FollowStart.last(4), finite=True)) as follow:
+                        open_follow = pool.fetch_view if views else pool.fetch
+                        with open_follow(last=4) as follow:
                             events = [follow.next_event(timeout_ms=1000) for _ in range(7)]
                             self.assertIsNone(follow.next_event(timeout_ms=0))
                 frame_type = MessageView if views else UdpFrame
                 frames = [event for event in events if isinstance(event, frame_type)]
                 self.assertEqual([frame.seq for frame in frames], [base + 10, base + 12, base + 11, base + 12])
                 for frame in frames:
-                    self.assertEqual(frame.timestamp_ns, timestamp)
+                    self.assertEqual(frame.time, timestamp)
                     if views:
                         self.assertEqual(frame.data["value"], 17)
                         self.assertEqual(list(frame.meta["tags"]), ["tag"])
@@ -552,8 +606,8 @@ class BindingTests(unittest.TestCase):
 
         with self._new_client() as local_client:
             with local_client.create_pool("udp-sdk", TEST_POOL_SIZE_BYTES) as local_pool:
-                original = local_pool.append({"origin": "lite3", "value": 7}, ["source"])
-                original_lite3 = local_pool.get_lite3(original.seq).payload
+                original = local_pool.feed({"origin": "lite3", "value": 7}, ["source"])
+                original_lite3 = local_pool._get_lite3(original.seq).payload
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as held:
                     held.bind(("127.0.0.1", 0))
                     port = held.getsockname()[1]
@@ -590,41 +644,33 @@ class BindingTests(unittest.TestCase):
 
                     with UdpClient(f"udp://127.0.0.1:{port}") as udp_client:
                         with udp_client.open_pool("udp-sdk") as udp_pool:
-                            options = UdpFollowOptions(
-                                start=FollowStart.sequence(original.seq + 1), finite=False
-                            )
-                            with udp_pool.follow(options) as follow:
+                            with udp_pool.follow(since=original.seq + 1) as follow:
                                 self.assertIsNone(
-                                    udp_pool.send_json({"origin": "json", "value": 8}, ["sensor"])
+                                    udp_pool.feed({"origin": "json", "value": 8}, ["sensor"])
                                 )
                                 json_frame = _next_udp_frame(self, follow)
                                 json_message = json_frame.message()
                                 self.assertEqual(json_message.data, {"origin": "json", "value": 8})
                                 self.assertEqual(json_message.tags, ["sensor"])
-                                json_time = local_pool.get_lite3(json_frame.seq).timestamp_ns
-                                self.assertEqual(json_frame.timestamp_ns, json_time)
-                                self.assertGreater(json_frame.timestamp_ns, 1 << 53)
-                                stored_json = local_pool.get(json_frame.seq)
+                                json_time = local_pool._get_lite3(json_frame.seq).time
+                                self.assertEqual(json_frame.time, json_time)
+                                self.assertGreater(json_frame.time, 1 << 53)
+                                stored_json = parse_message(local_pool._get_json(json_frame.seq))
                                 self.assertEqual(stored_json.data, json_message.data)
 
                                 mutable_lite3 = bytearray(original_lite3)
-                                self.assertIsNone(udp_pool.send_lite3(mutable_lite3))
+                                self.assertIsNone(udp_pool.feed_lite3(mutable_lite3))
                                 mutable_lite3[:] = b"\x00" * len(mutable_lite3)
                                 lite3_frame = _next_udp_frame(self, follow)
                                 self.assertEqual(lite3_frame.payload, original_lite3)
                                 self.assertEqual(lite3_frame.message().data, original.data)
                                 self.assertEqual(lite3_frame.message().tags, ["source"])
-                                stored_lite3 = local_pool.get(lite3_frame.seq)
+                                stored_lite3 = parse_message(local_pool._get_json(lite3_frame.seq))
                                 self.assertEqual(stored_lite3.data, original.data)
 
                             large_start = (1 << 53) + 1
-                            with udp_pool.follow(
-                                UdpFollowOptions(
-                                    start=FollowStart.sequence(large_start), finite=True
-                                )
-                            ) as large_follow:
-                                progress = large_follow.next_event(timeout_ms=1000)
-                                self.assertEqual(progress.start_seq, large_start)
+                            with self.assertRaises(plasmite.UsageError):
+                                udp_pool.fetch(since=large_start)
 
                             cancel_follow = udp_pool.follow()
                             self.assertIsNotNone(cancel_follow.next_event(timeout_ms=0))

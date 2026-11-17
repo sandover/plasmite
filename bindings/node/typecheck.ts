@@ -1,4 +1,3 @@
-import { FollowStart } from ".";
 /*
 Purpose: Lightweight type smoke test for public Node binding declarations.
 Key Exports: None.
@@ -19,24 +18,21 @@ import {
 
 const client = new Client("./data");
 const pool = client.createPool("docs", 1024 * 1024);
-const pooled = client.pool("docs", 1024 * 1024);
-const appended = pool.appendJson(Buffer.from("{}"), [], Durability.Fast);
-const appendedAlias = pool.append({ kind: "note" }, ["tag"], Durability.Fast);
-const frame = pool.getLite3(1n);
-const got = pool.get(1n);
-const parsed = parseMessage(got);
+const pooled = client.openPool("docs", { create: true });
+const appended = pool.feedJson(Buffer.from("{}"), { durability: Durability.Fast });
+const fed = pool.feed({ kind: "note" }, { tags: ["tag"], durability: Durability.Fast });
+const parsed = parseMessage(appended);
 const parsedFromEnvelope = parseMessage({
   seq: 1,
   time: "2026-02-18T00:00:00Z",
   data: { ok: true },
   meta: { tags: ["tag"] },
 });
-const typedMessage: Message = got;
+const typedMessage: Message = parsed;
 const retentionGap: ErrorKind = ErrorKind.RetentionGap;
 void appended;
 void pooled;
-void appendedAlias;
-void frame;
+void fed;
 void parsed;
 void parsedFromEnvelope;
 void typedMessage;
@@ -45,13 +41,8 @@ void retentionGap;
 async function smokeRemote() {
   const remote = new RemoteClient("http://127.0.0.1:9700");
   const opened = await remote.openPool("docs");
-  const msg = await opened.append({ kind: "note" }, ["note"], Durability.Fast);
-  for await (const next of opened.follow({
-    start: FollowStart.sequence(msg.seq),
-    maxMessages: 1,
-    tags: ["note"],
-    errorOnGap: true,
-  })) {
+  const msg = await opened.feed({ kind: "note" }, { tags: ["note"], durability: Durability.Fast });
+  for await (const next of await opened.follow({ since: msg.seq, tags: ["note"] })) {
     const seq: bigint = next.seq;
     void seq;
     break;
@@ -59,19 +50,24 @@ async function smokeRemote() {
 }
 
 async function smokeLocalStreams() {
-  for await (const message of pool.follow({
-    maxMessages: 1,
-    timeoutMs: 10,
-    tags: ["tag"],
-    errorOnGap: true,
-  })) {
+  for await (const message of await pool.follow({ tags: ["tag"] })) {
     void message;
     break;
   }
-  const stream = pool.openFollow(FollowStart.sequence(1n), 1n, 10n, true);
-  stream.close();
-  const lite3Stream = pool.openLite3Follow(FollowStart.sequence(1n), 1n, 10n, true);
-  lite3Stream.close();
+  const history = await pool.fetch({ since: 1n, tags: ["tag"] });
+  const item = await history.next();
+  if (item.value) {
+    const time: bigint = item.value.time;
+    void time;
+  }
+  await history.return();
+  const binary = await pool.fetchLite3({ since: 1n });
+  const frame = await binary.next();
+  if (frame.value) {
+    const payload: Buffer = frame.value.payload;
+    void payload;
+  }
+  await binary.return();
 }
 
 function handleRemoteError(err: unknown) {

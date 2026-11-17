@@ -93,6 +93,21 @@ pub(crate) fn emit_output(value: Value, mode: OutputMode) -> Result<(), Error> {
     write_stdout(render_output(&value, mode).as_bytes())
 }
 
+pub(crate) fn emit_lite3_header() -> Result<(), Error> {
+    let mut started = BINARY_STARTED
+        .lock()
+        .map_err(|_| Error::new(ErrorKind::Internal).with_message("stdout lock failed"))?;
+    start_lite3(&mut io::stdout().lock(), &mut started)
+}
+
+fn start_lite3(stdout: &mut impl Write, started: &mut bool) -> Result<(), Error> {
+    if !*started {
+        super::message_stream::write_header(stdout).map_err(stdout_error)?;
+        *started = true;
+    }
+    Ok(())
+}
+
 pub(crate) fn emit_lite3(
     seq: u64,
     timestamp_ns: u64,
@@ -106,10 +121,7 @@ pub(crate) fn emit_lite3(
     if mode == OutputMode::Lite3Raw {
         return super::message_stream::write_raw(&mut stdout, payload).map_err(stdout_error);
     }
-    if !*started {
-        super::message_stream::write_header(&mut stdout).map_err(stdout_error)?;
-        *started = true;
-    }
+    start_lite3(&mut stdout, &mut started)?;
     super::message_stream::write_frame(&mut stdout, seq, timestamp_ns, payload)
         .map_err(stdout_error)
 }

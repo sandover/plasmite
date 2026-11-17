@@ -1,6 +1,6 @@
 //! The native access key works across a server restart and a fresh client process.
 
-use plasmite::api::{Durability, PoolOptions, PoolRef, RemoteClient, access};
+use plasmite::api::{Feed, PoolOptions, PoolRef, Read as Selection, RemoteClient, Since, access};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -23,15 +23,15 @@ fn native_key_connects_and_reuses_server_identity()
     let server = TestServer::start_with_args_and_scheme(&pool_dir, &[], "https");
     let url = server.base_url.clone();
     assert!(
-        ureq::get(&format!("{}/v0/pools", server.local_url))
+        ureq::get(&format!("{}/v2/pools", server.local_url))
             .call()
             .is_ok()
     );
-    let forged_origin = ureq::get(&format!("{}/v0/pools", server.local_url))
+    let forged_origin = ureq::get(&format!("{}/v2/pools", server.local_url))
         .set("Origin", "https://evil.test")
         .call();
     assert!(matches!(forged_origin, Err(ureq::Error::Status(403, _))));
-    let forged_host = ureq::get(&format!("{}/v0/pools", server.local_url))
+    let forged_host = ureq::get(&format!("{}/v2/pools", server.local_url))
         .set("Host", "evil.test")
         .call();
     assert!(matches!(forged_host, Err(ureq::Error::Status(403, _))));
@@ -177,14 +177,15 @@ fn native_key_connects_and_reuses_server_identity()
         .create_pool(&pool_ref, PoolOptions::new(1024 * 1024))
         .map_err(|error| format!("create shared pool: {error:?}"))?;
     let pool = saved_client
-        .open_pool(&pool_ref)
+        .open_pool(&pool_ref, false)
         .map_err(|error| format!("open shared pool: {error:?}"))?;
     let message = pool
-        .append_json_now(&json!({"message":"hello"}), &[], Durability::Fast)
+        .feed(&json!({"message":"hello"}), Feed::default())
         .map_err(|error| format!("append shared message: {error:?}"))?;
     assert_eq!(
-        pool.get_message(message.seq)
-            .map_err(|error| format!("read shared message: {error:?}"))?
+        pool.fetch(Selection::since(Since::Seq(message.seq)))?
+            .next_message()?
+            .ok_or("missing shared message")?
             .data,
         json!({"message":"hello"})
     );
@@ -235,11 +236,12 @@ fn native_key_connects_and_reuses_server_identity()
     access::connect(&restarted.base_url, replacement_key)?;
     let saved = RemoteClient::new(&restarted.base_url)?;
     let restored_pool = saved
-        .open_pool(&pool_ref)
+        .open_pool(&pool_ref, false)
         .map_err(|error| format!("reopen pool after server restart: {error:?}"))?;
     let restored_message = restored_pool
-        .get_message(message.seq)
-        .map_err(|error| format!("read message after server restart: {error:?}"))?;
+        .fetch(Selection::since(Since::Seq(message.seq)))?
+        .next_message()?
+        .ok_or("missing message after server restart")?;
     assert_eq!(restored_message.data, json!({"message":"hello"}));
     saved
         .delete_pool(&pool_ref)

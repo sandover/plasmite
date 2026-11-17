@@ -21,7 +21,7 @@ pub enum CursorResult {
 #[derive(Debug, PartialEq)]
 pub struct FrameRef {
     pub seq: u64,
-    pub timestamp_ns: u64,
+    pub time: u64,
     pub flags: u32,
     pub payload: Vec<u8>,
 }
@@ -30,7 +30,7 @@ pub struct FrameRef {
 // crosses the public boundary, rather than every frame skipped by a scan.
 pub(crate) struct FrameView<'a> {
     pub seq: u64,
-    pub timestamp_ns: u64,
+    pub time: u64,
     pub flags: u32,
     pub payload: &'a [u8],
 }
@@ -39,7 +39,7 @@ impl FrameView<'_> {
     pub(crate) fn into_owned(self) -> FrameRef {
         FrameRef {
             seq: self.seq,
-            timestamp_ns: self.timestamp_ns,
+            time: self.time,
             flags: self.flags,
             payload: self.payload.to_vec(),
         }
@@ -80,12 +80,35 @@ impl Cursor {
         self.next_locked(pool)
     }
 
+    pub(crate) fn next_checked(
+        &mut self,
+        pool: &Pool,
+        expected: Option<u64>,
+    ) -> Result<CursorResult, Error> {
+        let _lock = pool.read_lock()?;
+        self.next_owned_locked(pool, expected)
+    }
+
     // The caller retains the shared pool lock through the payload copy.
     pub(crate) fn next_locked(&mut self, pool: &Pool) -> Result<CursorResult, Error> {
-        match self.next_view_locked(pool)? {
-            CursorViewResult::Message(frame) => Ok(CursorResult::Message(frame.into_owned())),
-            CursorViewResult::WouldBlock => Ok(CursorResult::WouldBlock),
-            CursorViewResult::FellBehind => Ok(CursorResult::FellBehind),
+        self.next_owned_locked(pool, None)
+    }
+
+    fn next_owned_locked(
+        &mut self,
+        pool: &Pool,
+        expected: Option<u64>,
+    ) -> Result<CursorResult, Error> {
+        loop {
+            match self.next_view_locked(pool, expected)? {
+                CursorViewResult::Message(frame) => {
+                    if expected.is_none_or(|expected| frame.seq >= expected) {
+                        return Ok(CursorResult::Message(frame.into_owned()));
+                    }
+                }
+                CursorViewResult::WouldBlock => return Ok(CursorResult::WouldBlock),
+                CursorViewResult::FellBehind => return Ok(CursorResult::FellBehind),
+            }
         }
     }
 
@@ -100,7 +123,7 @@ impl Cursor {
         }
         loop {
             let checkpoint = self.clone();
-            match self.next_view_locked(pool)? {
+            match self.next_view_locked(pool, minimum_seq)? {
                 CursorViewResult::Message(frame) => {
                     // Older records never cross this stream's requested boundary.
                     // Check their frame headers, then skip without copying payloads.
@@ -122,8 +145,40 @@ impl Cursor {
         }
     }
 
-    fn next_view_locked<'p>(&mut self, pool: &'p Pool) -> Result<CursorViewResult<'p>, Error> {
+    /// Position the cursor at the first matching frame while the caller holds the pool lock.
+    pub(crate) fn seek_time_locked(
+        &mut self,
+        pool: &Pool,
+        time_ns: u64,
+    ) -> Result<Option<u64>, Error> {
+        loop {
+            let before = self.clone();
+            match self.next_view_locked(pool, None)? {
+                CursorViewResult::Message(frame) if frame.time >= time_ns => {
+                    *self = before;
+                    return Ok(Some(frame.seq));
+                }
+                CursorViewResult::Message(_) => continue,
+                CursorViewResult::WouldBlock => return Ok(None),
+                CursorViewResult::FellBehind => {
+                    return Err(Error::new(ErrorKind::Corrupt)
+                        .with_message("retained history changed while locked"));
+                }
+            }
+        }
+    }
+
+    fn next_view_locked<'p>(
+        &mut self,
+        pool: &'p Pool,
+        expected: Option<u64>,
+    ) -> Result<CursorViewResult<'p>, Error> {
         let header = pool.header_locked()?;
+        if let Some(expected) = expected
+            && expected < header.oldest_seq
+        {
+            return Err(Error::retention_gap(expected, header.oldest_seq));
+        }
         let position_may_be_stale = self.observed_header != Some(header);
         self.observed_header = Some(header);
         if header.oldest_seq == 0 {
@@ -282,7 +337,7 @@ pub(crate) fn read_frame_at<'a>(
     Ok(ReadResult::Message {
         frame: FrameView {
             seq: h1.seq,
-            timestamp_ns: h1.timestamp_ns,
+            time: h1.timestamp_ns,
             flags: h1.flags,
             payload,
         },

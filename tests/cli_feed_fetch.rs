@@ -1,7 +1,7 @@
 //! Purpose: Feed and fetch black-box CLI integration tests.
 
 pub mod support;
-use plasmite::api::{AppendOptions, Durability, Pool, PoolApiExt, PoolOptions};
+use plasmite::api::{AppendOptions, Durability, Pool, PoolOptions};
 use support::cli::*;
 
 #[test]
@@ -98,7 +98,7 @@ fn create_feed_fetch_follow_flow() {
             pool_dir.to_str().unwrap(),
             "follow",
             "testpool",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "json",
@@ -151,7 +151,7 @@ fn feed_stdout_contains_the_complete_message() {
 }
 
 #[test]
-fn emit_short_file_flag_reads_single_json_file() {
+fn feed_reads_one_json_object_from_redirected_file() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -172,14 +172,8 @@ fn emit_short_file_flag_reads_single_json_file() {
     std::fs::write(&input_file, b"{\"x\":1}\n").expect("write input");
 
     let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-f",
-            input_file.to_str().unwrap(),
-        ])
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
+        .stdin(File::open(&input_file).expect("open input"))
         .args(["--format", "json"])
         .output()
         .expect("feed");
@@ -230,9 +224,8 @@ fn feed_file_reads_multiple_json_records() {
             "demo",
             "--input-format",
             "json",
-            "--file",
-            input_file.to_str().unwrap(),
         ])
+        .stdin(File::open(&input_file).expect("open input"))
         .args(["--format", "json"])
         .output()
         .expect("feed");
@@ -289,14 +282,8 @@ fn feed_file_auto_handles_multiline_json_data() {
     std::fs::write(&input_file, b"{\n  \"x\": 1,\n  \"y\": 2\n}\n").expect("write input");
 
     let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "--file",
-            input_file.to_str().unwrap(),
-        ])
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
+        .stdin(File::open(&input_file).expect("open input"))
         .args(["--format", "json"])
         .output()
         .expect("feed");
@@ -318,62 +305,6 @@ fn feed_file_auto_handles_multiline_json_data() {
     let value = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
     assert_eq!(value["data"]["x"], 1);
     assert_eq!(value["data"]["y"], 2);
-}
-
-#[test]
-fn emit_retries_when_pool_is_busy() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "busy",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let pool_path = pool_dir.join("busy.plasmite");
-    let file = File::open(&pool_path).expect("open pool");
-    file.try_lock().expect("try lock");
-
-    let (tx, rx) = mpsc::channel();
-    let pool_dir_str = pool_dir.to_str().unwrap().to_string();
-    thread::spawn(move || {
-        let output = cmd()
-            .args([
-                "--dir",
-                &pool_dir_str,
-                "feed",
-                "busy",
-                "{\"x\":1}",
-                "--retry",
-                "5",
-                "--retry-delay",
-                "50ms",
-            ])
-            .args(["--format", "json"])
-            .output()
-            .expect("feed");
-        let _ = tx.send(output);
-    });
-
-    thread::sleep(Duration::from_millis(150));
-    file.unlock().expect("unlock");
-
-    let output = rx.recv_timeout(Duration::from_secs(2)).expect("output");
-    assert!(
-        output.status.success(),
-        "feed failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
-    assert!(value.get("seq").is_some());
 }
 
 #[test]
@@ -413,50 +344,6 @@ fn feed_auto_handles_pretty_json_data() {
     assert_eq!(lines.len(), 1);
     assert!(lines[0].get("seq").is_some());
     assert_eq!(lines[0]["data"]["x"], 1);
-}
-
-#[test]
-fn feed_file_tty_emits_complete_json_messages() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-    let input_file = temp.path().join("events.jsonl");
-    std::fs::write(&input_file, "{\"x\":1}\n{\"x\":2}\n").expect("write input");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let output = cmd_tty(&[
-        "--color",
-        "never",
-        "--dir",
-        pool_dir.to_str().unwrap(),
-        "feed",
-        "demo",
-        "--file",
-        input_file.to_str().unwrap(),
-        "--input-format",
-        "json",
-        "--format",
-        "json",
-    ]);
-    assert!(output.status.success());
-    let text = sanitize_tty_text(&output.stdout);
-    // macOS `script` writes a literal terminal EOF marker before the child output.
-    // Remove only that leading marker so valid message data remains untouched.
-    let text = text.strip_prefix("^D").unwrap_or(&text);
-    let messages = parse_json_lines(text.as_bytes());
-    assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0]["data"]["x"], 1);
-    assert_eq!(messages[1]["data"]["x"], 2);
 }
 
 #[test]
@@ -561,22 +448,10 @@ fn emit_missing_pool_hint_suggests_create() {
 }
 
 #[test]
-fn emit_remote_url_happy_path_appends_message() {
+fn remote_feed_creates_missing_pool_and_copies_a_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
+    std::fs::create_dir(&pool_dir).unwrap();
 
     let server = ServeProcess::start(&pool_dir);
     let access_home = temp.path().join("access-home");
@@ -603,6 +478,7 @@ fn emit_remote_url_happy_path_appends_message() {
             pool_dir.to_str().unwrap(),
             "feed",
             &pool_url,
+            "--create",
             "{\"x\":1}",
             "--tag",
             "ping",
@@ -674,63 +550,6 @@ fn emit_remote_url_rejects_trailing_slash() {
 }
 
 #[test]
-fn emit_remote_url_rejects_create_flag() {
-    let output = cmd()
-        .args([
-            "feed",
-            "http://localhost:9170/demo",
-            "--create",
-            "{\"x\":1}",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("feed");
-    assert!(!output.status.success());
-    let err = parse_error_json(&output.stderr);
-    assert_eq!(
-        err.get("error")
-            .and_then(|v| v.get("kind"))
-            .and_then(|v| v.as_str()),
-        Some("Usage")
-    );
-    let message = err
-        .get("error")
-        .and_then(|v| v.get("message"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    assert!(message.contains("does not support --create"));
-    let hint = err
-        .get("error")
-        .and_then(|v| v.get("hint"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    assert!(hint.contains("Create the pool on the server with pool create."));
-}
-
-#[test]
-fn emit_remote_create_rejected() {
-    let output = cmd()
-        .args([
-            "feed",
-            "http://localhost:9170/demo",
-            "--create",
-            "{\"x\":1}",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("feed");
-    assert_eq!(output.status.code(), Some(2));
-
-    let err = parse_error_json(&output.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
-    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(message.contains("does not support --create"));
-    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("Create the pool on the server with pool create."));
-}
-
-#[test]
 fn feed_streams_json_values_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -783,7 +602,7 @@ fn feed_streams_json_values_from_stdin() {
             pool_dir.to_str().unwrap(),
             "follow",
             "testpool",
-            "--tail",
+            "--last",
             "2",
             "--format",
             "json",
@@ -819,23 +638,27 @@ fn create_fixture_pool(pool_dir: &Path, name: &str) -> Pool {
 }
 
 fn append_fixture(pool: &mut Pool) -> (Vec<u8>, String) {
-    let tags = vec!["fixture".to_string(), "binary".to_string()];
-    let message = pool
-        .append_json(
-            &json!({"text": "before\0after\nnext line", "nested": {"value": 7}}),
-            &tags,
+    let view = plasmite::view::MessageView::encode(
+        &json!({"text": "before\0after\nnext line", "nested": {"value": 7}}),
+        &["fixture", "binary"],
+    )
+    .unwrap();
+    let seq = pool
+        .append_with_options(
+            view.bytes(),
             AppendOptions::new(FIXTURE_TIMESTAMP_NS, Durability::Fast),
         )
         .expect("append fixture");
-    assert_eq!(message.seq, 1);
-    let bytes = pool.get_lite3(message.seq).expect("fixture Lite3").payload;
-    (bytes, message.time)
+    assert_eq!(seq, 1);
+    let bytes = pool.get(seq).expect("fixture Lite3").payload;
+    let message = plasmite::api::Message::from_lite3(seq, FIXTURE_TIMESTAMP_NS, &bytes).unwrap();
+    (bytes, message.time_rfc3339())
 }
 
 fn append_marker(pool: &mut Pool) {
-    pool.append_json(
-        &json!({"marker": true}),
-        &[],
+    let view = plasmite::view::MessageView::encode(&json!({"marker": true}), &[]).unwrap();
+    pool.append_with_options(
+        view.bytes(),
         AppendOptions::new(FIXTURE_TIMESTAMP_NS - 1, Durability::Fast),
     )
     .expect("append marker");
@@ -903,11 +726,10 @@ fn feed_lite3_file_preserves_bytes_tags_and_assigns_fresh_identity() {
             "target",
             "--input-format",
             "lite3-raw",
-            "--file",
-            input_file.to_str().expect("input path"),
             "--format",
             "json",
         ])
+        .stdin(File::open(&input_file).expect("open input"))
         .output()
         .expect("feed Lite3 file");
     assert!(
@@ -932,7 +754,7 @@ fn feed_lite3_file_preserves_bytes_tags_and_assigns_fresh_identity() {
 }
 
 #[test]
-fn feed_lite3_file_dash_reads_one_binary_document_from_stdin() {
+fn feed_lite3_reads_one_binary_document_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     let mut source = create_fixture_pool(&pool_dir, "source");
@@ -948,8 +770,6 @@ fn feed_lite3_file_dash_reads_one_binary_document_from_stdin() {
             "target",
             "--input-format",
             "lite3-raw",
-            "--file",
-            "-",
             "--format",
             "json",
         ])
@@ -1068,11 +888,10 @@ fn http_fetch_and_feed_match_local_lite3_bytes() {
             &target_url,
             "--input-format",
             "lite3-raw",
-            "--file",
-            input_file.to_str().expect("input path"),
             "--format",
             "json",
         ])
+        .stdin(File::open(&input_file).expect("open input"))
         .output()
         .expect("HTTP feed Lite3");
     assert!(
@@ -1102,7 +921,6 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
     let input_file = temp.path().join("input.lite3");
     std::fs::write(&input_file, b"not needed").expect("write input");
     let directory = pool_dir.to_str().expect("pool directory");
-    let input_path = input_file.to_str().expect("input path");
 
     let cases: [(&str, &[&str]); 3] = [
         (
@@ -1124,8 +942,6 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
                 "lite3-raw",
                 "--tag",
                 "extra",
-                "--file",
-                input_path,
                 "--format",
                 "json",
             ],
@@ -1138,8 +954,6 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
                 "lite3-raw",
                 "--errors",
                 "skip",
-                "--file",
-                input_path,
                 "--format",
                 "json",
             ],
@@ -1149,6 +963,7 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
         let output = cmd()
             .args(["--dir", directory, "feed", name])
             .args(args)
+            .stdin(File::open(&input_file).unwrap())
             .output()
             .expect("invalid Lite3 feed");
         assert_eq!(
@@ -1179,8 +994,6 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
             "lite3-raw",
             "--tag",
             "extra",
-            "--file",
-            input_path,
             "--format",
             "json",
         ])
@@ -1193,35 +1006,6 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
         !pool_dir.exists(),
         "invalid flags opened or created the pool directory"
     );
-}
-
-#[test]
-fn remote_binary_create_rejects_before_waiting_for_stdin() {
-    let mut child = cmd()
-        .args([
-            "feed",
-            "http://127.0.0.1:1/unused",
-            "--create",
-            "--input-format",
-            "lite3-raw",
-            "--format",
-            "json",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("invalid remote create");
-    let status = wait_within(
-        &mut child,
-        Duration::from_secs(2),
-        "remote --create validation",
-    );
-    assert_eq!(status.code(), Some(2));
-    let output = child.wait_with_output().expect("error output");
-    assert!(output.stdout.is_empty());
-    let error = parse_error_json(&output.stderr);
-    assert_eq!(error["error"]["kind"], "Usage");
 }
 
 #[test]
@@ -1251,9 +1035,8 @@ fn feed_lite3_raw_allows_empty_stream_and_rejects_invalid_payloads() {
             "target",
             "--input-format",
             "lite3-raw",
-            "--file",
-            empty_file.to_str().expect("empty path"),
         ])
+        .stdin(File::open(&empty_file).expect("open input"))
         .output()
         .expect("feed empty stream");
     assert!(
@@ -1280,11 +1063,10 @@ fn feed_lite3_raw_allows_empty_stream_and_rejects_invalid_payloads() {
                 "target",
                 "--input-format",
                 "lite3-raw",
-                "--file",
-                input_file.to_str().expect("input path"),
                 "--format",
                 "json",
             ])
+            .stdin(File::open(&input_file).expect("open input"))
             .output()
             .expect("feed malformed Lite3");
         assert!(!output.status.success(), "accepted {name} Lite3 payload");
@@ -1300,11 +1082,10 @@ fn feed_lite3_raw_allows_empty_stream_and_rejects_invalid_payloads() {
             "target",
             "--input-format",
             "lite3-raw",
-            "--file",
-            input_file.to_str().expect("input path"),
             "--format",
             "json",
         ])
+        .stdin(File::open(&input_file).expect("open input"))
         .output()
         .expect("feed valid Lite3");
     assert!(
@@ -1321,59 +1102,6 @@ fn feed_lite3_raw_allows_empty_stream_and_rejects_invalid_payloads() {
     let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3-raw"]);
     assert!(raw.status.success());
     assert_eq!(raw.stdout, payload);
-}
-
-#[test]
-fn create_size_implies_creation_for_feed_and_tap_without_changing_existing_pools() {
-    for family in ["feed", "tap"] {
-        let temp = tempfile::tempdir().unwrap();
-        let pool_path = temp.path().join("sized.plasmite");
-        let run = |pool: &str, size: Option<&str>| {
-            let mut command = cmd();
-            command.arg("--dir").arg(temp.path()).args([family, pool]);
-            if let Some(size) = size {
-                command.args(["--create-size", size]);
-            }
-            if family == "feed" {
-                command.arg("{\"value\":1}");
-            } else {
-                command.args([
-                    "--quiet",
-                    "--",
-                    env!("CARGO_BIN_EXE_plasmite"),
-                    "version",
-                    "--format",
-                    "json",
-                ]);
-            }
-            command.output().unwrap()
-        };
-        let missing = run("missing", None);
-        assert_eq!(missing.status.code(), Some(3));
-        assert!(!temp.path().join("missing.plasmite").exists());
-        let invalid = run("invalid-size", Some("bad"));
-        assert_eq!(invalid.status.code(), Some(2));
-        assert!(!temp.path().join("invalid-size.plasmite").exists());
-        let created = run("sized", Some("64K"));
-        assert!(
-            created.status.success(),
-            "{}",
-            String::from_utf8_lossy(&created.stderr)
-        );
-        assert_eq!(std::fs::metadata(&pool_path).unwrap().len(), 65536);
-        let original = Pool::open(&pool_path).unwrap().get_message(1).unwrap();
-        let reopened = run("sized", Some("1M"));
-        assert!(
-            reopened.status.success(),
-            "{}",
-            String::from_utf8_lossy(&reopened.stderr)
-        );
-        assert_eq!(std::fs::metadata(&pool_path).unwrap().len(), 65536);
-        let retained = Pool::open(&pool_path).unwrap().get_message(1).unwrap();
-        assert_eq!(retained.seq, original.seq);
-        assert_eq!(retained.time, original.time);
-        assert_eq!(retained.data, original.data);
-    }
 }
 
 #[test]

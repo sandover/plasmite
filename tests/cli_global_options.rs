@@ -151,36 +151,3 @@ fn structured_errors_disable_forced_color() {
     let _ = parse_error_json(&output.stderr);
     assert!(!output.stderr.contains(&0x1b));
 }
-
-#[cfg(unix)]
-#[test]
-fn tap_separator_preserves_child_global_looking_arguments() {
-    let temp = tempfile::tempdir().unwrap();
-    let output = cmd()
-        .args([
-            "tap",
-            "demo",
-            "--create",
-            "--dir",
-            temp.path().to_str().unwrap(),
-            "--",
-            "printf",
-            "%s\\n",
-            "--dir",
-            "--color",
-            "--help",
-            "--version",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "--dir\n--color\n--help\n--version\n--json\n"
-    );
-}

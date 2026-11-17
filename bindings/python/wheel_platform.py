@@ -50,7 +50,7 @@ def macos_platform_tag(native_dir: Path, original_tag: str, extension_dir: Path 
     if match is None:
         raise ValueError(f'Invalid macOS wheel platform: {original_tag}')
     minimum = (int(match[1]), int(match[2]), 0)
-    binaries = [native_dir / name for name in ('libplasmite.dylib', 'plasmite')]
+    binaries = [native_dir / name for name in ('libplasmite.2.dylib', 'plasmite')]
     if extension_dir is not None:
         binaries.extend(extension_dir.glob('_views_native*.so'))
     native = [macho_platform(p.read_bytes()) for p in binaries if p.is_file()]

@@ -2,7 +2,7 @@
 
 This document defines the public API contract across bindings. The source checkout
 includes breaking changes that await the next major release; see the
-[next major upgrade guide](../../../docs/record/upgrading-next-major.md).
+[2.0 upgrade guide](../../../docs/record/upgrading-2.0.md).
 Published 1.x APIs retain their release-specific contract.
 The historical path is retained; Rust source-level breaking changes are
 documented in [the upgrade guide](../../../docs/record/upgrading-1.0.md).

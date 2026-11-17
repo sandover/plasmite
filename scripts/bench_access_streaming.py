@@ -25,7 +25,7 @@ def main():
     refs = {"local_cli_stream": args.pool, "local_http_cli_stream": args.local_server + "/" + args.pool,
             "https_cli_stream": args.server + "/" + args.pool}
     result = {"versions": {"plasmite": subprocess.check_output([args.binary, "--version"], text=True).strip()}, "configuration": vars(args) | {"output": str(args.output), "sizes": [512, 4096],
-        "timing": "One CLI process per batch, including process startup, JSON input/output, and pipe transfer. Read uses follow --tail N --no-follow; this reads retained history rather than N exact-fetch requests."}, "runs": []}
+        "timing": "One CLI process per batch, including process startup, JSON input/output, and pipe transfer. Read uses fetch --last N; this reads retained history rather than N exact-fetch requests."}, "runs": []}
     for size in [512, 4096]:
         for repeat in range(args.repeats):
             lanes = list(refs)
@@ -43,7 +43,7 @@ def main():
                 if len(sequences) != len(data) or len(set(sequences)) != len(data):
                     raise RuntimeError("stream append count mismatch")
                 started = time.perf_counter_ns()
-                read = subprocess.run([*command, "--format", "json", "follow", refs[lane], "--tail", str(args.messages), "--no-follow"],
+                read = subprocess.run([*command, "--format", "json", "fetch", refs[lane], "--last", str(args.messages)],
                     capture_output=True, text=True, encoding="utf-8", check=True, timeout=60)
                 read_ns = time.perf_counter_ns() - started
                 messages = [json.loads(line) for line in read.stdout.splitlines()]

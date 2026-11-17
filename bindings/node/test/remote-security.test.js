@@ -59,7 +59,7 @@ test("HTTP remains available without credentials and with loopback credentials",
 
 test("HTTPS bearer requests use the requested origin and reject redirects", async () => {
   await withFetchStub((url, options) => {
-    assert.equal(url, "https://service.example:9700/v0/pools");
+    assert.equal(url, "https://service.example:9700/v2/pools");
     assert.equal(options.redirect, "manual");
     assert.equal(options.headers.Authorization, "Bearer secret");
     return new Response(null, {
@@ -116,4 +116,35 @@ test("HTTP errors retain exact uint64 seq and offset tokens", async () => {
     });
   }
   assert.equal(new RemoteError({ error: { kind: "Io" } }, 500).seq, undefined);
+});
+
+test("2.0 fetch opens eagerly and keeps its bound through cutoff", async () => {
+  const { RemotePool } = require("../remote");
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async url => {
+    const request = new URL(url);
+    calls.push(request);
+    const message = (seq) => `{"seq":${seq},"time":"2026-11-17T01:00:00.123456789Z","meta":{"tags":["keep"]},"data":{}}\n`;
+    return new Response(calls.length === 1
+      ? message(1) + '{"type":"cutoff","next_seq":2,"until":3}\n'
+      : message(3) + '{"type":"complete"}\n');
+  };
+  try {
+    const pool = new RemotePool(new RemoteClient("http://localhost"), "events");
+    const read = await pool.fetch({ last: 3, tags: ["keep"] });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].pathname, "/v2/pools/events/fetch");
+    assert.equal(calls[0].searchParams.get("last"), "3");
+    const first = (await read.next()).value;
+    assert.equal(first.seq, 1n);
+    assert.equal(first.time % 1_000_000_000n, 123456789n);
+    assert.equal((await read.next()).value.seq, 3n);
+    assert.equal((await read.next()).done, true);
+    assert.equal(calls[1].searchParams.get("since"), "2");
+    assert.equal(calls[1].searchParams.get("until"), "3");
+    assert.equal(calls[1].searchParams.get("tag"), "keep");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

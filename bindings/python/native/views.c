@@ -455,7 +455,7 @@ static PyObject *snapshot_repr(Snapshot *self) {
                                 (unsigned long long)view_seq(self->view));
 }
 static PyGetSetDef snapshot_getset[] = {{"seq", (getter)snapshot_seq, NULL, NULL, NULL},
-                                        {"timestamp_ns", (getter)snapshot_time, NULL, NULL, NULL},
+                                        {"time", (getter)snapshot_time, NULL, NULL, NULL},
                                         {"data", (getter)snapshot_data, NULL, NULL, NULL},
                                         {"_root", (getter)snapshot_root, NULL, NULL, NULL},
                                         {NULL}};
@@ -898,11 +898,11 @@ static PyObject *configure(PyObject *module, PyObject *args) {
         }                                                                                          \
         memcpy(&field, &symbol, sizeof(field));                                                    \
     } while (0)
-    LOAD(get_view, "plsm_pool_get_view");
+    LOAD(get_view, "plsm_internal_pool_get_view");
     LOAD(from_bytes, "plsm_view_from_lite3");
     LOAD(release_view, "plsm_view_release");
     LOAD(view_seq, "plsm_view_seq");
-    LOAD(view_time, "plsm_view_timestamp_ns");
+    LOAD(view_time, "plsm_view_time");
     LOAD(view_root, "plsm_view_root");
     LOAD(view_data, "plsm_view_data");
     LOAD(view_bytes, "plsm_view_bytes");
@@ -917,10 +917,10 @@ static PyObject *configure(PyObject *module, PyObject *args) {
     LOAD(buf_free, "plsm_buf_free");
     LOAD(builder_new, "plsm_builder_new");
     LOAD(builder_put, "plsm_builder_put");
-    LOAD(append_builder, "plsm_pool_append_builder");
+    LOAD(append_builder, "plsm_pool_feed_builder_view");
     LOAD(builder_free, "plsm_builder_free");
     LOAD(copy_value, "plsm_builder_copy_value");
-    LOAD(append_owner, "plsm_pool_append_view");
+    LOAD(append_owner, "plsm_pool_feed_view");
     LOAD(stream_next, "plsm_view_stream_next");
     configured_interpreter = PyInterpreterState_Get();
     configured_handle = (uintptr_t)address;

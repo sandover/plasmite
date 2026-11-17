@@ -8,21 +8,15 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/sandover/plasmite/bindings/go/local.svg)](https://pkg.go.dev/github.com/sandover/plasmite/bindings/go/local)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Easy interprocess communication.**
+**Plasmite is a pipe that remembers.** Programs send and receive JSON messages
+through a bounded file called a pool. The pool keeps recent messages after
+writers exit. When it fills, new messages overwrite the oldest ones.
 
-What would it take to make IPC pleasant and predictable?
-
-- Reading and writing processes come and go... so **message channels should outlast them**
-- Machines crash... so **channels should persist on disk**
-- Disks are finite... so **channels should be bounded in size**
-- Message brokers bring complexity and ceremony... so for local IPC, **don't require a broker**
-- Observability matters... so **messages must be inspectable**
-- Schemas are great... but **schemas should be optional**
-- Latency matters... so **IPC should be fast**
-
-So, there's **Plasmite**.
-
-Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config. Readers mmap the pool file and take owned message snapshots, and payloads use [Lite3](https://github.com/fastserial/lite3), a binary JSON encoding.
+Use `feed` to write a message, `follow` to wait for new messages, and `fetch`
+to read retained history and exit. Both reads accept a starting position,
+such as a sequence, a time, or the last few records. The CLI and the Rust,
+Python, Go, Node and C libraries use the same model. Local pools work without
+a server.
 
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
 clients and browsers connect with an access key. A local MCP process works
@@ -47,7 +41,7 @@ Follow [Share your first pool](docs/record/serving.md#share-your-first-pool).
     <td valign="bottom">
     <br/>
       <br/><b>Bob starts watching</b><br/>
-      <code>pls --dir ./pools follow channel --tail 1</code>
+      <code>pls --dir ./pools follow channel --last 1 --one</code>
       <br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
       <code>{ "data": {"from": "A", "msg": "hello world"}, ... }</code>
@@ -111,7 +105,7 @@ Carol sends and watches:
 
 ```bash
 echo '{"from":"C","msg":"hello"}' | pls feed udp://alice.example.test:9702/channel
-pls follow udp://alice.example.test:9702/channel --tail 1
+pls follow udp://alice.example.test:9702/channel --last 1
 ```
 
 UDP is best-effort, with no authentication, encryption, or stored-write acknowledgement. Use it on loopback or a separately protected network. See the [UDP guide](docs/cli.md).
@@ -121,11 +115,11 @@ UDP is best-effort, with no authentication, encryption, or stored-write acknowle
 Ordinary JSON objects go straight into `feed`. Complete Plasmite messages keep their data and tags when piped to another pool, with a new sequence and time:
 
 ```bash
-pls --dir ./pools follow channel --no-follow | pls --dir ./pools feed copy --create-size 1M
+pls --dir ./pools fetch channel | pls --dir ./pools feed copy --create
 pls --dir ./pools fetch channel 1 --format yaml | pls --dir ./pools feed copy
 ```
 
-`--create-size` creates a missing pool; it never resizes or recreates an existing pool. `follow --no-follow` reads all retained messages and exits.
+`--create` opens an existing pool or creates it at the default size. `fetch` reads the retained messages and exits.
 
 YAML input and output use the same values as JSON. `--format yaml` selects YAML output; marked YAML input is detected automatically.
 
@@ -237,10 +231,9 @@ for message input defaults and output formats, and the
 | | |
 |---|---|
 | `feed` *pool* *object* | Send a message |
-| `follow` *pool* | Follow messages |
-| `fetch` *pool* *seq* | Fetch one message by sequence number |
+| `follow` *pool* | Wait for new messages. Use `--since` or `--last` to start in history. |
+| `fetch` *pool* [*seq*] | Read retained history or fetch one message by sequence. |
 | `duplex` *pool* | 2-way session with a pool |
-| `tap` *pool* `--` *command…* | Capture a process's output |
 
 **Pool management**
 
@@ -287,7 +280,7 @@ A pool is a single `.plasmite` file containing a persistent ring buffer:
 - **Bounded retention** — old messages overwritten when full (default 1 MB, configurable)
 - **Committed frames** keep unfinished writes out of readers’ results; choose flush durability when writes must reach disk before success
 
-Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See [Live Event Stream](docs/cookbook.md#live-event-stream).
+Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Pass `--tag` once per required tag, or pipe to `jq` to filter by data fields. See [Live Event Stream](docs/cookbook.md#live-event-stream).
 
 Default pool directory: `~/.plasmite/pools/`.
 

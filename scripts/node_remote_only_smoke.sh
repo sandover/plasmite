@@ -2,7 +2,7 @@
 # Purpose: Validate remote-only behavior when npm tarball has no native payload.
 # Exports: N/A (script entry point).
 # Role: Ensures RemoteClient remains usable without native/{platform} assets.
-# Invariants: Packages with native dirs removed and skips prepack scripts.
+# Invariants: Packages from a staging directory without native assets.
 # Invariants: Client constructor and CLI must fail with a helpful native message.
 # Notes: Uses workspace-local temp dirs under .scratch/.
 
@@ -13,17 +13,8 @@ NODE_DIR="$ROOT/bindings/node"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/node-remote-only-smoke.XXXXXX")"
 
-backup_dir="$WORKDIR/native-backup"
-if [[ -d "$NODE_DIR/native" ]]; then
-  cp -R "$NODE_DIR/native" "$backup_dir"
-fi
-
-restore_native() {
+cleanup() {
   local status=$?
-  rm -rf "$NODE_DIR/native"
-  if [[ -d "$backup_dir" ]]; then
-    cp -R "$backup_dir" "$NODE_DIR/native"
-  fi
   if [[ "$status" -eq 0 ]]; then
     rm -rf "$WORKDIR"
   else
@@ -31,16 +22,30 @@ restore_native() {
   fi
   return "$status"
 }
-trap restore_native EXIT
-
-rm -rf "$NODE_DIR/native/linux-x64" "$NODE_DIR/native/linux-arm64" "$NODE_DIR/native/darwin-x64" "$NODE_DIR/native/darwin-arm64" "$NODE_DIR/native/win32-x64"
+trap cleanup EXIT
 
 (
   cd "$NODE_DIR"
+  npm pack --ignore-scripts --dry-run --json > "$WORKDIR/manifest.json"
+)
+stage="$WORKDIR/package"
+node - "$NODE_DIR" "$stage" "$WORKDIR/manifest.json" <<'JS'
+const { copyFileSync, mkdirSync, readFileSync } = require('node:fs');
+const { dirname, join } = require('node:path');
+const [source, stage, manifest] = process.argv.slice(2);
+for (const entry of JSON.parse(readFileSync(manifest, 'utf8'))[0].files) {
+  if (entry.path.startsWith('native/')) continue;
+  const target = join(stage, entry.path);
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(join(source, entry.path), target);
+}
+JS
+(
+  cd "$stage"
   npm pack --ignore-scripts >/dev/null
 )
 
-TARBALL="$(cd "$NODE_DIR" && ls -1 plasmite-*.tgz | tail -n 1)"
+TARBALL="$(cd "$stage" && ls -1 plasmite-*.tgz | tail -n 1)"
 if [[ -z "$TARBALL" ]]; then
   echo "failed to produce npm tarball for remote-only smoke"
   exit 1
@@ -50,7 +55,7 @@ mkdir -p "$WORKDIR/app"
 (
   cd "$WORKDIR/app"
   npm init -y >/dev/null
-  npm install "$NODE_DIR/$TARBALL" >/dev/null
+  npm install "$stage/$TARBALL" >/dev/null
   node -e 'const { RemoteClient } = require("plasmite"); const r = new RemoteClient("http://127.0.0.1:9700"); if (!r) { throw new Error("missing remote client"); }'
   node -e 'const p = require("plasmite"); let ok = false; try { new p.Client("./x"); } catch (e) { ok = /native addon is unavailable|unsupported platform/i.test(String(e.message)); } if (!ok) { process.exit(1); }'
   set +e
@@ -67,5 +72,4 @@ mkdir -p "$WORKDIR/app"
   fi
 )
 
-rm -f "$NODE_DIR/$TARBALL"
 echo "[smoke] node remote-only package behavior ok"

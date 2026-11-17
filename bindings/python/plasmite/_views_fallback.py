@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from threading import Lock
 
 from . import _LIB as lib
-from . import _take_error, plsm_buf_t, plsm_error_t, plsm_pool_t, plsm_stream_t
+from . import _take_error, _tag_array, plsm_buf_t, plsm_error_t, plsm_feed_options_t, plsm_pool_t, plsm_stream_t
 
 
 class Ref(c.Structure):
@@ -52,7 +52,7 @@ def _configure_unlocked():
     err = c.POINTER(c.POINTER(plsm_error_t))
     owner = c.POINTER(c.c_void_p)
     signatures = {
-        "plsm_pool_get_view": (
+        "plsm_internal_pool_get_view": (
             [c.POINTER(plsm_pool_t), c.c_uint64, owner, err],
             c.c_int,
         ),
@@ -72,7 +72,7 @@ def _configure_unlocked():
             ],
             c.c_int,
         ),
-        "plsm_pool_append_view": (
+        "plsm_pool_feed_view": (
             [c.POINTER(plsm_pool_t), c.c_void_p, c.c_uint32, owner, err],
             c.c_int,
         ),
@@ -82,7 +82,7 @@ def _configure_unlocked():
         ),
         "plsm_view_release": ([c.c_void_p], None),
         "plsm_view_seq": ([c.c_void_p], c.c_uint64),
-        "plsm_view_timestamp_ns": ([c.c_void_p], c.c_uint64),
+        "plsm_view_time": ([c.c_void_p], c.c_uint64),
         "plsm_view_root": ([c.c_void_p], Ref),
         "plsm_view_data": ([c.c_void_p], Ref),
         "plsm_view_bytes": ([c.c_void_p, c.POINTER(c.c_size_t)], c.c_void_p),
@@ -100,14 +100,12 @@ def _configure_unlocked():
     }
     signatures.update(
         {
-            "plsm_pool_append_view_json": (
+            "plsm_pool_feed_json_view": (
                 [
                     c.POINTER(plsm_pool_t),
                     c.c_char_p,
                     c.c_size_t,
-                    c.POINTER(c.c_char_p),
-                    c.c_size_t,
-                    c.c_uint32,
+                    c.POINTER(plsm_feed_options_t),
                     owner,
                     err,
                 ],
@@ -129,7 +127,7 @@ def _configure_unlocked():
                 ],
                 c.c_int,
             ),
-            "plsm_pool_append_builder": (
+            "plsm_pool_feed_builder_view": (
                 [c.POINTER(plsm_pool_t), c.c_void_p, c.c_uint32, owner, err],
                 c.c_int,
             ),
@@ -228,8 +226,8 @@ class MessageView(bytes):
         return lib.plsm_view_seq(self._ptr)
 
     @property
-    def timestamp_ns(self):
-        return lib.plsm_view_timestamp_ns(self._ptr)
+    def time(self):
+        return lib.plsm_view_time(self._ptr)
 
     @property
     def data(self):
@@ -365,7 +363,7 @@ def get(address, seq):
     _configure()
     out = c.c_void_p()
     _call(
-        lib.plsm_pool_get_view,
+        lib.plsm_internal_pool_get_view,
         c.cast(address, c.POINTER(plsm_pool_t)),
         seq,
         c.byref(out),
@@ -417,7 +415,7 @@ def append(address, data, tags, durability):
     pool = c.cast(address, c.POINTER(plsm_pool_t))
     out = c.c_void_p()
     if type(data) is MessageView and tags is None:
-        _call(lib.plsm_pool_append_view, pool, data._ptr, durability, c.byref(out))
+        _call(lib.plsm_pool_feed_view, pool, data._ptr, durability, c.byref(out))
         return MessageView(out)
     if type(data) is MessageView:
         data = data.data
@@ -434,22 +432,21 @@ def append(address, data, tags, durability):
     _configure()
     pool = c.cast(address, c.POINTER(plsm_pool_t))
     out = c.c_void_p()
-    if not binary[0] and all(b"\0" not in tag for tag in encoded_tags):
+    if not binary[0]:
         # Bulk JSON avoids one ctypes call per field on compatibility runtimes.
         import json
 
         payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
             "utf-8"
         )
-        tag_array = (c.c_char_p * len(tags))(*encoded_tags)
+        tag_array, encoded = _tag_array(tags)
+        options = plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability, tag_array, len(encoded))
         _call(
-            lib.plsm_pool_append_view_json,
+            lib.plsm_pool_feed_json_view,
             pool,
             payload,
             len(payload),
-            tag_array,
-            len(tags),
-            durability,
+            c.byref(options),
             c.byref(out),
         )
         return MessageView(out)
@@ -465,7 +462,7 @@ def append(address, data, tags, durability):
             )
         else:
             _write_container(builder, root.value, data)
-        _call(lib.plsm_pool_append_builder, pool, builder, durability, c.byref(out))
+        _call(lib.plsm_pool_feed_builder_view, pool, builder, durability, c.byref(out))
         return MessageView(out)
     finally:
         lib.plsm_builder_free(builder)

@@ -1,17 +1,15 @@
-const { followStart } = require("./follow");
 /*
 Purpose: Provide an HTTP/JSON RemoteClient for the Node binding.
 Key Exports: RemoteClient, RemotePool, RemoteError.
-Role: JS-side remote access that mirrors the v0 server protocol.
-Invariants: Uses JSON request/response envelopes from spec/remote/v0.
+Role: JavaScript client for Plasmite HTTP API 2.0.
+Invariants: Uses the JSON and binary streams defined in spec/v2.
 Invariants: Base URL must be http(s) without a path.
-Invariants: Tail streams are JSONL and exposed as async iterables.
+Invariants: Readers expose async iteration and propagate terminal records.
 */
 
-const { Readable } = require("node:stream");
-const readline = require("node:readline");
-const { messageFromEnvelope, parseMessageJson, normalizeMessageSeq } = require("./message");
+const { Message, messageFromEnvelope, parseMessageJson, normalizeMessageSeq, timeText, parsePoolInfo } = require("./message");
 const { ERROR_KIND_VALUES, mapDurability, mapErrorKind } = require("./mappings");
+const { readStart, normalizeWait } = require("./follow");
 const MAX_FRAME_BYTES = 256 * 1024 * 1024;
 const LITE3_TYPE = "application/x-plasmite-lite3";
 
@@ -33,6 +31,8 @@ class RemoteError extends Error {
     this.path = error && error.path ? error.path : undefined;
     this.seq = error && error.seq !== undefined ? normalizeMessageSeq(error.seq) : undefined;
     this.offset = error && error.offset !== undefined ? normalizeMessageSeq(error.offset) : undefined;
+    this.missing = error?.missing === undefined ? undefined : normalizeMessageSeq(error.missing);
+    this.nextSeq = error?.next_seq === undefined ? undefined : normalizeMessageSeq(error.next_seq);
   }
 }
 
@@ -64,11 +64,11 @@ class RemoteClient {
    * @param {number|bigint} sizeBytes
    * @returns {Promise<unknown>}
    */
-  async createPool(pool, sizeBytes) {
+  async createPool(pool, sizeBytes = 1024 * 1024) {
     const payload = { pool, size_bytes: Number(sizeBytes) };
-    const url = buildUrl(this.baseUrl, ["v0", "pools"]);
-    const data = await this._requestJson("POST", url, payload);
-    return data.pool;
+    const url = buildUrl(this.baseUrl, ["v2", "pools"]);
+    await this._requestJson("POST", url, payload, parsePoolInfo);
+    return new RemotePool(this, pool);
   }
 
   /**
@@ -76,9 +76,9 @@ class RemoteClient {
    * @param {string} pool
    * @returns {Promise<RemotePool>}
    */
-  async openPool(pool) {
-    const payload = { pool };
-    const url = buildUrl(this.baseUrl, ["v0", "pools", "open"]);
+  async openPool(pool, { create = false } = {}) {
+    const payload = { create };
+    const url = buildUrl(this.baseUrl, ["v2", "pools", pool, "open"]);
     await this._requestJson("POST", url, payload);
     return new RemotePool(this, pool);
   }
@@ -89,8 +89,8 @@ class RemoteClient {
    * @returns {Promise<unknown>}
    */
   async poolInfo(pool) {
-    const url = buildUrl(this.baseUrl, ["v0", "pools", pool, "info"]);
-    const data = await this._requestJson("GET", url, null);
+    const url = buildUrl(this.baseUrl, ["v2", "pools", pool]);
+    const data = await this._requestJson("GET", url, null, parsePoolInfo);
     return data.pool;
   }
 
@@ -99,8 +99,8 @@ class RemoteClient {
    * @returns {Promise<unknown[]>}
    */
   async listPools() {
-    const url = buildUrl(this.baseUrl, ["v0", "pools"]);
-    const data = await this._requestJson("GET", url, null);
+    const url = buildUrl(this.baseUrl, ["v2", "pools"]);
+    const data = await this._requestJson("GET", url, null, parsePoolInfo);
     return data.pools;
   }
 
@@ -110,11 +110,11 @@ class RemoteClient {
    * @returns {Promise<void>}
    */
   async deletePool(pool) {
-    const url = buildUrl(this.baseUrl, ["v0", "pools", pool]);
+    const url = buildUrl(this.baseUrl, ["v2", "pools", pool]);
     await this._requestJson("DELETE", url, null);
   }
 
-  async _requestJson(method, url, body) {
+  async _requestJson(method, url, body, decode = text => parseMessageJson(text, "message")) {
     let payload;
     let contentType;
     if (method !== "GET" && method !== "DELETE") {
@@ -125,7 +125,7 @@ class RemoteClient {
     if (response.status === 204) {
       return null;
     }
-    return parseMessageJson(await response.text(), "message");
+    return decode(await response.text());
   }
 
   async _request(method, url, { body, contentType, accept = "application/json", signal } = {}) {
@@ -146,6 +146,11 @@ class RemoteClient {
     rejectRedirect(response);
 
     if (!response.ok) {
+      if (response.status === 404 && url.pathname.startsWith("/v2/") &&
+          response.headers.get("plasmite-version") !== "2") {
+        await response.body?.cancel().catch(() => {});
+        throw new RemoteError({ kind: "Usage", message: "Server requires upgrade to Plasmite 2" }, 404);
+      }
       throw await parseRemoteError(response);
     }
 
@@ -176,195 +181,257 @@ class RemotePool {
     return this.pool;
   }
 
-  /**
-   * Append message data to the remote pool.
-   * @param {unknown} data
-   * @param {string[]} [tags]
-   * @param {number|string} [durability]
-   * @returns {Promise<import("./message").Message>}
-   */
-  async append(data, tags = [], durability = "fast") {
-    const payload = { data, tags, durability: mapDurability(durability) };
-    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append"]);
+  info() {
+    return this.client.poolInfo(this.pool);
+  }
+
+  async feed(data, { tags, durability = "fast" } = {}) {
+    if (data instanceof Message) {
+      if (tags !== undefined) throw new RemoteError({ kind: "Usage", message: "cannot supply tags when forwarding a message" }, 400);
+      tags = data.tags;
+      data = data.data;
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new RemoteError({ kind: "Usage", message: "feed requires an object" }, 400);
+    }
+    const url = buildUrl(this.client.baseUrl, ["v2", "pools", this.pool, "feed"]);
+    const payload = { data, tags: tags ?? [], durability: mapDurability(durability) };
     const response = await this.client._requestJson("POST", url, payload);
     return messageFromEnvelope(response.message);
   }
 
-  /**
-   * Get message by sequence from remote pool.
-   * @param {number|bigint} seq
-   * @returns {Promise<import("./message").Message>}
-   */
-  async get(seq) {
-    const url = buildUrl(this.client.baseUrl, [
-      "v0",
-      "pools",
-      this.pool,
-      "messages",
-      String(seq),
-    ]);
-    const response = await this.client._requestJson("GET", url, null);
-    return messageFromEnvelope(response.message);
+  follow(options = {}) {
+    return openV2Reader(this, true, options);
   }
 
-  /** Encode once and retain the sent data with the server's committed identity. */
-  async appendView(data, tags, durability = "fast") {
+  followLite3(options = {}) {
+    return openV2Reader(this, true, options, "lite3");
+  }
+
+  fetch(options = {}) {
+    return openV2Reader(this, false, options);
+  }
+
+  fetchLite3(options = {}) {
+    return openV2Reader(this, false, options, "lite3");
+  }
+
+  followView(options = {}) {
+    return openV2Reader(this, true, options, "view");
+  }
+
+  fetchView(options = {}) {
+    return openV2Reader(this, false, options, "view");
+  }
+
+  async feedLite3(payload, { durability = "fast" } = {}) {
+    if (!Buffer.isBuffer(payload)) throw new TypeError("Lite3 payload must be a Buffer");
+    if (payload.length > MAX_FRAME_BYTES) throw new RangeError("Lite3 payload exceeds maximum frame size");
+    const response = await this._feedBinary(payload, durability, "application/json");
+    const message = parseMessageJson((await readBody(response)).toString("utf8"), "message").message;
+    return messageFromEnvelope(message);
+  }
+
+  async _feedBinary(payload, durability, accept) {
+    const url = buildUrl(this.client.baseUrl, ["v2", "pools", this.pool, "feed"]);
+    const policy = mapDurability(durability);
+    if (policy !== "fast") url.searchParams.set("durability", policy);
+    return this.client._request("POST", url, { body: payload, contentType: LITE3_TYPE, accept });
+  }
+
+  async feedView(data, { tags, durability = "fast" } = {}) {
+    if (tags !== undefined && (data instanceof Message || require("./views").messageReference(data))) {
+      throw new RemoteError({ kind: "Usage", message: "cannot supply tags when forwarding a message" }, 400);
+    }
+    if (data instanceof Message) {
+      tags = data.tags;
+      data = data.data;
+    }
     const backend = require("./portable");
     const prepared = backend.prepareAppend(data, tags);
     try {
-      const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append_lite3"]);
-      const policy = mapDurability(durability);
-      if (policy !== "fast") url.searchParams.set("durability", policy);
-      const response = await this.client._request("POST", url, {
-        body: prepared.payload, contentType: LITE3_TYPE, accept: "application/x-plasmite-identity",
-      });
-      let seq, timestampNs;
-      if (response.status === 204) {
-        seq = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
-        timestampNs = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
-      } else {
-        // Older v0 servers ignore the new Accept type and return the JSON receipt.
-        const receipt = parseMessageJson((await readBody(response)).toString("utf8"), "message").message;
-        seq = normalizeMessageSeq(receipt.seq);
-        timestampNs = receiptTimestamp(receipt.time);
-      }
-      return backend.messageWithIdentity(prepared.message, seq, timestampNs);
-    } catch (error) {
+      const response = await this._feedBinary(prepared.payload, durability, "application/x-plasmite-identity");
+      const seq = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
+      const time = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
+      return backend.messageWithIdentity(prepared.message, seq, time);
+    } catch (err) {
       prepared.discard();
-      throw error;
+      throw err;
     }
   }
 
-  async getView(seq, options = {}) {
-    const frame = await this.getLite3(seq, options);
-    return require("./portable").decodeMessage(frame.payload, frame.seq, frame.timestampNs);
-  }
-
-  async *followViews(options = {}) {
-    const backend = require("./portable");
-    for await (const frame of this._followLite3(options, false)) {
-      yield await backend.decodeMessage(frame.payload, frame.seq, frame.timestampNs);
-    }
-  }
-
-  /** Append encoded bytes; current servers return a complete JSON receipt. */
-  async appendLite3(payload, durability = "fast") {
-    if (!Buffer.isBuffer(payload)) throw new TypeError("Lite3 payload must be a Buffer");
-    if (payload.length > MAX_FRAME_BYTES) throw new RangeError("Lite3 payload exceeds maximum frame size");
-    const policy = mapDurability(durability);
-    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append_lite3"]);
-    if (policy !== "fast") url.searchParams.set("durability", policy);
-    const response = await this.client._request("POST", url, {
-      body: payload, contentType: LITE3_TYPE,
-    });
-    const bytes = await readBody(response);
-    return normalizeMessageSeq(parseMessageJson(bytes.toString("utf8"), "message").message.seq);
-  }
-
-  /** Read bytes and their identity from one response on current servers. */
-  async getLite3(seq, { signal } = {}) {
-    const expected = normalizeMessageSeq(seq);
-    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "messages", String(expected), "lite3"]);
-    const response = await this.client._request("GET", url, { accept: LITE3_TYPE, signal });
-    try {
-      const actual = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
-      const timestampNs = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
-      if (actual !== expected) throw new Error("remote Lite3 frame sequence does not match request");
-      return binaryFrame(actual, timestampNs, await readBody(response));
-    } catch (error) {
-      await response.body?.cancel().catch(() => {});
-      throw error;
-    }
-  }
-
-  /** Stream complete owned frames without building message objects. */
-  async *followLite3(options = {}) {
-    yield* this._followLite3(options, true);
-  }
-
-  async *_followLite3(options, owned) {
-    if (options.errorOnGap === true) throw new Error("binary HTTP tails cannot report terminal retention gaps");
-    const url = tailUrl(this.client.baseUrl, this.pool, "follow_lite3", options);
-    const request = requestController(options.signal);
-    let input;
-    try {
-      const response = await this.client._requestStream(url, request.controller, `${LITE3_TYPE}-stream`);
-      if (!response.body) throw new Error("remote Lite3 tail response has no body");
-      input = response.body.getReader();
-      const source = new FrameReader(input);
-      while (true) {
-        const header = await source.read(20, true);
-        if (header === null) return;
-        const length = header.readUInt32BE(16);
-        if (length > MAX_FRAME_BYTES) throw new Error("Lite3 frame exceeds maximum response size");
-        yield binaryFrame(header.readBigUInt64BE(0), header.readBigUInt64BE(8), await source.read(length, false, owned));
-      }
-    } finally {
-      request.dispose();
-      if (input) {
-        await input.cancel().catch(() => {});
-        input.releaseLock();
-      }
-    }
-  }
-
-  /**
-   * Tail remote messages as an async iterable.
-   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number, tags?: string[], errorOnGap?: boolean}} [options]
-   * @returns {AsyncGenerator<import("./message").Message, void, unknown>}
-   */
-  async *follow(options = {}) {
-    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "follow"]);
-    setFollowStart(url, options);
-    if (options.maxMessages !== undefined) {
-      url.searchParams.set("max", String(options.maxMessages));
-    }
-    if (options.timeoutMs !== undefined) {
-      url.searchParams.set("timeout_ms", String(options.timeoutMs));
-    }
-    if (options.errorOnGap === true) {
-      url.searchParams.set("gap_policy", "error");
-    }
-    if (options.tags !== undefined) {
-      const tags = Array.isArray(options.tags) ? options.tags : [options.tags];
-      for (const tag of tags) {
-        url.searchParams.append("tag", String(tag));
-      }
-    }
-
-    const controller = new AbortController();
-    const response = await this.client._requestStream(url, controller);
-    if (!response.body) {
-      throw new Error("remote tail response has no body");
-    }
-    const stream = Readable.fromWeb(response.body);
-    const reader = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    try {
-      for await (const line of reader) {
-        if (!line || !line.trim()) {
-          continue;
-        }
-        const raw = Buffer.from(line, "utf8");
-        const payload = parseMessageJson(line);
-        if (payload && payload.error) {
-          throw new RemoteError(payload, response.status);
-        }
-        yield messageFromEnvelope(payload, raw);
-      }
-    } finally {
-      controller.abort();
-      reader.close();
-    }
-  }
 }
 
-function tailUrl(baseUrl, pool, route, options) {
-  const url = buildUrl(baseUrl, ["v0", "pools", pool, route]);
-  setFollowStart(url, options);
-  if (options.maxMessages !== undefined) url.searchParams.set("max", String(normalizeMessageSeq(options.maxMessages)));
-  if (options.timeoutMs !== undefined) url.searchParams.set("timeout_ms", String(options.timeoutMs));
-  for (const tag of options.tags || []) url.searchParams.append("tag", String(tag));
-  return url;
+async function openV2Reader(pool, live, options = {}, representation = "json") {
+  const { since, last, tags, signal, ...extra } = options;
+  if (Object.keys(extra).length) {
+    throw new RemoteError({ kind: "Usage", message: "read options are since, last, tags and signal" }, 400);
+  }
+  let kind, value;
+  try { [kind, value] = readStart(since, last); } catch (err) {
+    throw new RemoteError({ kind: "Usage", message: err.message }, 400);
+  }
+  const route = live ? "follow" : "fetch";
+  const base = buildUrl(pool.client.baseUrl, ["v2", "pools", pool.pool, route]);
+  for (const tag of tags ?? []) base.searchParams.append("tag", tag);
+
+  const initial = new URL(base);
+  switch (kind) {
+    case 1: initial.searchParams.set("since", "oldest"); break;
+    case 2: initial.searchParams.set("since", value.toString()); break;
+    case 3: initial.searchParams.set("since", timeText(value)); break;
+    case 4: initial.searchParams.set("since", `${value}ns`); break;
+    case 5: initial.searchParams.set("last", value.toString()); break;
+  }
+  const request = requestController(signal);
+  const accept = representation === "json" ? "application/jsonl" : "application/x-plasmite-lite3-stream";
+  const open = url => pool.client._requestStream(url, request.controller, accept);
+  let response;
+  try {
+    response = await open(initial);
+  } catch (err) {
+    request.dispose();
+    throw err;
+  }
+
+  const invalid = message => new RemoteError({ kind: "Io", message }, 0);
+  const read = async function* () {
+    let lastMessage;
+    let continuation;
+    while (!request.controller.signal.aborted) {
+      if (!response.body) throw invalid("read response has no body");
+      let cutoff;
+      for await (const record of responseRecords(response.body, representation, invalid)) {
+        if (record.type === "complete") {
+          if (live) throw invalid("unexpected completion of live read");
+          return;
+        }
+        if (record.type === "error") throw new RemoteError(record, response.status);
+        if (record.type === "cutoff") {
+          cutoff = record;
+          break;
+        }
+        if (lastMessage !== undefined && record.seq <= lastMessage) throw invalid("read sequence did not advance");
+        lastMessage = record.seq;
+        yield record;
+      }
+      if (!cutoff) throw invalid("read response ended without a control record");
+      const next = normalizeMessageSeq(cutoff.next_seq);
+      const until = cutoff.until === undefined ? undefined : normalizeMessageSeq(cutoff.until);
+      if (next === 0n || (lastMessage !== undefined && next <= lastMessage)
+          || live === (until !== undefined) || (until !== undefined && next > until)
+          || (continuation && (until !== continuation.until || next < continuation.next
+              || (!live && next === continuation.next)))) throw invalid("invalid stream cutoff");
+      continuation = { next, until };
+      const resumed = new URL(base);
+      resumed.searchParams.set("since", next.toString());
+      if (until !== undefined) resumed.searchParams.set("until", until.toString());
+      response = await open(resumed);
+    }
+  };
+
+  const iterator = read();
+  let pending;
+  let reading = false;
+  let shutdown;
+  const finish = { done: true, value: undefined };
+  const close = () => {
+    if (shutdown) return shutdown;
+    request.dispose();
+    const cancelBody = response.body?.locked ? undefined : response.body?.cancel();
+    shutdown = Promise.allSettled([cancelBody, iterator.return()]);
+    return shutdown;
+  };
+  return {
+    async next(wait) {
+      if (shutdown || request.controller.signal.aborted) {
+        await close();
+        return finish;
+      }
+      if (wait !== undefined) {
+        try { wait = normalizeWait(wait); } catch (err) {
+          throw new RemoteError({ kind: "Usage", message: err.message }, 400);
+        }
+      }
+      if (reading) throw invalid("stream already has an active reader");
+      reading = true;
+      const item = pending ??= iterator.next();
+      // A timed-out call leaves one pull pending for the next caller.
+      item.catch(() => {});
+      let timer;
+      try {
+        const result = wait === undefined ? await item : await Promise.race([item,
+          new Promise(resolve => { timer = setTimeout(() => resolve(null), Math.min(wait, 2147483647)); })]);
+        if (result === null) return { done: false, value: undefined };
+        pending = undefined;
+        if (result.done) await close();
+        return result;
+      } catch (err) {
+        const aborted = request.controller.signal.aborted;
+        await close();
+        if (aborted) return finish;
+        if (err instanceof RemoteError) throw err;
+        throw invalid(err.message);
+      } finally {
+        reading = false;
+        clearTimeout(timer);
+      }
+    },
+    close() { void close(); },
+    async return() { await close(); return finish; },
+    [Symbol.asyncIterator]() { return this; },
+  };
+}
+
+async function* responseRecords(body, representation, invalid) {
+  const input = body.getReader();
+  try {
+    if (representation === "json") {
+      const decoder = new TextDecoder();
+      let remainder = "";
+      for (;;) {
+        const { done, value } = await input.read();
+        const lines = (remainder + decoder.decode(value, { stream: !done })).split("\n");
+        remainder = lines.pop();
+        if (done) lines.push(remainder);
+        for (let line of lines) {
+          if (!line.trim()) continue;
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          const value = parseMessageJson(line);
+          yield value.type === undefined ? messageFromEnvelope(value, Buffer.from(line, "utf8")) : value;
+        }
+        if (done) return;
+      }
+    }
+
+    const source = new FrameReader(input);
+    for (;;) {
+      const header = await source.read(5, true);
+      if (header === null) return;
+      const kind = header[0];
+      const length = header.readUInt32BE(1);
+      if (kind === 0x43 && length > 0 && length <= MAX_FRAME_BYTES) {
+        const control = parseMessageJson((await source.read(length)).toString("utf8"));
+        if (!["complete", "error", "cutoff"].includes(control.type)) throw invalid("invalid binary control");
+        yield control;
+      } else if (kind === 0x4d && length >= 16 && length <= MAX_FRAME_BYTES + 16) {
+        const identity = await source.read(16);
+        const seq = identity.readBigUInt64BE(0);
+        const time = identity.readBigUInt64BE(8);
+        const payload = await source.read(length - 16, false, representation === "lite3");
+        if (representation === "view") {
+          yield await require("./portable").decodeMessage(payload, seq, time);
+        } else {
+          yield { seq, time, payload };
+        }
+      } else {
+        throw invalid("invalid binary read record");
+      }
+    }
+  } finally {
+    await input.cancel().catch(() => {});
+    input.releaseLock();
+  }
 }
 
 function requestController(signal) {
@@ -375,22 +442,9 @@ function requestController(signal) {
   return { controller, dispose() { signal?.removeEventListener("abort", abort); controller.abort(); } };
 }
 
-function binaryFrame(seq, timestampNs, payload) {
-  return { seq, timestampNs, payload,
-    get time() { return new Date(Number(timestampNs / 1_000_000n)); } };
-}
-
 function frameHeader(value, name) {
   if (value === null || !/^[0-9]{1,20}$/.test(value)) throw new Error(`missing or invalid ${name} header`);
   return normalizeMessageSeq(BigInt(value));
-}
-
-function receiptTimestamp(value) {
-  const match = typeof value === "string" && /^(.*T\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?Z$/.exec(value);
-  if (!match) throw new Error("invalid timestamp in legacy append receipt");
-  const ms = Date.parse(match[1] + "Z");
-  if (!Number.isFinite(ms)) throw new Error("invalid timestamp in legacy append receipt");
-  return normalizeMessageSeq(BigInt(ms) * 1000000n + BigInt((match[2] || "").padEnd(9, "0")));
 }
 
 // Hold one transport chunk and assemble only a fragmented requested frame.
@@ -523,11 +577,3 @@ module.exports = {
   RemotePool,
   RemoteError,
 };
-
-function setFollowStart(url, options) {
-  if (options.sinceSeq !== undefined) throw new TypeError("use start: FollowStart.sequence(seq)");
-  const [kind, value] = followStart(options.start);
-  url.searchParams.set("start", ["new", "last", "since", "sequence"][kind]);
-  url.searchParams.set("start_value", String(value));
-  if (options.finite) url.searchParams.set("finite", "true");
-}

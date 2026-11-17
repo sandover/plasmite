@@ -7,7 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { performance } = require('node:perf_hooks');
 const bindingRoot = process.env.PLASMITE_BENCH_BINDING ? path.resolve(process.env.PLASMITE_BENCH_BINDING) : path.join(__dirname, '..');
-const { Client, toNative, toJson } = require(bindingRoot);
+const { Client, parseMessage, toNative, toJson } = require(bindingRoot);
 const warmOnly = process.env.PLASMITE_BENCH_WARM_ONLY === '1';
 const assert = require('node:assert/strict');
 const iterations = Number(process.argv[2] || 100);
@@ -39,12 +39,12 @@ async function main() {
   const client = new Client(dir), pool = client.createPool('bench', 32 * 1024 * 1024);
   try {
     for (const [fixture, data] of Object.entries(fixtures)) {
-      const receipt = pool.append(data);
+      const receipt = await pool.feed(data);
       const seq = receipt.seq;
       const initialStart = performance.now();
-      const view = await pool.getView(seq);
+      const view = await pool._getView(seq);
       const initialViewMs = performance.now() - initialStart;
-      const native = pool.get(seq);
+      const native = parseMessage(pool._getJson(seq));
       const initialNativeStart = performance.now();
       let firstNative = toNative(view.data);
       const initialNativeMs = performance.now() - initialNativeStart;
@@ -60,13 +60,13 @@ async function main() {
       for (let repeat = 0; repeat < repeats; repeat++) {
         // Alternate lane order to reduce systematic thermal/cache bias.
         const cold = [
-          ['cold-identity/view', async () => Number((await pool.getView(seq)).seq)],
-          ['cold-identity/current-json', async () => Number(pool.get(seq).seq)],
-          ['cold-field/view', async () => (await pool.getView(seq)).data.metrics.power],
-          ['cold-field/current-json', async () => pool.get(seq).data.metrics.power],
-          ['cold-native/view', async () => toNative((await pool.getView(seq)).data).metrics.power],
-          ['cold-native/current-json', async () => pool.get(seq).data.metrics.power],
-          ['cold-native/json-parse-safe-fixture', async () => JSON.parse(toJson((await pool.getView(seq)).data)).metrics.power],
+          ['cold-identity/view', async () => Number((await pool._getView(seq)).seq)],
+          ['cold-identity/current-json', async () => Number(parseMessage(pool._getJson(seq)).seq)],
+          ['cold-field/view', async () => (await pool._getView(seq)).data.metrics.power],
+          ['cold-field/current-json', async () => parseMessage(pool._getJson(seq)).data.metrics.power],
+          ['cold-native/view', async () => toNative((await pool._getView(seq)).data).metrics.power],
+          ['cold-native/current-json', async () => parseMessage(pool._getJson(seq)).data.metrics.power],
+          ['cold-native/json-parse-safe-fixture', async () => JSON.parse(toJson((await pool._getView(seq)).data)).metrics.power],
         ];
         const warm = [
           ['warm-field/view', iterations * 100, () => view.data.metrics.power],
@@ -90,7 +90,7 @@ async function main() {
       global.gc?.();
       const before = process.memoryUsage();
       let children = [];
-      for (let i = 0; i < 32; i++) children.push((await pool.getView(seq)).data.metrics);
+      for (let i = 0; i < 32; i++) children.push((await pool._getView(seq)).data.metrics);
       global.gc?.();
       const retainedChildren = process.memoryUsage();
       assert.equal(children.every(x => x.power === 42), true);
@@ -116,8 +116,8 @@ async function main() {
     // An unsafe integer keeps native materialization on the exact walker.
     // Its JSON representation would round through JSON.parse, so it has no
     // parse-based same-result control.
-    const exactSeq = pool.appendIdentity(Buffer.from('{"metrics":{"power":42},"large":9223372036854775807}')).seq;
-    const exactView = await pool.getView(exactSeq);
+    const exactSeq = pool.feedJsonReceipt(Buffer.from('{"metrics":{"power":42},"large":9223372036854775807}')).seq;
+    const exactView = await pool._getView(exactSeq);
     assert.equal(toNative(exactView.data).large, 9223372036854775807n);
     const exactMaterialization = [];
     for (let repeat = 0; repeat < repeats; repeat++) exactMaterialization.push({ repeat,

@@ -1,4 +1,3 @@
-const { FollowStart } = require("../follow");
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -24,7 +23,7 @@ function within(promise, ms) {
 
 test('128 idle local reads leave libuv filesystem work available and close safely', async () => {
   await fixture(async pool => {
-    const streams = Array.from({ length: 128 }, () => pool.openFollow(FollowStart.all(), null, null));
+    const streams = (await Promise.all(Array.from({ length: 128 }, () => pool.follow()))).map(reader => reader._stream);
     const reads = streams.map(stream => stream.nextJsonWait(5000));
     try {
       await within(fs.promises.stat(__filename), 500);
@@ -36,11 +35,11 @@ test('128 idle local reads leave libuv filesystem work available and close safel
 
 test('queued local waits keep an absolute budget and preserve their cursor', async () => {
   await fixture(async pool => {
-    const streams = Array.from({ length: 128 }, () => pool.openLite3Follow(FollowStart.all(), null, null));
+    const streams = (await Promise.all(Array.from({ length: 128 }, () => pool.followLite3()))).map(reader => reader._stream);
     try {
       const reads = streams.map(stream => stream.nextWait(15));
       assert.ok((await within(Promise.all(reads), 500)).every(read => read.status === 0));
-      const message = pool.append({ value: 7 });
+      const message = await pool.feed({ value: 7 });
       for (const stream of streams) {
         const read = await stream.nextWait(0);
         assert.equal(read.status, 1);
@@ -56,11 +55,13 @@ test('terminating a worker cancels pending native waits without entering its dea
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-wait-worker-'));
     const worker = new Worker(`
       const {parentPort,workerData}=require('node:worker_threads');
-      const {Client,FollowStart}=require(workerData.addon);
+      const {Client}=require(workerData.addon);
       const client=new Client(workerData.dir), pool=client.createPool('waiting',1048576n);
-      const stream=pool.openFollow(FollowStart.all(),null,null);
-      stream.nextJsonWait(1000000);
-      parentPort.postMessage('waiting');
+      (async () => {
+        const reader = await pool.follow();
+        reader.next(1000);
+        parentPort.postMessage('waiting');
+      })();
     `, { eval: true, workerData: { addon, dir } });
     try {
       await within(new Promise((resolve, reject) => { worker.once('message', resolve); worker.once('error', reject); }), 2000);
@@ -72,16 +73,16 @@ test('terminating a worker cancels pending native waits without entering its dea
 
 test('owned local tails filter before limiting and retain values after close and overwrite', async () => {
   await fixture(async pool => {
-    pool.append({ nested: { value: 1 } }, ['ignore']);
-    const kept = pool.append({ nested: { value: 2 }, values: [3, 4] }, ['keep']);
-    const tail = pool.followViews({ start: FollowStart.sequence(1n), tags: ['keep'], maxMessages: 1 });
+    await pool.feed({ nested: { value: 1 } }, { tags: ['ignore'] });
+    const kept = await pool.feed({ nested: { value: 2 }, values: [3, 4] }, { tags: ['keep'] });
+    const tail = await pool.fetchView({ since: 1n, tags: ['keep'] });
     const { value: message } = await tail.next();
     assert.equal(message.seq, kept.seq);
     assert.equal(message.data.nested.value, 2);
     assert.equal(message.data.values[1], 4);
     const child = message.data.nested;
     assert.deepEqual(await tail.next(), { done: true, value: undefined });
-    for (let i = 0; i < 300; i++) pool.append({ fill: 'x'.repeat(4096) });
+    for (let i = 0; i < 300; i++) await pool.feed({ fill: 'x'.repeat(4096) });
     pool.close();
     assert.equal(child.value, 2);
     assert.throws(() => { child.value = 3; }, TypeError);
@@ -90,14 +91,14 @@ test('owned local tails filter before limiting and retain values after close and
 
 test('owned local iterator return interrupts an idle read and keeps retained values valid', async () => {
   await fixture(async pool => {
-    const tail = pool.followViews();
+    const tail = await pool.followView();
     const pending = tail.next();
     await new Promise(resolve => setTimeout(resolve, 5));
     const returned = tail.return();
     assert.deepEqual(await within(pending, 500), { done: true, value: undefined });
     assert.deepEqual(await within(returned, 500), { done: true, value: undefined });
     const controller = new AbortController();
-    const aborting = pool.followViews({start: FollowStart.all(),  signal: controller.signal });
+    const aborting = await pool.followView({ since: 'oldest', signal: controller.signal });
     const read = aborting.next(); controller.abort();
     assert.equal((await within(read, 500)).done, true);
   });
@@ -124,8 +125,8 @@ test('returning an unused UDP iterator leaves another caller’s read alone', as
 test('a stream reuses one completion resource across reads', async () => {
   const { createHook } = require('node:async_hooks');
   await fixture(async pool => {
-    for (let i = 0; i < 3; i++) pool.append({ value: i });
-    const stream = pool.openFollow(FollowStart.sequence(1n), 3, null);
+    for (let i = 0; i < 3; i++) await pool.feed({ value: i });
+    const stream = (await pool.fetch({ since: 1n }))._stream;
     let resources = 0;
     const hook = createHook({ init(id, type) { if (type === 'plasmite:stream') resources++; } }).enable();
     try {
@@ -140,7 +141,7 @@ test('async hooks can close a stream during channel or Promise creation', async 
   const { createHook } = require('node:async_hooks');
   await fixture(async pool => {
     for (const kind of ['plasmite:stream', 'PROMISE']) {
-      const stream = pool.openFollow(FollowStart.all(), null, null);
+      const stream = (await pool.follow())._stream;
       let closed = false;
       const hook = createHook({ init(id, type) {
         if (!closed && type === kind) { closed = true; stream.close(); }
@@ -155,8 +156,8 @@ test('reused completion channels preserve each caller’s AsyncLocalStorage cont
   const { AsyncLocalStorage } = require('node:async_hooks');
   const local = new AsyncLocalStorage();
   await fixture(async pool => {
-    pool.append({ value: 1 }); pool.append({ value: 2 });
-    const stream = pool.openFollow(FollowStart.sequence(1n), 2, null);
+    await pool.feed({ value: 1 }); await pool.feed({ value: 2 });
+    const stream = (await pool.fetch({ since: 1n }))._stream;
     try {
       for (const name of ['first', 'second']) {
         await local.run(name, async () => {
@@ -171,35 +172,42 @@ test('reused completion channels preserve each caller’s AsyncLocalStorage cont
 
 test('owned tail progress extends past a single per-read timeout interval', async () => {
   await fixture(async pool => {
-    const first = setTimeout(() => pool.append({ number: 1 }), 70);
-    const second = setTimeout(() => pool.append({ number: 2 }), 150);
+    const first = setTimeout(() => pool.feed({ number: 1 }), 70);
+    const second = setTimeout(() => pool.feed({ number: 2 }), 150);
     try {
       const values = [];
-      for await (const message of pool.followViews({start: FollowStart.all(),  maxMessages: 2, timeoutMs: 120 })) values.push(message.data.number);
+      const reader = await pool.followView();
+      try {
+        for (let i = 0; i < 2; i++) values.push((await reader.next(0.12)).value.data.number);
+      } finally { reader.close(); }
       assert.deepEqual(values, [1, 2]);
     } finally { clearTimeout(first); clearTimeout(second); }
   });
 });
 
-test('finite owned tails finish after a quiet per-read timeout', async () => {
+test('an owned follow keeps the reader open after a per-read timeout', async () => {
   await fixture(async pool => {
-    const tail = pool.followViews({start: FollowStart.all(),  maxMessages: 1, timeoutMs: 10 });
-    assert.deepEqual(await within(tail.next(), 500), { done: true, value: undefined });
+    const reader = await pool.followView();
+    try {
+      assert.deepEqual(await within(reader.next(0.01), 500), { done: false, value: undefined });
+      await pool.feed({ n: 1 });
+      assert.equal((await reader.next()).value.data.n, 1);
+    } finally { reader.close(); }
   });
 });
 
 test('an unlimited owned tail keeps one native read across quiet intervals', async () => {
   await fixture(async pool => {
-    const original = pool._inner.openViewFollow.bind(pool._inner);
+    const original = pool._inner.openRead.bind(pool._inner);
     let waits = 0;
-    pool._inner.openViewFollow = (...args) => {
+    pool._inner.openRead = (...args) => {
       const stream = original(...args), wait = stream.nextJsonWait.bind(stream);
       stream.nextJsonWait = budget => { waits++; assert.equal(budget, 18446744073709551615n); return wait(budget); };
       return stream;
     };
-    const tail = pool.followViews({start: FollowStart.all(),  timeoutMs: 5 });
+    const tail = await pool.followView();
     const next = tail.next();
-    const timer = setTimeout(() => pool.append({ value: 1 }), 25);
+    const timer = setTimeout(() => pool.feed({ value: 1 }), 25);
     try {
       assert.equal((await within(next, 500)).value.data.value, 1);
       assert.equal(waits, 1);

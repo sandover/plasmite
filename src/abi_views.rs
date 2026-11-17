@@ -90,7 +90,7 @@ pub extern "C" fn plsm_view_from_lite3(
     )
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn plsm_pool_get_view(
+pub extern "C" fn plsm_internal_pool_get_view(
     pool: *mut plsm_pool,
     seq: u64,
     out: *mut *const plsm_message_view,
@@ -104,7 +104,7 @@ pub extern "C" fn plsm_pool_get_view(
         (|| {
             let f = pool.pool.get(seq)?;
             publish(
-                MessageView::from_owned(f.payload, f.seq, f.timestamp_ns, f.flags)?,
+                MessageView::from_owned(f.payload, f.seq, f.time, f.flags)?,
                 out,
             )
         })(),
@@ -139,8 +139,8 @@ pub unsafe extern "C" fn plsm_view_seq(owner: *const plsm_message_view) -> u64 {
     unsafe { (*owner).view.seq }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn plsm_view_timestamp_ns(owner: *const plsm_message_view) -> u64 {
-    unsafe { (*owner).view.timestamp_ns }
+pub unsafe extern "C" fn plsm_view_time(owner: *const plsm_message_view) -> u64 {
+    unsafe { (*owner).view.time }
 }
 /// Backing payload capacity; no owner/index metadata or double-counted shares.
 #[unsafe(no_mangle)]
@@ -317,7 +317,7 @@ pub unsafe extern "C" fn plsm_view_bytes(
     bytes.as_ptr()
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn plsm_pool_get_into(
+pub extern "C" fn plsm_internal_pool_get_into(
     pool: *mut plsm_pool,
     seq: u64,
     destination: *mut u8,
@@ -446,13 +446,11 @@ pub extern "C" fn plsm_view_select(
 
 /// Parse once, commit the checked encoding, and retain it as an owned view.
 #[unsafe(no_mangle)]
-pub extern "C" fn plsm_pool_append_view_json(
+pub extern "C" fn plsm_pool_feed_json_view(
     pool: *mut plsm_pool,
     bytes: *const u8,
     len: usize,
-    tags: *const *const std::ffi::c_char,
-    tags_len: usize,
-    durability: u32,
+    options: *const crate::abi::v2::plsm_feed_options,
     out: *mut *const plsm_message_view,
     err: *mut *mut plsm_error,
 ) -> i32 {
@@ -465,6 +463,7 @@ pub extern "C" fn plsm_pool_append_view_json(
     };
     finish(
         (|| {
+            let (durability, tags) = crate::abi::v2::feed_arguments(options)?;
             let durability = match durability {
                 0 => crate::api::Durability::Fast,
                 1 => crate::api::Durability::Flush,
@@ -473,15 +472,14 @@ pub extern "C" fn plsm_pool_append_view_json(
             let parsed = crate::core::lite3::ParsedJson::parse_view(unsafe {
                 std::slice::from_raw_parts(bytes, len)
             })?;
-            let tags = unsafe { crate::abi::tag_refs(tags, tags_len) }?;
-            let mut view = parsed.encode_message_view(&tags)?;
+            let mut view = parsed.encode_message_view(&tags.unwrap_or_default())?;
             let time = crate::api::now_ns()?;
             let seq = pool.pool.append_with_options(
                 view.bytes(),
                 crate::api::AppendOptions::new(time, durability),
             )?;
             view.seq = seq;
-            view.timestamp_ns = time;
+            view.time = time;
             publish(view, out)
         })(),
         err,
@@ -573,7 +571,7 @@ mod tests {
 
 /// Forward immutable bytes with a fresh destination identity and no payload copy.
 #[unsafe(no_mangle)]
-pub extern "C" fn plsm_pool_append_view(
+pub extern "C" fn plsm_pool_feed_view(
     pool: *mut plsm_pool,
     source: *const plsm_message_view,
     durability: u32,
@@ -647,7 +645,7 @@ mod forwarding_tests {
             0
         );
         assert_eq!(
-            plsm_pool_append_view(pool, source, 0, &mut forwarded, &mut err),
+            plsm_pool_feed_view(pool, source, 0, &mut forwarded, &mut err),
             0
         );
         let mut old_len = 0;
@@ -657,7 +655,7 @@ mod forwarding_tests {
         });
         assert_eq!(old_len, new_len);
         assert_eq!(unsafe { plsm_view_seq(forwarded) }, 1);
-        assert_ne!(unsafe { plsm_view_timestamp_ns(forwarded) }, 123);
+        assert_ne!(unsafe { plsm_view_time(forwarded) }, 123);
         crate::abi::plsm_pool_free(pool);
         crate::abi::plsm_client_free(client);
         unsafe {

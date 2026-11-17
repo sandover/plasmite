@@ -13,15 +13,15 @@ class ViewABI:
         error = c.POINTER(c.POINTER(module.plsm_error_t))
         owner = c.POINTER(c.c_void_p)
         pool = c.POINTER(module.plsm_pool_t)
-        self.lib.plsm_pool_append_view_json.argtypes = [pool, c.c_char_p, c.c_size_t,
-            c.POINTER(c.c_char_p), c.c_size_t, c.c_uint32, owner, error]
-        self.lib.plsm_pool_append_view_json.restype = c.c_int
+        self.lib.plsm_pool_feed_json_view.argtypes = [pool, c.c_char_p, c.c_size_t,
+                                                        c.POINTER(module.plsm_feed_options_t), owner, error]
+        self.lib.plsm_pool_feed_json_view.restype = c.c_int
         self.lib.plsm_view_from_lite3.argtypes = [c.c_char_p, c.c_size_t,
             c.c_uint64, c.c_uint64, owner, error]
         self.lib.plsm_view_from_lite3.restype = c.c_int
-        self.lib.plsm_pool_append_view.argtypes = [pool, c.c_void_p, c.c_uint32, owner, error]
-        self.lib.plsm_pool_append_view.restype = c.c_int
-        for name in ['plsm_view_seq', 'plsm_view_timestamp_ns']:
+        self.lib.plsm_pool_feed_view.argtypes = [pool, c.c_void_p, c.c_uint32, owner, error]
+        self.lib.plsm_pool_feed_view.restype = c.c_int
+        for name in ['plsm_view_seq', 'plsm_view_time']:
             function = getattr(self.lib, name)
             function.argtypes = [c.c_void_p]
             function.restype = c.c_uint64
@@ -40,16 +40,16 @@ class ViewABI:
 
     def receipt(self, owner):
         try:
-            return self.module.AppendReceipt(self.lib.plsm_view_seq(owner),
-                                             self.lib.plsm_view_timestamp_ns(owner))
+            return self.module.FeedReceipt(self.lib.plsm_view_seq(owner),
+                                             self.lib.plsm_view_time(owner))
         finally:
             self.lib.plsm_view_release(owner)
 
     def append(self, pool, value):
         payload = json.dumps(value).encode('utf-8')
-        return self.receipt(self.checked(self.lib.plsm_pool_append_view_json,
-                            pool._ptr, payload, len(payload), None, 0, 0))
+        return self.receipt(self.checked(self.lib.plsm_pool_feed_json_view,
+                            pool._ptr, payload, len(payload), None))
 
     def forward(self, pool, owner):
-        return self.receipt(self.checked(self.lib.plsm_pool_append_view,
+        return self.receipt(self.checked(self.lib.plsm_pool_feed_view,
                                         pool._ptr, owner, 0))

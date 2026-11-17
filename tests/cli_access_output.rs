@@ -310,8 +310,8 @@ fn removed_errors_skip_option_is_rejected() {
             .unwrap(),
     );
     let output = command(temp.path())
-        .args(["feed", pool.to_str().unwrap(), "--file"])
-        .arg(&data)
+        .args(["feed", pool.to_str().unwrap()])
+        .stdin(std::fs::File::open(&data).unwrap())
         .args(["--errors", "skip"])
         .output()
         .unwrap();

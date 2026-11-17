@@ -1,6 +1,6 @@
 //! Actual CLI processes send and follow through the UDP endpoint.
 
-use plasmite::api::{Pool, PoolApiExt};
+use plasmite::api::Pool;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
@@ -88,17 +88,7 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     let pool_path = PathBuf::from(&pools).join("sensors.plasmite");
     wait_for_seq(&pool_path, 1)?;
     let followed = command()
-        .args([
-            "follow",
-            &url,
-            "--tail",
-            "1",
-            "--no-follow",
-            "--timeout",
-            "6s",
-            "--format",
-            "json",
-        ])
+        .args(["fetch", &url, "--last", "1", "--format", "json"])
         .output()?;
     assert!(
         followed.status.success(),
@@ -127,19 +117,7 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     wait_for_seq(&pool_path, 2)?;
     let filtered = command()
         .args([
-            "follow",
-            &url,
-            "--tail",
-            "2",
-            "--no-follow",
-            "--tag",
-            "alert",
-            "--where",
-            ".data.temperature == 24",
-            "--timeout",
-            "6s",
-            "--format",
-            "json",
+            "fetch", &url, "--last", "2", "--tag", "alert", "--format", "json",
         ])
         .output()?;
     assert!(
@@ -168,29 +146,16 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     );
     assert!(copied.stdout.is_empty());
     wait_for_seq(&pool_path, 3)?;
-    let stored = Pool::open(&pool_path)?.get_message(3)?;
+    let frame = Pool::open(&pool_path)?.get(3)?;
+    let stored = plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload)?;
     assert_eq!(stored.data, source["data"]);
     assert_eq!(stored.meta.tags, vec!["alert"]);
 
-    let timed_out = command()
-        .args([
-            "follow",
-            &url,
-            "--tag",
-            "missing",
-            "--timeout",
-            "200ms",
-            "--format",
-            "json",
-        ])
+    let filtered_empty = command()
+        .args(["fetch", &url, "--tag", "missing", "--format", "json"])
         .output()?;
-    assert_eq!(
-        timed_out.status.code(),
-        Some(124),
-        "{}",
-        String::from_utf8_lossy(&timed_out.stderr)
-    );
-    assert!(timed_out.stdout.is_empty());
+    assert!(filtered_empty.status.success());
+    assert!(filtered_empty.stdout.is_empty());
 
     let mut duplex = command()
         .args(["duplex", &url, "--timeout", "150ms", "--format", "json"])
@@ -219,15 +184,7 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     assert_eq!(messages[0]["data"], json!({"from":"peer","duplex":true}));
     wait_for_seq(&pool_path, 4)?;
     let all = command()
-        .args([
-            "follow",
-            &url,
-            "--no-follow",
-            "--format",
-            "json",
-            "--timeout",
-            "6s",
-        ])
+        .args(["fetch", &url, "--format", "json"])
         .output()?;
     assert!(
         all.status.success(),
@@ -264,7 +221,6 @@ fn wait_for_seq(path: &PathBuf, seq: u64) -> Result<(), Box<dyn std::error::Erro
 fn unsupported_udp_commands_reject_without_server_work() -> Result<(), Box<dyn std::error::Error>> {
     let bin = env!("CARGO_BIN_EXE_plasmite");
     for args in [
-        vec!["fetch", "udp://127.0.0.1:9701/sensors", "1"],
         vec!["pool", "info", "udp://127.0.0.1:9701/sensors"],
         vec!["tap", "udp://127.0.0.1:9701/sensors", "--", "echo", "never"],
         vec!["access", "connect", "udp://127.0.0.1:9701/sensors"],
@@ -272,7 +228,7 @@ fn unsupported_udp_commands_reject_without_server_work() -> Result<(), Box<dyn s
         vec![
             "follow",
             "udp://127.0.0.1:9701/sensors",
-            "--tail",
+            "--last",
             "1",
             "--replay",
             "1",
@@ -292,14 +248,13 @@ fn unsupported_udp_commands_reject_without_server_work() -> Result<(), Box<dyn s
 #[test]
 fn udp_cli_preserves_arrival_order_and_reports_only_server_skips()
 -> Result<(), Box<dyn std::error::Error>> {
-    for (skip, retained, quiet, filtered, code) in [
-        (None, false, false, false, 0),
-        (Some("oversized"), false, false, false, 1),
-        (Some("pressure"), false, false, false, 1),
-        (Some("retention"), true, false, false, 9),
-        (None, true, false, false, 9), // Retention progress survives a lost SKIP.
-        (Some("pressure"), false, true, false, 1),
-        (None, false, false, true, 0),
+    for (skip, retained, filtered, code) in [
+        (None, false, false, 0),
+        (Some("oversized"), false, false, 1),
+        (Some("pressure"), false, false, 1),
+        (Some("retention"), true, false, 9),
+        (None, true, false, 9), // Retention progress survives a lost SKIP.
+        (None, false, true, 0),
     ] {
         let peer = UdpSocket::bind("127.0.0.1:0")?;
         peer.set_read_timeout(Some(Duration::from_secs(3)))?;
@@ -333,7 +288,11 @@ fn udp_cli_preserves_arrival_order_and_reports_only_server_skips()
             assert_eq!(verified["cookie"], cookie);
             let data = |seq: u64| {
                 let payload = plasmite::api::lite3::encode_message(
-                    &["sensor".into()],
+                    &[if seq.is_multiple_of(2) {
+                        "even".into()
+                    } else {
+                        "odd".into()
+                    }],
                     &serde_json::json!({"sample": seq}),
                 )
                 .unwrap();
@@ -379,21 +338,15 @@ fn udp_cli_preserves_arrival_order_and_reports_only_server_skips()
             .env("HOME", temp.path())
             .env("PLASMITE_ACCESS_HOME", temp.path())
             .args([
-                "follow",
+                "fetch",
                 &format!("udp://{address}/sensors"),
-                "--tail",
+                "--last",
                 "6",
-                "--no-follow",
-                "--timeout",
-                "3s",
                 "--format",
                 "json",
             ]);
-        if quiet {
-            command.arg("--quiet-drops");
-        }
         if filtered {
-            command.args(["--tag", "sensor", "--where", ".data.sample == 12"]);
+            command.args(["--tag", "even"]);
         }
         let output = command.output()?;
         server.join().unwrap();
@@ -416,7 +369,9 @@ fn udp_cli_preserves_arrival_order_and_reports_only_server_skips()
         assert_eq!(
             sequences,
             if filtered {
-                vec![12, 12]
+                vec![10, 12, 12]
+            } else if skip == Some("retention") {
+                vec![10]
             } else {
                 vec![10, 12, 11, 12]
             }
@@ -424,25 +379,17 @@ fn udp_cli_preserves_arrival_order_and_reports_only_server_skips()
         for message in &messages {
             assert_eq!(message["data"]["sample"], message["seq"]);
         }
-        if let Some(reason) = skip
-            && !quiet
-        {
+        if retained {
+            let error: Value = serde_json::from_slice(&output.stderr)?;
+            assert_eq!(error["error"]["kind"], "RetentionGap");
+        } else if let Some(reason) = skip {
             let notice: Value = serde_json::from_slice(&output.stderr)?;
             assert_eq!(notice["notice"]["kind"], "udp-gap");
             assert_eq!(notice["notice"]["details"]["first_seq"], 11);
             assert_eq!(notice["notice"]["details"]["last_seq"], 11);
             assert_eq!(notice["notice"]["details"]["reason"], reason);
-        } else if retained && !quiet {
-            let notice: Value = serde_json::from_slice(&output.stderr)?;
-            assert_eq!(notice["notice"]["details"]["reason"], "retention");
-            assert!(notice["notice"]["details"].get("first_seq").is_none());
-            assert!(notice["notice"]["details"].get("last_seq").is_none());
         } else {
-            assert!(
-                output.stderr.is_empty(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            assert!(output.stderr.is_empty());
         }
     }
     Ok(())

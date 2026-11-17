@@ -7,13 +7,13 @@
     reason = "the public API uses the shared Error type like sibling API modules"
 )]
 
-use super::{Message, PoolRef};
+use super::message::ReadStart;
+use super::{Message, PoolRef, Read, Since};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{encode_message, validate_bytes};
 use crate::pool_paths::{PoolNameResolveError, resolve_named_pool_path};
 use crate::udp_wire as wire;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::Deserialize;
 use std::collections::VecDeque;
 use std::io;
 use std::net::{
@@ -50,37 +50,16 @@ pub struct UdpPool {
     name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UdpFollowOptions {
-    pub start: UdpStart,
-    pub live: bool,
-}
-
-impl UdpFollowOptions {
-    pub fn new() -> Self {
-        Self {
-            start: UdpStart::New,
-            live: true,
-        }
-    }
-}
-
-impl Default for UdpFollowOptions {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UdpFrame {
     pub seq: u64,
-    pub timestamp_ns: u64,
+    pub time: u64,
     pub payload: Vec<u8>,
 }
 
 impl UdpFrame {
     pub fn message(&self) -> Result<Message, Error> {
-        super::message::message_from_udp_payload(self.seq, self.timestamp_ns, &self.payload)
+        super::message::message_from_udp_payload(self.seq, self.time, &self.payload)
     }
 }
 
@@ -163,6 +142,8 @@ struct FollowReader<F> {
     pending: VecDeque<UdpStreamEvent<F>>,
     admit: fn(u64, u64, &[u8]) -> Result<F, Error>,
     initial_bounds: Option<FollowBounds>,
+    tags: Vec<String>,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     last_activity: Instant,
     next_renewal: Instant,
     terminal_seen: bool,
@@ -225,14 +206,26 @@ impl UdpClient {
 }
 
 impl UdpPool {
-    /// Encode and send one message. Success means the operating system accepted the datagram.
-    pub fn send_json(&self, data: &Value, tags: &[String]) -> Result<(), Error> {
+    /// Feed one datagram. Success only confirms that the socket accepted it.
+    pub fn feed<'a>(
+        &self,
+        input: impl Into<super::FeedInput<'a>>,
+        options: super::Feed,
+    ) -> Result<(), Error> {
+        let (data, tags, durability) = options.resolve(input.into())?;
+        check_udp_durability(durability)?;
         let document = encode_message(tags, data)?;
         self.send_lite3(document.as_slice())
     }
 
+    /// Forward a complete Lite3 envelope in one datagram.
+    pub fn feed_lite3(&self, bytes: &[u8], options: super::Feed) -> Result<(), Error> {
+        check_udp_durability(options.encoded_durability()?)?;
+        self.send_lite3(bytes)
+    }
+
     /// Validate and send one complete Lite3 message without changing its bytes.
-    pub fn send_lite3(&self, document: &[u8]) -> Result<(), Error> {
+    fn send_lite3(&self, document: &[u8]) -> Result<(), Error> {
         check_datagram_sizes(self.name.as_bytes(), document.len())?;
 
         // Lite3's native reader needs aligned storage. A caller can pass a slice
@@ -261,25 +254,49 @@ impl UdpPool {
         Ok(())
     }
 
-    /// Subscribe to best-effort DATA in arrival order, including late messages and duplicates.
-    pub fn follow(&self, options: UdpFollowOptions) -> Result<UdpFollow, Error> {
-        Ok(UdpFollow(self.follow_reader(options, admit_frame)?))
+    /// Open a live UDP reader using the shared read selection.
+    pub fn follow(&self, read: Read) -> Result<UdpFollow, Error> {
+        self.open_read(read, true, admit_frame).map(UdpFollow)
     }
 
-    /// Follow the same arrival-order event stream, retaining DATA as owned views.
-    pub fn follow_views(&self, options: UdpFollowOptions) -> Result<UdpViewFollow, Error> {
-        Ok(UdpViewFollow(
-            self.follow_reader(options, |seq, time, bytes| {
-                crate::view::MessageView::from_bytes(bytes, seq, time)
-            })?,
-        ))
+    /// Open a finite UDP subscription over retained history.
+    pub fn fetch(&self, read: Read) -> Result<UdpFollow, Error> {
+        self.open_read(read, false, admit_frame).map(UdpFollow)
     }
 
-    fn follow_reader<F>(
+    pub fn follow_view(&self, read: Read) -> Result<UdpViewFollow, Error> {
+        self.open_read(read, true, admit_view).map(UdpViewFollow)
+    }
+
+    pub fn fetch_view(&self, read: Read) -> Result<UdpViewFollow, Error> {
+        self.open_read(read, false, admit_view).map(UdpViewFollow)
+    }
+
+    fn open_read<F>(
         &self,
-        options: UdpFollowOptions,
+        read: Read,
+        live: bool,
         admit: fn(u64, u64, &[u8]) -> Result<F, Error>,
     ) -> Result<FollowReader<F>, Error> {
+        if read.until.is_some() {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("UDP does not support HTTP continuation bounds"));
+        }
+        let start = match read.start {
+            ReadStart::Default => UdpStart::New,
+            ReadStart::Since(Since::Oldest) => UdpStart::all(),
+            ReadStart::Since(Since::Seq(0)) => {
+                return Err(
+                    Error::new(ErrorKind::Usage).with_message("since must be a positive sequence")
+                );
+            }
+            ReadStart::Since(Since::Seq(seq)) => UdpStart::Sequence(seq),
+            ReadStart::Since(Since::At(time)) => UdpStart::Since(time),
+            ReadStart::Since(Since::Ago(duration)) => {
+                UdpStart::Ago(u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
+            }
+            ReadStart::Last(count) => UdpStart::Last(count),
+        };
         let mut id = [0u8; 16];
         getrandom::fill(&mut id).map_err(|error| {
             Error::new(ErrorKind::Internal)
@@ -292,8 +309,8 @@ impl UdpPool {
         })?;
         let selection = wire::Selection {
             pool: self.name.clone(),
-            start: options.start,
-            live: options.live,
+            start,
+            live,
         };
         let now = Instant::now();
         let mut follow = FollowReader {
@@ -303,6 +320,8 @@ impl UdpPool {
             pending: VecDeque::new(),
             admit,
             initial_bounds: None,
+            tags: read.tags,
+            cancel: read.cancel,
             last_activity: now,
             next_renewal: now + Duration::from_millis(wire::RENEW_MS),
             terminal_seen: false,
@@ -310,6 +329,15 @@ impl UdpPool {
         follow.open()?;
         Ok(follow)
     }
+}
+
+fn check_udp_durability(durability: super::Durability) -> Result<(), Error> {
+    if durability == super::Durability::Flush {
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("UDP feed does not support flush durability")
+        );
+    }
+    Ok(())
 }
 
 impl<F> FollowReader<F> {
@@ -401,6 +429,10 @@ impl<F> FollowReader<F> {
         deadline: Option<Instant>,
         mut poll_once: bool,
     ) -> Result<Option<UdpStreamEvent<F>>, Error> {
+        if self.cancelled() {
+            self.close();
+            return Ok(None);
+        }
         if let Some(event) = self.pending.pop_front() {
             return Ok(Some(event));
         }
@@ -410,6 +442,10 @@ impl<F> FollowReader<F> {
         let mut buffer = [0u8; 65_536];
 
         loop {
+            if self.cancelled() {
+                self.close();
+                return Ok(None);
+            }
             if let Some(event) = self.pending.pop_front() {
                 return Ok(Some(event));
             }
@@ -449,7 +485,10 @@ impl<F> FollowReader<F> {
                 poll_once = false;
                 received
             } else {
-                let wait = receive_until.saturating_duration_since(Instant::now());
+                let mut wait = receive_until.saturating_duration_since(Instant::now());
+                if self.cancel.is_some() {
+                    wait = wait.min(Duration::from_millis(50));
+                }
                 if wait.is_zero() {
                     continue;
                 }
@@ -469,6 +508,12 @@ impl<F> FollowReader<F> {
 
             self.accept_response(op, body)?;
         }
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
     }
 
     fn response<'a>(&self, packet: &'a [u8]) -> Option<(u8, &'a [u8])> {
@@ -564,6 +609,10 @@ impl<F> FollowReader<F> {
                 end_seq: progress.end_seq,
             });
         }
+        if progress.retention_gap {
+            return Err(Error::new(ErrorKind::RetentionGap)
+                .with_message("UDP server reported a retention gap"));
+        }
         self.pending.push_back(UdpStreamEvent::Progress {
             start_seq: progress.start_seq,
             next_seq: progress.next_seq,
@@ -582,19 +631,18 @@ impl<F> FollowReader<F> {
             return Err(protocol_error("UDP data packet has no Lite3 payload"));
         }
         let seq = u64::from_be_bytes(body[..8].try_into().expect("fixed sequence field"));
-        let timestamp_ns =
-            u64::from_be_bytes(body[8..16].try_into().expect("fixed timestamp field"));
-        let frame = (self.admit)(seq, timestamp_ns, &body[16..]).map_err(|error| {
+        let time = u64::from_be_bytes(body[8..16].try_into().expect("fixed timestamp field"));
+        let frame = (self.admit)(seq, time, &body[16..]).map_err(|error| {
             Error::new(ErrorKind::Corrupt)
                 .with_message("UDP data packet contains invalid Lite3")
                 .with_source(error)
         })?;
 
-        let since = match &self.selection.start {
-            UdpStart::Since(since) => Some(*since),
-            _ => None,
+        let matches_tags = self.tags.is_empty() || {
+            let meta = super::message::Meta::from_lite3(&body[16..])?;
+            self.tags.iter().all(|tag| meta.tags.contains(tag))
         };
-        if since.is_none_or(|since| timestamp_ns >= since) {
+        if matches_tags {
             self.pending.push_back(UdpStreamEvent::Frame(frame));
         }
         Ok(())
@@ -603,6 +651,12 @@ impl<F> FollowReader<F> {
     fn accept_skip(&mut self, skip: wire::Skip) -> Result<(), Error> {
         if skip.first > skip.last || matches!(skip.reason, UdpSkipReason::Unknown) {
             return Err(protocol_error("UDP skip range or reason is invalid"));
+        }
+        if skip.reason == UdpSkipReason::Retention {
+            return Err(Error::retention_gap(
+                skip.first,
+                skip.last.saturating_add(1),
+            ));
         }
         self.pending.push_back(UdpStreamEvent::Gap {
             first: skip.first,
@@ -636,14 +690,14 @@ impl<F> Drop for FollowReader<F> {
     }
 }
 
-fn admit_frame(seq: u64, timestamp_ns: u64, bytes: &[u8]) -> Result<UdpFrame, Error> {
+fn admit_frame(seq: u64, time: u64, bytes: &[u8]) -> Result<UdpFrame, Error> {
     let payload = bytes.to_vec();
     validate_bytes(&payload)?;
-    Ok(UdpFrame {
-        seq,
-        timestamp_ns,
-        payload,
-    })
+    Ok(UdpFrame { seq, time, payload })
+}
+
+fn admit_view(seq: u64, time: u64, bytes: &[u8]) -> Result<crate::view::MessageView, Error> {
+    crate::view::MessageView::from_bytes(bytes, seq, time)
 }
 
 macro_rules! follow_adapter {
@@ -911,6 +965,11 @@ fn decode_failure(body: &[u8]) -> Result<Error, Error> {
         "RetentionGap" => ErrorKind::RetentionGap,
         _ => return Err(protocol_error("UDP server sent an unknown error kind")),
     };
+    if let (ErrorKind::RetentionGap, Some(missing), Some(next)) =
+        (kind, failure.missing, failure.next_seq)
+    {
+        return Ok(Error::retention_gap(missing, next).with_message(failure.message));
+    }
     Ok(Error::new(kind).with_message(failure.message))
 }
 

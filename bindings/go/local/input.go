@@ -12,31 +12,33 @@ import (
 	"unsafe"
 )
 
-// AppendView encodes ordinary Go values directly and returns the committed
-// immutable snapshot. Integers fit i64, finite floats keep binary64, and []byte
-// becomes native bytes. Custom JSON/text hooks run once in Go's visit order.
-// A whole *MessageView with nil tags forwards its original payload; nonnil tags
-// replace its tags (an empty slice clears them). The result has fresh identity.
-func (p *Pool) AppendView(value any, tags []string, options ...AppendOption) (*MessageView, error) {
+// FeedView encodes native values or forwards a message with its original tags.
+func (p *Pool) FeedView(value any, tags []string, options ...FeedOption) (*MessageView, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
-	if whole, ok := value.(*MessageView); ok {
-		if whole == nil || len(whole.encoded) == 0 {
+	switch message := value.(type) {
+	case *MessageView:
+		if message == nil || len(message.encoded) == 0 {
 			return nil, invalidArgumentError("missing message view")
 		}
-		if tags == nil {
-			snapshot := *whole // options may reassign the caller's view variable
-			return p.forwardView(&snapshot, api.ApplyAppendOptions(options...).Durability)
+		if tags != nil {
+			return nil, invalidArgumentError("cannot supply tags when forwarding a message")
 		}
-		value = whole.Data() // explicit tags replace the envelope's tag set
+		snapshot := *message // options may reassign the caller's view variable
+		return p.forwardView(&snapshot, api.ApplyFeedOptions(options...).Durability)
+	case *api.Message:
+		if message == nil || tags != nil {
+			return nil, invalidArgumentError("forwarding requires a message and no tag override")
+		}
+		return p.FeedJSONView(message.Data, message.Tags(), options...)
 	}
 	input := nativeInput{}
 	defer input.pin.Unpin()
 	if err := input.collect(reflect.ValueOf(value), ^uintptr(0), "", false, 1); err != nil {
 		return nil, err
 	}
-	cfg := api.ApplyAppendOptions(options...)
+	cfg := api.ApplyFeedOptions(options...)
 	if err := input.tagValues(tags); err != nil {
 		return nil, err
 	}
@@ -48,8 +50,8 @@ func (p *Pool) AppendView(value any, tags []string, options ...AppendOption) (*M
 	return adoptNativeInput(result), nil
 }
 
-// AppendJSONView parses explicit JSON once under the strict integer-token policy.
-func (p *Pool) AppendJSONView(raw []byte, tags []string, options ...AppendOption) (*MessageView, error) {
+// FeedJSONView parses explicit JSON once under the strict integer-token policy.
+func (p *Pool) FeedJSONView(raw []byte, tags []string, options ...FeedOption) (*MessageView, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -60,7 +62,7 @@ func (p *Pool) AppendJSONView(raw []byte, tags []string, options ...AppendOption
 	} // options may mutate caller input
 	index := input.add(^uintptr(0), "", false, 1, inputJSON)
 	input.nodes[index].text = input.bytes(raw)
-	cfg := api.ApplyAppendOptions(options...)
+	cfg := api.ApplyFeedOptions(options...)
 	if err := input.tagValues(tags); err != nil {
 		return nil, err
 	}

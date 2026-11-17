@@ -4,7 +4,8 @@ Owned views help when an application reads a few fields, retains encoded data
 or forwards a message. They keep Lite3 and its validation result instead of
 rebuilding a whole native object tree at each language boundary. An application
 that needs every field as ordinary language objects still pays for that copy.
-Existing message APIs remain available alongside the new view methods.
+Use `feed_view`, `follow_view` and `fetch_view` where the binding offers them.
+They share options with `feed`, `follow` and `fetch`.
 
 ## Where the work went
 
@@ -84,15 +85,40 @@ encoding/decoding and retained construction proof.
 A retained child keeps the complete message alive. Explicit mutable exports
 copy; Python compatibility buffers also require extra encoded copies. Larger
 batches retain more messages at once. Lite3 can occupy more bytes than compact
-JSON, so fewer conversions do not guarantee less wire traffic or CPU. HTTP
-binary tails keep their terminal-error limits, and UDP views keep arrival-order,
-duplicate and late-packet behavior. Views preserve the existing delivery rules.
-See the [migration guide](../record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
+JSON, so fewer conversions do not guarantee less wire traffic or CPU. HTTP JSON and binary readers both report terminal errors. UDP views deliver
+messages in arrival order, including duplicates and late packets.
+See the [migration guide](../record/upgrading-2.0.md#keep-encoded-data-with-owned-views)
 for exact-number rules, copy boundaries, cleanup and transport support.
+
+## Plasmite 2.0 read and write check
+
+On the same Apple Silicon Mac, release builds from `80a92f1` and the 2.0
+candidate each read 10,000 retained small messages per run. The baseline
+used the old reader with a record limit. The candidate used `fetch`. Each
+run verified the same result. Seven alternating runs gave these medians
+and ranges in nanoseconds per message.
+
+| Representation | Before | 2.0 |
+| --- | ---: | ---: |
+| Encoded Lite3 | 788 (760–872) | 798 (760–820) |
+| Decoded message | 1,377 (1,303–1,464) | 1,199 (1,096–1,278) |
+| View, one field | 909 (880–973) | 946 (906–982) |
+| View, full decode | 1,146 (1,110–1,216) | 1,175 (1,111–1,248) |
+
+Five alternating 2,000-operation runs of `bench_owned_views` also compared
+the old append calls with `feed_view`. Typed feed measured 3.47 → 3.68 µs
+and JSON-to-view feed 3.78 → 3.97 µs. The ranges overlapped. An independent
+cold field read measured 282 → 286 ns. The 2.0 feed samples the clock as
+part of each write.
+
+Build with `cargo build --release --example bench_view_streams --example bench_owned_views`.
+Run `bench_view_streams local LANE small 10000` for `raw`, `json`,
+`view_selected` and `view_full`, and `bench_owned_views 2000` for the
+typed-input and sparse-view lanes. These checks cover local Rust paths.
 
 ## Integration checks
 
-The integrated owned-view and stream implementations pass `just check` and
+The pre-2.0 owned-view checkpoint passed `just check` and
 `just release-gate`, including language bindings, C interface checks, packaged
 native and addon-free Node installs, and native/fallback Python wheels. An
 additional Node run with explicit garbage collection checks retained children.

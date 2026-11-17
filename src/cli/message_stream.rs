@@ -1,13 +1,16 @@
 //! Read one complete CLI message at a time and write framed Lite3 messages.
 
-use crate::interface_wire::{LITE3_FRAME_HEADER_LEN, Lite3FrameHeader};
+use crate::interface_wire::{
+    LITE3_CONTROL_RECORD, LITE3_MESSAGE_ID_LEN, LITE3_MESSAGE_RECORD, LITE3_RECORD_HEADER_LEN,
+    encode_lite3_record_header,
+};
 use clap::ValueEnum;
 use plasmite::api::{Error, ErrorKind, lite3};
 use serde_json::{Map, Number, Value};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use yaml_serde::Value as YamlValue;
 
-pub(crate) const LITE3_STREAM_MAGIC: &[u8; 4] = b"PLS1";
+pub(crate) const LITE3_STREAM_MAGIC: &[u8; 4] = b"PLS2";
 const MAX_PAYLOAD_BYTES: usize = lite3::MAX_LITE3_BUF;
 // A control byte can take six JSON bytes ("\\u00xx"). Leave room for the envelope.
 const MAX_TEXT_RECORD_BYTES: usize = 6 * MAX_PAYLOAD_BYTES + 64 * 1024;
@@ -19,6 +22,7 @@ pub(crate) enum InputFormat {
     Yaml,
     Lite3,
     Lite3Raw,
+    Lines,
 }
 
 #[derive(Debug)]
@@ -72,6 +76,28 @@ where
         InputFormat::Yaml => read_yaml_records(reader, &mut on_record),
         InputFormat::Lite3 => read_lite3_records(&mut reader, false, &mut on_record),
         InputFormat::Lite3Raw => read_raw_lite3(&mut reader, &mut on_record),
+        InputFormat::Lines => read_text_lines(&mut reader, &mut on_record),
+    }
+}
+
+fn read_text_lines<R, F>(reader: &mut R, on_record: &mut F) -> Result<u64, Error>
+where
+    R: BufRead,
+    F: FnMut(InputRecord) -> Result<(), Error>,
+{
+    let mut bytes = Vec::new();
+    let mut count = 0;
+    loop {
+        bytes.clear();
+        if read_line_bounded(reader, &mut bytes, MAX_TEXT_RECORD_BYTES)? == 0 {
+            return Ok(count);
+        }
+        let line = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let line = std::str::from_utf8(line)
+            .map_err(|err| input_error("line input must be valid UTF-8").with_source(err))?;
+        on_record(InputRecord::Json(serde_json::json!({ "line": line })))?;
+        count += 1;
     }
 }
 
@@ -274,19 +300,28 @@ where
     }
     let mut count = 0;
     loop {
-        let mut header = [0; LITE3_FRAME_HEADER_LEN];
+        let mut header = [0; LITE3_RECORD_HEADER_LEN];
         if !read_exact_or_eof(reader, &mut header)? {
             return Ok(count);
         }
-        let Lite3FrameHeader {
-            seq,
-            timestamp_ns,
-            payload_len,
-        } = Lite3FrameHeader::decode(header);
-        let len = payload_len as usize;
+        match header[0] {
+            LITE3_MESSAGE_RECORD => {}
+            LITE3_CONTROL_RECORD => {
+                return Err(input_error("Lite3 input cannot contain control records"));
+            }
+            _ => return Err(input_error("unknown Lite3 record kind")),
+        }
+        let body_len = u32::from_be_bytes(header[1..].try_into().expect("record length")) as usize;
+        let len = body_len
+            .checked_sub(LITE3_MESSAGE_ID_LEN)
+            .ok_or_else(|| input_error("Lite3 message record is missing its identity"))?;
         if len > MAX_PAYLOAD_BYTES {
             return Err(input_error("Lite3 payload exceeds 256 MiB"));
         }
+        let mut identity = [0; LITE3_MESSAGE_ID_LEN];
+        read_required(reader, &mut identity, "incomplete Lite3 message identity")?;
+        let seq = u64::from_be_bytes(identity[..8].try_into().expect("sequence"));
+        let timestamp_ns = u64::from_be_bytes(identity[8..].try_into().expect("timestamp"));
         let mut payload = vec![0; len];
         read_required(reader, &mut payload, "incomplete Lite3 payload")?;
         lite3::validate_bytes(&payload)?;
@@ -340,13 +375,13 @@ pub(crate) fn write_frame(
     if payload.len() > MAX_PAYLOAD_BYTES {
         return Err(input_error("Lite3 payload exceeds 256 MiB"));
     }
-    let header = Lite3FrameHeader {
-        seq,
-        timestamp_ns,
-        payload_len: u32::try_from(payload.len()).expect("256 MiB fits u32"),
-    };
+    let length =
+        u32::try_from(payload.len() + LITE3_MESSAGE_ID_LEN).expect("bounded message length");
+    let header = encode_lite3_record_header(LITE3_MESSAGE_RECORD, length);
     writer
-        .write_all(&header.encode())
+        .write_all(&header)
+        .and_then(|()| writer.write_all(&seq.to_be_bytes()))
+        .and_then(|()| writer.write_all(&timestamp_ns.to_be_bytes()))
         .and_then(|()| writer.write_all(payload))
         .and_then(|()| writer.flush())
         .map_err(write_error)

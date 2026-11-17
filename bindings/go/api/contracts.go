@@ -1,6 +1,6 @@
 /*
 Purpose: Backend-agnostic Go contracts and shared model types for Plasmite.
-Key Exports: Client, Pool, Message, MessageMeta, Stream, FollowOptions, Error.
+Key Exports: Client, Pool, Message, MessageMeta, Reader, Error.
 Role: Stable pure-Go surface consumed by local/fake/future transport backends.
 Invariants: No cgo imports; error kinds are stable; stream APIs remain cancel-safe.
 Invariants: Pool ordering and bounded buffering semantics are preserved by implementations.
@@ -10,7 +10,6 @@ Notes: Numeric error-kind values match include/plasmite.h for cross-binding pari
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +38,8 @@ type Error struct {
 	Path    string
 	Seq     *uint64
 	Offset  *uint64
+	Missing uint64
+	NextSeq uint64
 }
 
 var (
@@ -71,20 +72,20 @@ const (
 	DurabilityFlush Durability = 1
 )
 
-type AppendConfig struct {
+type FeedConfig struct {
 	Durability Durability
 }
 
-type AppendOption func(*AppendConfig)
+type FeedOption func(*FeedConfig)
 
-func WithDurability(d Durability) AppendOption {
-	return func(cfg *AppendConfig) {
+func WithDurability(d Durability) FeedOption {
+	return func(cfg *FeedConfig) {
 		cfg.Durability = d
 	}
 }
 
-func ApplyAppendOptions(opts ...AppendOption) AppendConfig {
-	cfg := AppendConfig{Durability: DurabilityFast}
+func ApplyFeedOptions(opts ...FeedOption) FeedConfig {
+	cfg := FeedConfig{Durability: DurabilityFast}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cfg)
@@ -114,12 +115,22 @@ type MessageMeta struct {
 }
 
 type Message struct {
-	Seq         uint64          `json:"seq"`
-	Time        time.Time       `json:"-"`
-	TimeRFC3339 string          `json:"time"`
-	Data        json.RawMessage `json:"data"`
-	Meta        MessageMeta     `json:"meta"`
-	Raw         []byte          `json:"-"`
+	Seq  uint64          `json:"seq"`
+	Time uint64          `json:"-"`
+	Data json.RawMessage `json:"data"`
+	Meta MessageMeta     `json:"meta"`
+	Raw  []byte          `json:"-"`
+}
+
+// MarshalJSON uses the same UTC nanosecond timestamp as the CLI.
+func (m Message) MarshalJSON() ([]byte, error) {
+	const nanosecondsPerSecond = 1_000_000_000
+	instant := time.Unix(int64(m.Time/nanosecondsPerSecond), int64(m.Time%nanosecondsPerSecond)).UTC()
+	type fields Message
+	return json.Marshal(struct {
+		fields
+		Time string `json:"time"`
+	}{fields(m), instant.Format("2006-01-02T15:04:05.000000000Z")})
 }
 
 func (m *Message) Tags() []string {
@@ -157,150 +168,34 @@ func decodeMessage(raw []byte, owned bool) (*Message, error) {
 		raw = append([]byte(nil), raw...)
 	}
 	return &Message{
-		Seq:         payload.Seq,
-		Time:        parsedTime.UTC(),
-		TimeRFC3339: payload.Time,
-		Data:        payload.Data,
-		Meta:        payload.Meta,
-		Raw:         raw,
+		Seq:  payload.Seq,
+		Time: unixNanoseconds(parsedTime),
+		Data: payload.Data,
+		Meta: payload.Meta,
+		Raw:  raw,
 	}, nil
 }
 
 type Lite3Frame struct {
-	Seq         uint64
-	TimestampNs uint64
-	Flags       uint32
-	Payload     []byte
+	Seq     uint64
+	Time    uint64
+	Flags   uint32
+	Payload []byte
 }
 
-func (f *Lite3Frame) Time() time.Time {
-	if f == nil {
-		return time.Time{}
-	}
-	return time.Unix(0, int64(f.TimestampNs)).UTC()
-}
-
-type FollowOptions struct {
-	Start       FollowStart
-	Finite      bool
-	MaxMessages *uint64
-	Tags        []string
-	Timeout     time.Duration
-	Buffer      int
-	ErrorOnGap  bool
-}
-
-type Client interface {
-	Close()
-	CreatePool(ref PoolRef, sizeBytes uint64) (Pool, error)
-	OpenPool(ref PoolRef) (Pool, error)
-	Pool(ref PoolRef, sizeBytes uint64) (Pool, error)
-}
-
-// AppendReceipt identifies a successful commit without echoing its payload.
-// TimestampNs is unsigned Unix time in nanoseconds.
-type AppendReceipt struct {
-	Seq         uint64
-	TimestampNs uint64
-}
-
-// AppendIdentity requests only a numeric receipt from a supporting backend.
-// Unsupported backends fail before appending; a later Get cannot recover an
-// identity reliably once another writer overwrites the record.
-func AppendIdentity(pool Pool, value any, tags []string, opts ...AppendOption) (*AppendReceipt, error) {
-	writer, ok := pool.(interface {
-		AppendJSONIdentity([]byte, []string, Durability) (*AppendReceipt, error)
-	})
-	if !ok {
-		return nil, InvalidArgumentError("backend does not support append identity")
-	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("plasmite: marshal payload: %w", err)
-	}
-	return writer.AppendJSONIdentity(payload, tags, ApplyAppendOptions(opts...).Durability)
-}
-
-func AppendJSONIdentity(pool Pool, payload []byte, tags []string, durability Durability) (*AppendReceipt, error) {
-	writer, ok := pool.(interface {
-		AppendJSONIdentity([]byte, []string, Durability) (*AppendReceipt, error)
-	})
-	if !ok {
-		return nil, InvalidArgumentError("backend does not support append identity")
-	}
-	return writer.AppendJSONIdentity(payload, tags, durability)
-}
-
-func AppendLite3Identity(pool Pool, payload []byte, durability Durability) (*AppendReceipt, error) {
-	writer, ok := pool.(interface {
-		AppendLite3Identity([]byte, Durability) (*AppendReceipt, error)
-	})
-	if !ok {
-		return nil, InvalidArgumentError("backend does not support append identity")
-	}
-	return writer.AppendLite3Identity(payload, durability)
+// FeedReceipt identifies a successful commit. Time counts Unix nanoseconds.
+type FeedReceipt struct {
+	Seq  uint64
+	Time uint64
 }
 
 type Pool interface {
 	Close()
-	AppendJSON(payload []byte, tags []string, durability Durability) ([]byte, error)
-	Append(value any, tags []string, opts ...AppendOption) (*Message, error)
-	AppendLite3(payload []byte, durability Durability) (uint64, error)
-	GetJSON(seq uint64) ([]byte, error)
-	Get(seq uint64) (*Message, error)
-	GetLite3(seq uint64) (*Lite3Frame, error)
-	OpenFollow(start UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (Stream, error)
-	OpenLite3Follow(start UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (Lite3Stream, error)
-	Follow(ctx context.Context, opts FollowOptions) (<-chan *Message, <-chan error)
-	FollowLite3(ctx context.Context, opts FollowOptions) (<-chan *Lite3Frame, <-chan error)
-}
-
-type Stream interface {
-	NextJSON() ([]byte, error)
-	Close()
-}
-
-type Lite3Stream interface {
-	Next() (*Lite3Frame, error)
-	Close()
-}
-
-type UDPStartKind uint32
-
-const (
-	UDPStartNew UDPStartKind = iota
-	UDPStartLast
-	UDPStartSince
-	UDPStartSequence
-)
-
-// UdpStart chooses the history position for a UDP follow. Since is Unix time
-// in nanoseconds; Sequence starts at the named sequence.
-type FollowStart struct {
-	Kind  UDPStartKind
-	Value uint64
-}
-
-type UDPStart = FollowStart
-
-func UDPStartNewPosition() UDPStart { return UDPStart{Kind: UDPStartNew} }
-func UDPStartLastCount(count uint64) UDPStart {
-	return UDPStart{Kind: UDPStartLast, Value: count}
-}
-func UDPStartSinceNs(timestamp uint64) UDPStart {
-	return UDPStart{Kind: UDPStartSince, Value: timestamp}
-}
-func UDPStartAtSequence(seq uint64) UDPStart {
-	return UDPStart{Kind: UDPStartSequence, Value: seq}
-}
-
-type UDPFollowOptions struct {
-	Start  FollowStart
-	Finite bool
-}
-
-func NewUDPFollowOptions() UDPFollowOptions {
-	return UDPFollowOptions{Start: UDPStartNewPosition()}
+	Info() (PoolInfo, error)
+	Feed(value any, tags []string, opts ...FeedOption) (*Message, error)
+	FeedJSON(payload []byte, tags []string, durability Durability) ([]byte, error)
+	Follow(opts ...ReadOption) (Reader, error)
+	Fetch(opts ...ReadOption) (Reader, error)
 }
 
 type UDPEvent interface {
@@ -308,10 +203,10 @@ type UDPEvent interface {
 }
 
 type UDPFrame struct {
-	Seq         uint64
-	TimestampNs uint64
-	Payload     []byte
-	Message     *Message
+	Seq     uint64
+	Time    uint64
+	Payload []byte
+	Message *Message
 }
 
 func (*UDPFrame) udpEvent() {}
@@ -319,9 +214,9 @@ func (*UDPFrame) udpEvent() {}
 // UDPViewFrame carries a backend's immutable view without tying these contracts
 // to cgo. Concrete bindings choose the view type; ordinary messages need no Close.
 type UDPViewFrame[V any] struct {
-	Seq         uint64
-	TimestampNs uint64
-	View        V
+	Seq  uint64
+	Time uint64
+	View V
 }
 
 func (*UDPViewFrame[V]) udpEvent() {}

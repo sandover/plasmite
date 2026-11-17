@@ -1,7 +1,6 @@
 //! Purpose: Follow and duplex black-box CLI integration tests.
 
 pub mod support;
-use plasmite::api::PoolApiExt;
 use support::cli::*;
 
 fn connect_to_server(server: &ServeProcess, home: &std::path::Path) {
@@ -61,7 +60,7 @@ fn follow_emits_new_messages() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "json",
@@ -127,7 +126,7 @@ fn follow_one_exits_after_first_match() {
             "demo",
             "--format",
             "json",
-            "--tail",
+            "--last",
             "1",
             "--one",
         ])
@@ -212,7 +211,7 @@ fn follow_tail_one_exits_after_first_live_match() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "2",
             "--format",
             "json",
@@ -275,123 +274,6 @@ fn follow_tail_one_exits_after_first_live_match() {
 }
 
 #[test]
-fn follow_timeout_exits_when_no_output() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--format",
-            "json",
-            "--timeout",
-            "500ms",
-        ])
-        .output()
-        .expect("follow");
-    assert_eq!(output.status.code().unwrap(), 124);
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
-}
-
-#[test]
-fn follow_timeout_on_tty_prints_message() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let output = cmd_tty(&[
-        "--color",
-        "never",
-        "--dir",
-        pool_dir.to_str().unwrap(),
-        "follow",
-        "demo",
-        "--one",
-        "--timeout",
-        "200ms",
-    ]);
-    assert_eq!(output.status.code(), Some(124));
-    let text = sanitize_tty_text(&output.stdout);
-    assert!(text.contains("No messages received (timed out after 200ms)."));
-}
-
-#[test]
-fn follow_timeout_with_one_exits_on_message() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let pool_dir_str = pool_dir.to_str().unwrap().to_string();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(50));
-        let _ = cmd()
-            .args(["--dir", &pool_dir_str, "feed", "demo", "{\"x\":1}"])
-            .output();
-    });
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--format",
-            "json",
-            // The feed may land before or after this follower attaches; with --tail 1
-            // it sees the message either way.
-            "--tail",
-            "1",
-            "--one",
-            "--timeout",
-            "5s",
-        ])
-        .output()
-        .expect("follow");
-    assert!(output.status.success());
-    let lines = parse_json_lines(&output.stdout);
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
-}
-
-#[test]
 fn follow_json_emits_complete_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -426,7 +308,7 @@ fn follow_json_emits_complete_message() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "json",
@@ -492,13 +374,13 @@ fn follow_json_preserves_filtered_message_tags() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "json",
             "--one",
-            "--where",
-            r#".meta.tags[]? == "keep""#,
+            "--tag",
+            "keep",
         ])
         .output()
         .expect("follow");
@@ -544,7 +426,7 @@ fn follow_json_emits_complete_message_with_explicit_format() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "json",
@@ -556,76 +438,6 @@ fn follow_json_emits_complete_message_with_explicit_format() {
     let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
     assert_eq!(value["data"]["x"], 3);
     assert_eq!(value["seq"], 1);
-}
-
-#[test]
-fn follow_where_filters_messages() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-            "--tag",
-            "drop",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":2}",
-            "--tag",
-            "keep",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "10",
-            "--format",
-            "json",
-            "--where",
-            r#".meta.tags[]? == "keep""#,
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow");
-    let stdout = follower.stdout.take().expect("stdout");
-    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from follow output");
-    let value = parse_json(line.trim());
-    assert_eq!(value.get("data").unwrap()["x"], 2);
-    let _ = follower.kill();
-    let _ = follower.wait();
 }
 
 #[test]
@@ -679,513 +491,12 @@ fn follow_tag_filters_messages() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "10",
             "--format",
             "json",
             "--tag",
             "keep",
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow");
-    let stdout = follower.stdout.take().expect("stdout");
-    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from follow output");
-    let value = parse_json(line.trim());
-    assert_eq!(value.get("data").unwrap()["x"], 2);
-    let _ = follower.kill();
-    let _ = follower.wait();
-}
-
-#[test]
-fn follow_tag_and_where_compose_with_and() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let events = [
-        (r#"{"service":"billing","level":"warn"}"#, "keep"),
-        (r#"{"service":"billing","level":"error"}"#, "keep"),
-        (r#"{"service":"payments","level":"error"}"#, "keep"),
-    ];
-    for (payload, tag) in events {
-        let emit_out = cmd()
-            .args([
-                "--dir",
-                pool_dir.to_str().unwrap(),
-                "feed",
-                "demo",
-                payload,
-                "--tag",
-                tag,
-            ])
-            .output()
-            .expect("feed");
-        assert!(emit_out.status.success());
-    }
-
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "10",
-            "--format",
-            "json",
-            "--tag",
-            "keep",
-            "--where",
-            r#".data.level == "error""#,
-            "--where",
-            r#".data.service == "billing""#,
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow");
-    let stdout = follower.stdout.take().expect("stdout");
-    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from follow output");
-    let value = parse_json(line.trim());
-    assert_eq!(value["data"]["service"], "billing");
-    assert_eq!(value["data"]["level"], "error");
-    let _ = follower.kill();
-    let _ = follower.wait();
-}
-
-#[test]
-fn follow_where_multiple_predicates_and() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"level\":1}",
-            "--tag",
-            "alpha",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"level\":2}",
-            "--tag",
-            "alpha",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "10",
-            "--format",
-            "json",
-            "--where",
-            r#".meta.tags[]? == "alpha""#,
-            "--where",
-            ".data.level >= 2",
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow");
-    let stdout = follower.stdout.take().expect("stdout");
-    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from follow output");
-    let value = parse_json(line.trim());
-    assert_eq!(value.get("data").unwrap()["level"], 2);
-    let _ = follower.kill();
-    let _ = follower.wait();
-}
-
-#[test]
-fn follow_where_invalid_expression_is_usage_error() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "1",
-            "--format",
-            "json",
-            "--where",
-            "not valid jq",
-        ])
-        .output()
-        .expect("follow");
-    assert_eq!(follower.status.code().unwrap(), 2);
-    let err = parse_error_json(&follower.stderr);
-    let inner = err
-        .get("error")
-        .and_then(|v| v.as_object())
-        .expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
-}
-
-#[test]
-fn follow_where_non_boolean_expression_is_usage_error() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "1",
-            "--format",
-            "json",
-            "--where",
-            ".data",
-        ])
-        .output()
-        .expect("follow");
-    assert_eq!(follower.status.code().unwrap(), 2);
-    let err = parse_error_json(&follower.stderr);
-    let inner = err
-        .get("error")
-        .and_then(|v| v.as_object())
-        .expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
-}
-
-#[test]
-fn follow_where_with_since_emits_matches() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":5}",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--since",
-            "1h",
-            "--format",
-            "json",
-            "--where",
-            ".data.x == 5",
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow");
-    let stdout = follower.stdout.take().expect("stdout");
-    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from follow output");
-    let value = parse_json(line.trim());
-    assert_eq!(value.get("data").unwrap()["x"], 5);
-    let _ = follower.kill();
-    let _ = follower.wait();
-}
-
-#[test]
-fn follow_where_with_format_pretty_emits_matches() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "1",
-            "--format",
-            "pretty",
-            "--where",
-            ".data.x == 1",
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow");
-    let stdout = follower.stdout.take().expect("stdout");
-    let reader = BufReader::new(stdout);
-    let value = read_json_value(reader);
-    assert_eq!(value.get("data").unwrap()["x"], 1);
-    let _ = follower.kill();
-    let _ = follower.wait();
-}
-
-#[test]
-fn follow_where_with_quiet_drops_suppresses_notice() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "1",
-            "--format",
-            "json",
-            "--where",
-            ".data.x == 1",
-            "--quiet-drops",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("follow");
-    let stdout = follower.stdout.take().expect("stdout");
-    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from follow output");
-    let value = parse_json(line.trim());
-    assert_eq!(value.get("data").unwrap()["x"], 1);
-    let _ = follower.kill();
-    let output = follower.wait_with_output().expect("wait");
-    assert!(
-        output.stderr.is_empty(),
-        "expected no drop notices on stderr"
-    );
-}
-
-#[test]
-fn follow_where_multiple_predicates_with_since() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-            "--tag",
-            "alpha",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":2}",
-            "--tag",
-            "alpha",
-        ])
-        .output()
-        .expect("feed");
-    assert!(emit_out.status.success());
-
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--since",
-            "1h",
-            "--format",
-            "json",
-            "--where",
-            r#".meta.tags[]? == "alpha""#,
-            "--where",
-            ".data.x == 2",
         ])
         .stdout(Stdio::piped())
         .spawn()
@@ -1220,11 +531,10 @@ fn follow_since_future_exits_empty() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "follow",
+            "fetch",
             "demo",
             "--since",
             "2999-01-01T00:00:00Z",
-            "--no-follow",
         ])
         .output()
         .expect("follow");
@@ -1288,11 +598,10 @@ fn follow_defaults_to_json_when_stdout_is_redirected() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "follow",
+            "fetch",
             "demo",
-            "--tail",
+            "--last",
             "1",
-            "--no-follow",
         ])
         .output()
         .expect("follow default output");
@@ -1326,13 +635,12 @@ fn follow_emits_drop_notice_on_stderr() {
 
     let client = plasmite::api::LocalClient::new().with_pool_dir(&pool_dir);
     let mut pool = client
-        .open_pool(&plasmite::api::PoolRef::name("demo"))
+        .open_pool(&plasmite::api::PoolRef::name("demo"), false)
         .expect("pool");
     let payload = "a".repeat(8192);
-    pool.append_json_now(
+    pool.feed(
         &serde_json::json!({"x": "first", "pad": payload}),
-        &[],
-        plasmite::api::Durability::Fast,
+        plasmite::api::Feed::default(),
     )
     .expect("first message");
 
@@ -1345,7 +653,7 @@ fn follow_emits_drop_notice_on_stderr() {
                 "demo",
                 "--format",
                 "json",
-                "--tail",
+                "--last",
                 "1",
             ])
             .stdout(Stdio::piped())
@@ -1401,10 +709,9 @@ fn follow_emits_drop_notice_on_stderr() {
         .expect("follower attached");
 
     for i in 0..400u64 {
-        pool.append_json_now(
+        pool.feed(
             &serde_json::json!({"x": i, "pad": payload}),
-            &[],
-            plasmite::api::Durability::Fast,
+            plasmite::api::Feed::default(),
         )
         .expect("append");
     }
@@ -1460,7 +767,7 @@ fn follow_rejects_removed_jsonl_format_value() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--tail",
+            "--last",
             "1",
             "--format",
             "jsonl",
@@ -1473,27 +780,6 @@ fn follow_rejects_removed_jsonl_format_value() {
         "expected an unsupported format error: {}",
         String::from_utf8_lossy(&follower.stderr)
     );
-}
-
-#[test]
-fn follow_create_flag_creates_missing_pool() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "autopool",
-            "--create",
-            "--timeout",
-            "20ms",
-        ])
-        .output()
-        .expect("follow");
-    assert_eq!(follower.status.code(), Some(124));
-    assert!(pool_dir.join("autopool.plasmite").exists());
 }
 
 #[test]
@@ -1540,28 +826,42 @@ fn follow_missing_pool_hint_suggests_create() {
 }
 
 #[test]
-fn follow_remote_url_rejects_create_flag() {
+fn follow_remote_url_creates_missing_pool_and_returns_one_match() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "http://127.0.0.1:65535/demo",
-            "--create",
-        ])
-        .args(["--format", "json"])
-        .output()
-        .expect("follow");
-    assert_eq!(output.status.code(), Some(2));
-
-    let err = parse_error_json(&output.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
-    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(message.contains("does not support --create"));
+    let server = ServeProcess::start(temp.path());
+    let pool_url = format!("{}/demo", server.local_url);
+    let mut follow = KillOnDrop(
+        cmd()
+            .args([
+                "follow", &pool_url, "--create", "--since", "oldest", "--one", "--format", "json",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("follow"),
+    );
+    let path = temp.path().join("demo.plasmite");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut pool = loop {
+        if let Ok(pool) = plasmite::api::Pool::open(&path) {
+            break pool;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "follow did not create the remote pool"
+        );
+        sleep(Duration::from_millis(20));
+    };
+    pool.feed(&json!({"marker": true}), plasmite::api::Feed::new())
+        .expect("feed");
+    let line = read_line_with_timeout(
+        follow.0.stdout.take().expect("stdout"),
+        Duration::from_secs(5),
+    );
+    assert_eq!(
+        parse_json_lines(line.as_bytes())[0]["data"],
+        json!({"marker": true})
+    );
+    assert!(wait_within(&mut follow.0, Duration::from_secs(5), "remote follow --one").success());
 }
 
 #[test]
@@ -1610,15 +910,7 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
     let pool_url = format!("{}/demo", server.base_url);
     let follower = cmd()
         .args([
-            "follow",
-            &pool_url,
-            "--tail",
-            "1",
-            "--one",
-            "--format",
-            "json",
-            "--timeout",
-            "2s",
+            "follow", &pool_url, "--last", "1", "--one", "--format", "json",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
@@ -1672,7 +964,7 @@ fn follow_remote_url_supports_tag_filter() {
     let pool_url = format!("{}/demo", server.base_url);
     let mut follower = cmd()
         .args([
-            "follow", &pool_url, "--tail", "10", "--format", "json", "--tag", "keep",
+            "follow", &pool_url, "--last", "10", "--format", "json", "--tag", "keep",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdout(Stdio::piped())
@@ -1709,7 +1001,7 @@ fn follow_remote_url_rejects_api_shaped_path() {
 }
 
 #[test]
-fn follow_remote_url_supports_since_and_rejects_replay() {
+fn fetch_remote_by_time() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     std::fs::create_dir_all(&pool_dir).expect("pool directory");
@@ -1721,24 +1013,16 @@ fn follow_remote_url_supports_since_and_rejects_replay() {
         )
         .expect("create");
     let mut pool = client
-        .open_pool(&plasmite::api::PoolRef::name("demo"))
+        .open_pool(&plasmite::api::PoolRef::name("demo"), false)
         .expect("pool");
-    pool.append_json_now(&json!({"x": 1}), &[], plasmite::api::Durability::Fast)
+    pool.feed(&json!({"x": 1}), plasmite::api::Feed::default())
         .expect("append");
     let server = ServeProcess::start(&pool_dir);
     let access_home = temp.path().join("access-home");
     connect_to_server(&server, &access_home);
     let pool_url = format!("{}/demo", server.remote_url);
     let since = cmd()
-        .args([
-            "follow",
-            &pool_url,
-            "--since",
-            "5m",
-            "--no-follow",
-            "--format",
-            "json",
-        ])
+        .args(["fetch", &pool_url, "--since", "5m", "--format", "json"])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("follow");
@@ -1750,29 +1034,12 @@ fn follow_remote_url_supports_since_and_rejects_replay() {
     let messages = parse_json_lines(&since.stdout);
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0]["data"]["x"], 1);
-    let replay = cmd()
-        .args([
-            "follow", &pool_url, "--tail", "5", "--replay", "1", "--format", "json",
-        ])
-        .env("PLASMITE_ACCESS_HOME", &access_home)
-        .output()
-        .expect("follow");
-    assert_eq!(replay.status.code(), Some(2));
-    let replay_err = parse_error_json(&replay.stderr);
-    assert_eq!(replay_err["error"]["kind"], "Usage");
-    assert!(
-        replay_err["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("does not support --replay")
-    );
     let future = cmd()
         .args([
-            "follow",
+            "fetch",
             &pool_url,
             "--since",
             "2999-01-01T00:00:00Z",
-            "--no-follow",
             "--format",
             "json",
         ])
@@ -1781,57 +1048,6 @@ fn follow_remote_url_supports_since_and_rejects_replay() {
         .expect("future follow");
     assert!(future.status.success());
     assert!(future.stdout.is_empty());
-}
-
-#[test]
-fn follow_remote_url_timeout_returns_124() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let server = ServeProcess::start(&pool_dir);
-    let access_home = temp.path().join("access-home");
-    connect_to_server(&server, &access_home);
-    let pool_url = format!("{}/demo", server.base_url);
-    let follower = cmd()
-        .args([
-            "follow",
-            &pool_url,
-            "--format",
-            "json",
-            "--timeout",
-            "150ms",
-        ])
-        .env("PLASMITE_ACCESS_HOME", &access_home)
-        .output()
-        .expect("follow");
-    assert_eq!(follower.status.code(), Some(124));
-}
-
-#[test]
-fn duplex_remote_url_rejects_create_flag() {
-    let output = cmd()
-        .args(["duplex", "http://127.0.0.1:65535/chat", "--create"])
-        .args(["--format", "json"])
-        .output()
-        .expect("duplex");
-    assert_eq!(output.status.code(), Some(2));
-    let err = parse_error_json(&output.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
-    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(message.contains("does not support --create"));
 }
 
 #[test]
@@ -1855,7 +1071,7 @@ fn duplex_remote_url_accepts_future_since() {
             "duplex",
             &pool_url,
             "--timeout",
-            "50ms",
+            "300ms",
             "--since",
             "2999-01-01T00:00:00Z",
             "--format",
@@ -1878,14 +1094,16 @@ fn duplex_remote_url_accepts_future_since() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.is_empty());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["data"], json!({"from":"alice","msg":"hello"}));
     let pool = client
-        .open_pool(&plasmite::api::PoolRef::name("chat"))
+        .open_pool(&plasmite::api::PoolRef::name("chat"), false)
         .expect("pool");
-    assert_eq!(
-        pool.get_message(1).expect("sent message").data,
-        json!({"from":"alice", "msg":"hello"})
-    );
+    let frame = pool.get(1).unwrap();
+    let message =
+        plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
+    assert_eq!(message.data, json!({"from":"alice", "msg":"hello"}));
 }
 
 #[test]
@@ -1921,7 +1139,7 @@ fn duplex_https_sends_complete_messages_and_receives_after_eof() {
         plasmite::api::PoolOptions::new(1024 * 1024),
     )
     .unwrap();
-    pool.append_json_now(&json!({"seed":true}), &[], plasmite::api::Durability::Fast)
+    pool.feed(&json!({"seed":true}), plasmite::api::Feed::default())
         .unwrap();
     let server = ServeProcess::start(&pool_dir);
     let access_home = temp.path().join("access-home");
@@ -1932,7 +1150,7 @@ fn duplex_https_sends_complete_messages_and_receives_after_eof() {
             .args([
                 "duplex",
                 &target,
-                "--tail",
+                "--last",
                 "1",
                 "--timeout",
                 "200ms",
@@ -1967,529 +1185,14 @@ fn duplex_https_sends_complete_messages_and_receives_after_eof() {
         json!({"from":"alice","msg":"application"})
     );
     assert_eq!(messages[1]["meta"]["tags"], json!(["copied"]));
-    assert_eq!(pool.get_message(2).unwrap().data, messages[1]["data"]);
+    let frame = pool.get(2).unwrap();
+    let message =
+        plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
+    assert_eq!(message.data, messages[1]["data"]);
 }
 
 #[test]
-fn follow_replay_emits_messages_in_order() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rp"])
-        .output()
-        .expect("create");
-    for i in 1..=3 {
-        cmd()
-            .args([
-                "--dir",
-                pool_dir.to_str().unwrap(),
-                "feed",
-                "rp",
-                &format!("{{\"i\":{i}}}"),
-            ])
-            .output()
-            .expect("feed");
-        sleep(Duration::from_millis(20));
-    }
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rp",
-            "--tail",
-            "100",
-            "--replay",
-            "0",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 3);
-    assert_eq!(messages[0]["data"]["i"], 1);
-    assert_eq!(messages[1]["data"]["i"], 2);
-    assert_eq!(messages[2]["data"]["i"], 3);
-}
-
-#[test]
-fn follow_replay_tail_limits_messages() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpt"])
-        .output()
-        .expect("create");
-    for i in 1..=5 {
-        cmd()
-            .args([
-                "--dir",
-                pool_dir.to_str().unwrap(),
-                "feed",
-                "rpt",
-                &format!("{{\"i\":{i}}}"),
-            ])
-            .output()
-            .expect("feed");
-    }
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rpt",
-            "--tail",
-            "2",
-            "--replay",
-            "0",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0]["data"]["i"], 4);
-    assert_eq!(messages[1]["data"]["i"], 5);
-}
-
-#[test]
-fn follow_replay_respects_speed_timing() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rps"])
-        .output()
-        .expect("create");
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rps",
-            "{\"i\":1}",
-        ])
-        .output()
-        .expect("feed");
-    sleep(Duration::from_millis(200));
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rps",
-            "{\"i\":2}",
-        ])
-        .output()
-        .expect("feed");
-
-    let start = Instant::now();
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rps",
-            "--tail",
-            "100",
-            "--replay",
-            "1",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("follow --replay");
-    let elapsed = start.elapsed();
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 2);
-    assert!(
-        elapsed >= Duration::from_millis(150),
-        "replay at 1x should wait ~200ms between messages, took {elapsed:?}"
-    );
-}
-
-/// The time between the first two messages, as the pool recorded it.
-fn recorded_gap(messages: &[Value]) -> Duration {
-    let at = |message: &Value| {
-        time::OffsetDateTime::parse(
-            message["time"].as_str().expect("message time"),
-            &time::format_description::well_known::Rfc3339,
-        )
-        .expect("RFC 3339 time")
-    };
-    let gap = at(&messages[1]) - at(&messages[0]);
-    Duration::try_from(gap).expect("the second message is later")
-}
-
-#[test]
-fn follow_replay_speed_2x_halves_delay() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "rps2",
-        ])
-        .output()
-        .expect("create");
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rps2",
-            "{\"i\":1}",
-        ])
-        .output()
-        .expect("feed");
-    sleep(Duration::from_millis(1200));
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rps2",
-            "{\"i\":2}",
-        ])
-        .output()
-        .expect("feed");
-
-    let start = Instant::now();
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rps2",
-            "--tail",
-            "100",
-            "--replay",
-            "2",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("follow --replay");
-    let elapsed = start.elapsed();
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 2);
-    // The pool's own timestamps give the gap the replay reproduces; process startup
-    // only adds to the measured time, so half the gap is a floor and the whole gap,
-    // what 1x would take, is a ceiling with startup room to spare.
-    let gap = recorded_gap(&messages);
-    assert!(
-        elapsed >= gap.mul_f64(0.45),
-        "replay at 2x of a {gap:?} gap should wait about half of it, took {elapsed:?}"
-    );
-    assert!(
-        elapsed < gap,
-        "replay at 2x should finish before a 1x replay of {gap:?} could, took {elapsed:?}"
-    );
-}
-
-#[test]
-fn follow_replay_rejects_without_tail_or_since() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpz"])
-        .output()
-        .expect("create");
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rpz",
-            "--replay",
-            "1",
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(!output.status.success());
-}
-
-#[test]
-fn follow_replay_rejects_negative_speed() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpn"])
-        .output()
-        .expect("create");
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rpn",
-            "--tail",
-            "5",
-            "--replay",
-            "-1",
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(!output.status.success());
-}
-
-#[test]
-fn follow_replay_where_filters_messages() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpw"])
-        .output()
-        .expect("create");
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rpw",
-            r#"{"level":"info"}"#,
-        ])
-        .output()
-        .expect("feed");
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rpw",
-            r#"{"level":"error"}"#,
-        ])
-        .output()
-        .expect("feed");
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rpw",
-            r#"{"level":"info"}"#,
-        ])
-        .output()
-        .expect("feed");
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rpw",
-            "--tail",
-            "100",
-            "--replay",
-            "0",
-            "--format",
-            "json",
-            "--where",
-            r#".data.level == "error""#,
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["data"]["level"], "error");
-}
-
-#[test]
-fn follow_replay_one_exits_after_first_message() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpo"])
-        .output()
-        .expect("create");
-    for i in 1..=3 {
-        cmd()
-            .args([
-                "--dir",
-                pool_dir.to_str().unwrap(),
-                "feed",
-                "rpo",
-                &format!("{{\"i\":{i}}}"),
-            ])
-            .output()
-            .expect("feed");
-    }
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rpo",
-            "--tail",
-            "100",
-            "--replay",
-            "0",
-            "--format",
-            "json",
-            "--one",
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["data"]["i"], 1);
-}
-
-#[test]
-fn follow_replay_empty_pool_exits_ok() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpe"])
-        .output()
-        .expect("create");
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rpe",
-            "--tail",
-            "100",
-            "--replay",
-            "0",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(output.status.success());
-    assert!(output.stdout.is_empty());
-}
-
-#[test]
-fn follow_replay_emits_complete_message() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpd"])
-        .output()
-        .expect("create");
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rpd",
-            r#"{"x":42}"#,
-        ])
-        .output()
-        .expect("feed");
-
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rpd",
-            "--tail",
-            "100",
-            "--replay",
-            "0",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("follow --replay");
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["data"], json!({"x": 42}));
-    assert_eq!(messages[0]["seq"], 1);
-}
-
-#[test]
-fn follow_replay_zero_speed_emits_without_delay() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rp0"])
-        .output()
-        .expect("create");
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rp0",
-            "{\"i\":1}",
-        ])
-        .output()
-        .expect("feed");
-    sleep(Duration::from_millis(1200));
-    cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "rp0",
-            "{\"i\":2}",
-        ])
-        .output()
-        .expect("feed");
-
-    let start = Instant::now();
-    let output = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "rp0",
-            "--tail",
-            "100",
-            "--replay",
-            "0",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("follow --replay 0");
-    let elapsed = start.elapsed();
-    assert!(output.status.success());
-    let messages = parse_json_lines(&output.stdout);
-    assert_eq!(messages.len(), 2);
-    // A replay that waited at all would take the recorded gap; startup alone does not.
-    let gap = recorded_gap(&messages);
-    assert!(
-        elapsed < gap,
-        "--replay 0 should emit without the {gap:?} delay, took {elapsed:?}"
-    );
-}
-
-#[test]
-fn binary_follow_keeps_raw_bytes_and_validates_before_filtering() {
+fn binary_fetch_validates_before_filtering() {
     use plasmite::api::{AppendOptions, Durability, Pool, PoolOptions, lite3::Lite3Buf};
     let temp = tempfile::tempdir().unwrap();
     let payload =
@@ -2504,36 +1207,19 @@ fn binary_follow_keeps_raw_bytes_and_validates_before_filtering() {
         let raw = cmd()
             .arg("--dir")
             .arg(temp.path())
-            .args(["follow", &reference, "--no-follow", "--format", "lite3"])
+            .args(["fetch", &reference, "--format", "lite3"])
             .output()
             .unwrap();
-        if reference == "broken" {
-            assert!(
-                raw.status.success(),
-                "{}",
-                String::from_utf8_lossy(&raw.stderr)
-            );
-            let mut expected = b"PLS1".to_vec();
-            expected.extend_from_slice(&1u64.to_be_bytes());
-            expected.extend_from_slice(&1u64.to_be_bytes());
-            expected.extend_from_slice(&(payload.as_slice().len() as u32).to_be_bytes());
-            expected.extend_from_slice(payload.as_slice());
-            assert_eq!(raw.stdout, expected);
-        } else {
-            // The HTTP server's SDK tail already validates payloads before sending.
-            assert!(!raw.status.success());
-            assert!(
-                String::from_utf8_lossy(&raw.stderr).contains("meta.tags must be string array")
-            );
-        }
+        assert!(!raw.status.success());
+        assert!(String::from_utf8_lossy(&raw.stderr).contains("meta.tags must be string array"));
         for extra in [
             vec!["--tag", "absent"],
-            vec!["--tag", "absent", "--since", "2100-01-01T00:00:00Z"],
+            vec!["--tag", "absent", "--since", "oldest"],
         ] {
             let filtered = cmd()
                 .arg("--dir")
                 .arg(temp.path())
-                .args(["follow", &reference, "--no-follow", "--format", "lite3"])
+                .args(["fetch", &reference, "--format", "lite3"])
                 .args(extra)
                 .output()
                 .unwrap();

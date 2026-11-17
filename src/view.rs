@@ -51,7 +51,7 @@ impl Storage {
 pub struct MessageView {
     snapshot: std::sync::Arc<Snapshot>,
     pub seq: u64,
-    pub timestamp_ns: u64,
+    pub time: u64,
     pub flags: u32,
 }
 
@@ -70,13 +70,13 @@ pub struct ValueRef<'a> {
 }
 
 impl MessageView {
-    pub fn from_bytes(bytes: &[u8], seq: u64, timestamp_ns: u64) -> Result<Self, Error> {
-        Self::from_owned(bytes.to_vec(), seq, timestamp_ns, 0)
+    pub fn from_bytes(bytes: &[u8], seq: u64, time: u64) -> Result<Self, Error> {
+        Self::from_owned(bytes.to_vec(), seq, time, 0)
     }
     pub(crate) fn from_owned(
         bytes: Vec<u8>,
         seq: u64,
-        timestamp_ns: u64,
+        time: u64,
         flags: u32,
     ) -> Result<Self, Error> {
         let mut owner = Self {
@@ -86,7 +86,7 @@ impl MessageView {
                 json_native_safe: false,
             }),
             seq,
-            timestamp_ns,
+            time,
             flags,
         };
         let mut duplicates = Vec::<usize>::new();
@@ -148,7 +148,7 @@ impl MessageView {
         words: Vec<u32>,
         len: usize,
         seq: u64,
-        timestamp_ns: u64,
+        time: u64,
         flags: u32,
         json_native_safe: bool,
     ) -> Self {
@@ -160,7 +160,7 @@ impl MessageView {
                 json_native_safe,
             }),
             seq,
-            timestamp_ns,
+            time,
             flags,
         }
     }
@@ -182,11 +182,11 @@ impl MessageView {
         self.snapshot.json_native_safe
     }
     /// Reuse immutable payload ownership with a new committed identity.
-    pub(crate) fn with_identity(&self, seq: u64, timestamp_ns: u64, flags: u32) -> Self {
+    pub(crate) fn with_identity(&self, seq: u64, time: u64, flags: u32) -> Self {
         Self {
             snapshot: self.snapshot.clone(),
             seq,
-            timestamp_ns,
+            time,
             flags,
         }
     }

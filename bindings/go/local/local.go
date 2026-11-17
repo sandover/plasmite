@@ -1,6 +1,6 @@
 /*
 Purpose: Go bindings for the libplasmite C ABI (v0).
-Key Exports: Client, Pool, Stream, FollowOptions, Durability, Error.
+Key Exports: Client, Pool, Stream, Durability, Error.
 Role: Minimal, ergonomic wrapper around include/plasmite.h for Go users.
 Invariants: Caller must Close resources; JSON bytes in/out; errors returned as Go error.
 Notes: Uses cgo and links to -lplasmite; caller configures library search path.
@@ -10,24 +10,23 @@ package local
 /*
 #cgo pkg-config: plasmite
 #cgo CFLAGS: -I${SRCDIR}/../../include
-#cgo LDFLAGS: -lplasmite
+#cgo darwin LDFLAGS: -lplasmite.2
+#cgo linux LDFLAGS: -l:libplasmite.so.2
+#cgo windows LDFLAGS: -lplasmite2
 #include "plasmite.h"
+int plsm_internal_pool_get_json(plsm_pool_t *, uint64_t, plsm_buf_t *, plsm_error_t **);
+int plsm_internal_pool_get_lite3(plsm_pool_t *, uint64_t, plsm_lite3_frame_t *, plsm_error_t **);
 #include <stdlib.h>
 */
 import "C"
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
 	"unsafe"
 
 	"github.com/sandover/plasmite/bindings/go/api"
@@ -99,20 +98,18 @@ func PoolRefURI(uri string) PoolRef { return api.PoolRefURI(uri) }
 
 type Lite3Frame = api.Lite3Frame
 
-type FollowOptions = api.FollowOptions
+type FeedOption = api.FeedOption
 
-type AppendOption = api.AppendOption
-
-func WithDurability(d Durability) AppendOption { return api.WithDurability(d) }
+func WithDurability(d Durability) FeedOption { return api.WithDurability(d) }
 
 var (
-	_ api.Client      = (*Client)(nil)
-	_ api.Pool        = (*Pool)(nil)
-	_ api.Stream      = (*Stream)(nil)
-	_ api.Lite3Stream = (*Lite3Stream)(nil)
+	_ api.Pool = (*Pool)(nil)
 )
 
 func NewClient(poolDir string) (*Client, error) {
+	if major := C.plsm_abi_major(); major != 2 {
+		return nil, &Error{Kind: ErrorUsage, Message: fmt.Sprintf("Plasmite requires ABI major 2; found %d", major)}
+	}
 	if poolDir == "" {
 		return nil, invalidArgumentError("poolDir is required")
 	}
@@ -172,7 +169,7 @@ func (c *Client) Close() {
 	c.ptr = nil
 }
 
-func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
+func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
 	if c == nil {
 		return nil, closedError("client")
 	}
@@ -199,7 +196,7 @@ func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
 	return &Pool{ptr: cPool}, nil
 }
 
-func (c *Client) OpenPool(ref PoolRef) (api.Pool, error) {
+func (c *Client) OpenPool(ref PoolRef, opts ...api.OpenOption) (*Pool, error) {
 	if c == nil {
 		return nil, closedError("client")
 	}
@@ -216,23 +213,19 @@ func (c *Client) OpenPool(ref PoolRef) (api.Pool, error) {
 
 	var cPool *C.plsm_pool_t
 	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_open(c.ptr, cRef, &cPool, &cErr)
+	var cfg api.OpenConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var create C.uint32_t
+	if cfg.Create {
+		create = 1
+	}
+	rc := C.plsm_pool_open(c.ptr, cRef, create, &cPool, &cErr)
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
 	return &Pool{ptr: cPool}, nil
-}
-
-func (c *Client) Pool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
-	pool, err := c.OpenPool(ref)
-	if err == nil {
-		return pool, nil
-	}
-	var perr *Error
-	if errors.As(err, &perr) && perr.Kind == ErrorNotFound {
-		return c.CreatePool(ref, sizeBytes)
-	}
-	return nil, err
 }
 
 func (p *Pool) Close() {
@@ -248,164 +241,7 @@ func (p *Pool) Close() {
 	p.ptr = nil
 }
 
-func (p *Pool) AppendJSON(payload []byte, tags []string, durability Durability) ([]byte, error) {
-	if p == nil {
-		return nil, closedError("pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
-	if len(payload) == 0 {
-		return nil, invalidArgumentError("payload is required")
-	}
-	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
-	cLen := C.size_t(len(payload))
-
-	cTags, cleanup := cStringArray(tags)
-	defer cleanup()
-
-	var cBuf C.plsm_buf_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_append_json(
-		p.ptr,
-		cPayload,
-		cLen,
-		cTags,
-		C.size_t(len(tags)),
-		C.uint32_t(durability),
-		&cBuf,
-		&cErr,
-	)
-	runtime.KeepAlive(tags)
-	if rc != 0 {
-		return nil, fromCError(cErr)
-	}
-	return copyAndFreeBuf(&cBuf), nil
-}
-
-func (p *Pool) Append(value any, tags []string, opts ...AppendOption) (*api.Message, error) {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("plasmite: marshal payload: %w", err)
-	}
-	cfg := api.ApplyAppendOptions(opts...)
-	raw, err := p.AppendJSON(payload, tags, cfg.Durability)
-	if err != nil {
-		return nil, err
-	}
-	return api.DecodeOwnedMessage(raw)
-}
-
-// AppendLite3 appends a pre-encoded Lite3 payload without JSON encoding.
-func (p *Pool) AppendLite3(payload []byte, durability Durability) (uint64, error) {
-	if p == nil {
-		return 0, closedError("pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return 0, closedError("pool")
-	}
-	if len(payload) == 0 {
-		return 0, invalidArgumentError("payload is required")
-	}
-	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
-	cLen := C.size_t(len(payload))
-
-	var cSeq C.uint64_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_append_lite3(
-		p.ptr,
-		cPayload,
-		cLen,
-		C.uint32_t(durability),
-		&cSeq,
-		&cErr,
-	)
-	runtime.KeepAlive(payload)
-	if rc != 0 {
-		return 0, fromCError(cErr)
-	}
-	return uint64(cSeq), nil
-}
-
-// AppendIdentity appends an object without returning or decoding its data.
-func (p *Pool) AppendIdentity(value any, tags []string, opts ...AppendOption) (*api.AppendReceipt, error) {
-	return api.AppendIdentity(p, value, tags, opts...)
-}
-
-func (p *Pool) AppendJSONIdentity(payload []byte, tags []string, durability Durability) (*api.AppendReceipt, error) {
-	if p == nil {
-		return nil, closedError("pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
-	if len(payload) == 0 {
-		return nil, invalidArgumentError("payload is required")
-	}
-	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
-	cLen := C.size_t(len(payload))
-
-	cTags, cleanup := cStringArray(tags)
-	defer cleanup()
-
-	var identity C.plsm_append_identity_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_append_json_identity(
-		p.ptr,
-		cPayload,
-		cLen,
-		cTags,
-		C.size_t(len(tags)),
-		C.uint32_t(durability),
-		&identity,
-		&cErr,
-	)
-	runtime.KeepAlive(tags)
-	if rc != 0 {
-		return nil, fromCError(cErr)
-	}
-	return &api.AppendReceipt{Seq: uint64(identity.seq), TimestampNs: uint64(identity.timestamp_ns)}, nil
-}
-
-func (p *Pool) AppendLite3Identity(payload []byte, durability Durability) (*api.AppendReceipt, error) {
-	if p == nil {
-		return nil, closedError("pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
-	if len(payload) == 0 {
-		return nil, invalidArgumentError("payload is required")
-	}
-	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
-	cLen := C.size_t(len(payload))
-
-	var identity C.plsm_append_identity_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_append_lite3_identity(
-		p.ptr,
-		cPayload,
-		cLen,
-		C.uint32_t(durability),
-		&identity,
-		&cErr,
-	)
-	runtime.KeepAlive(payload)
-	if rc != 0 {
-		return nil, fromCError(cErr)
-	}
-	return &api.AppendReceipt{Seq: uint64(identity.seq), TimestampNs: uint64(identity.timestamp_ns)}, nil
-}
-
-func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
+func (p *Pool) getJSON(seq uint64) ([]byte, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -416,23 +252,15 @@ func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 	}
 	var cBuf C.plsm_buf_t
 	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_get_json(p.ptr, C.uint64_t(seq), &cBuf, &cErr)
+	rc := C.plsm_internal_pool_get_json(p.ptr, C.uint64_t(seq), &cBuf, &cErr)
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
 	return copyAndFreeBuf(&cBuf), nil
 }
 
-func (p *Pool) Get(seq uint64) (*api.Message, error) {
-	raw, err := p.GetJSON(seq)
-	if err != nil {
-		return nil, err
-	}
-	return api.DecodeOwnedMessage(raw)
-}
-
-// GetLite3 returns the raw Lite3 payload and metadata for the given sequence.
-func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
+// getLite3 returns the raw Lite3 payload and metadata for the given sequence.
+func (p *Pool) getLite3(seq uint64) (*Lite3Frame, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -443,109 +271,11 @@ func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
 	}
 	var cFrame C.plsm_lite3_frame_t
 	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_get_lite3(p.ptr, C.uint64_t(seq), &cFrame, &cErr)
+	rc := C.plsm_internal_pool_get_lite3(p.ptr, C.uint64_t(seq), &cFrame, &cErr)
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
 	return copyAndFreeLite3Frame(&cFrame), nil
-}
-
-func (p *Pool) OpenFollow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (api.Stream, error) {
-	stream, err := p.openFollow(start, maxMessages, timeoutMs, false, finite...)
-	if err != nil {
-		return nil, err
-	}
-	return stream, nil
-}
-
-func (p *Pool) openFollow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool, finite ...bool) (*Stream, error) {
-	if p == nil {
-		return nil, closedError("pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
-	options := followOptions(start, maxMessages, timeoutMs, errorOnGap, len(finite) > 0 && finite[0])
-	var cStream *C.plsm_stream_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_follow(p.ptr, &options, &cStream, &cErr)
-	if rc != 0 {
-		return nil, fromCError(cErr)
-	}
-	return &Stream{ptr: cStream}, nil
-}
-
-func (p *Pool) OpenLite3Follow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (api.Lite3Stream, error) {
-	stream, err := p.openLite3Follow(start, maxMessages, timeoutMs, false, finite...)
-	if err != nil {
-		return nil, err
-	}
-	return stream, nil
-}
-
-func (p *Pool) openLite3Follow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool, finite ...bool) (*Lite3Stream, error) {
-	if p == nil {
-		return nil, closedError("pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
-	options := followOptions(start, maxMessages, timeoutMs, errorOnGap, len(finite) > 0 && finite[0])
-	var cStream *C.plsm_lite3_stream_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_follow_lite3(p.ptr, &options, &cStream, &cErr)
-	if rc != 0 {
-		return nil, fromCError(cErr)
-	}
-	return &Lite3Stream{ptr: cStream}, nil
-}
-
-func (s *Stream) NextJSON() ([]byte, error) {
-	if s == nil {
-		return nil, closedError("stream")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ptr == nil {
-		return nil, closedError("stream")
-	}
-	var cBuf C.plsm_buf_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_stream_next(s.ptr, &cBuf, &cErr)
-	switch rc {
-	case 1:
-		return copyAndFreeBuf(&cBuf), nil
-	case 0:
-		return nil, io.EOF
-	default:
-		return nil, fromCError(cErr)
-	}
-}
-
-func (s *Lite3Stream) Next() (*Lite3Frame, error) {
-	if s == nil {
-		return nil, closedError("stream")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ptr == nil {
-		return nil, closedError("stream")
-	}
-	var cFrame C.plsm_lite3_frame_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_lite3_stream_next(s.ptr, &cFrame, &cErr)
-	switch rc {
-	case 1:
-		return copyAndFreeLite3Frame(&cFrame), nil
-	case 0:
-		return nil, io.EOF
-	default:
-		return nil, fromCError(cErr)
-	}
 }
 
 func (s *Stream) Close() {
@@ -572,145 +302,6 @@ func (s *Lite3Stream) Close() {
 	}
 	C.plsm_lite3_stream_free(s.ptr)
 	s.ptr = nil
-}
-
-func streamTimeoutMillis(timeout time.Duration) uint64 {
-	if timeout <= 0 {
-		timeout = time.Second
-	}
-	if timeout < time.Millisecond {
-		return 1
-	}
-	return uint64(timeout.Milliseconds())
-}
-
-// tailPoolOpen preserves the high-level tail's Close behavior while its native
-// stream retains an independent handle. Low-level streams outlive their Pool.
-func (p *Pool) tailPoolOpen() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.ptr != nil
-}
-
-// Follow streams matching JSON messages through one native reader. Bounded waits
-// check context cancellation at least every 50 ms while the pool is idle.
-func (p *Pool) Follow(ctx context.Context, opts FollowOptions) (<-chan *api.Message, <-chan error) {
-	out := make(chan *api.Message, bufferSize(opts.Buffer))
-	errs := make(chan error, 1)
-	limit := opts.MaxMessages
-	if len(opts.Tags) > 0 {
-		limit = nil
-	}
-	stream, err := p.openFollow(opts.Start, limit, nil, opts.ErrorOnGap, opts.Finite)
-	go func() {
-		defer close(out)
-		defer close(errs)
-		if stream != nil {
-			defer stream.Close()
-		}
-		if opts.MaxMessages != nil && *opts.MaxMessages == 0 {
-			return
-		}
-		if err != nil {
-			errs <- err
-			return
-		}
-		var delivered uint64
-		wait := min(streamTimeoutMillis(opts.Timeout), uint64(50))
-		for {
-			if ctx.Err() != nil {
-				errs <- ctx.Err()
-				return
-			}
-			if !p.tailPoolOpen() {
-				errs <- closedError("pool")
-				return
-			}
-			raw, status, err := stream.nextWait(wait)
-			if err != nil {
-				errs <- err
-				return
-			}
-			if status == 2 || status == 3 {
-				return
-			}
-			if status == 0 {
-				continue
-			}
-			msg, err := api.DecodeOwnedMessage(raw)
-			if err != nil {
-				errs <- err
-				return
-			}
-			if messageHasTags(msg, opts.Tags) {
-				select {
-				case out <- msg:
-					delivered++
-				case <-ctx.Done():
-					errs <- ctx.Err()
-					return
-				}
-			}
-			if (opts.MaxMessages != nil && delivered >= *opts.MaxMessages) || msg.Seq == ^uint64(0) {
-				return
-			}
-		}
-	}()
-	return out, errs
-}
-
-// FollowLite3 streams raw frames through one native reader. Bounded waits retain
-// its checkpoint while checking context cancellation and Pool.Close.
-func (p *Pool) FollowLite3(ctx context.Context, opts FollowOptions) (<-chan *Lite3Frame, <-chan error) {
-	out := make(chan *Lite3Frame, bufferSize(opts.Buffer))
-	errs := make(chan error, 1)
-	stream, err := p.openLite3Follow(opts.Start, opts.MaxMessages, nil, opts.ErrorOnGap, opts.Finite)
-	go func() {
-		defer close(out)
-		defer close(errs)
-		if stream != nil {
-			defer stream.Close()
-		}
-		if opts.MaxMessages != nil && *opts.MaxMessages == 0 {
-			return
-		}
-		if err != nil {
-			errs <- err
-			return
-		}
-		wait := min(streamTimeoutMillis(opts.Timeout), uint64(50))
-		for {
-			if ctx.Err() != nil {
-				errs <- ctx.Err()
-				return
-			}
-			if !p.tailPoolOpen() {
-				errs <- closedError("pool")
-				return
-			}
-			frame, status, err := stream.nextWait(wait)
-			if err != nil {
-				errs <- err
-				return
-			}
-			if status == 2 || status == 3 {
-				return
-			}
-			if status == 0 {
-				continue
-			}
-			select {
-			case out <- frame:
-			case <-ctx.Done():
-				errs <- ctx.Err()
-				return
-			}
-			if frame.Seq == ^uint64(0) {
-				return
-			}
-		}
-	}()
-	return out, errs
 }
 
 func (s *Stream) nextWait(wait uint64) ([]byte, int, error) {
@@ -767,10 +358,10 @@ func copyAndFreeLite3Frame(frame *C.plsm_lite3_frame_t) *Lite3Frame {
 		payload = C.GoBytes(unsafe.Pointer(frame.payload.data), C.int(frame.payload.len))
 	}
 	out := &Lite3Frame{
-		Seq:         uint64(frame.seq),
-		TimestampNs: uint64(frame.timestamp_ns),
-		Flags:       uint32(frame.flags),
-		Payload:     payload,
+		Seq:     uint64(frame.seq),
+		Time:    uint64(frame.time),
+		Flags:   uint32(frame.flags),
+		Payload: payload,
 	}
 	C.plsm_lite3_frame_free(frame)
 	return out
@@ -782,7 +373,7 @@ func fromCError(cErr *C.plsm_error_t) *Error {
 	}
 	defer C.plsm_error_free(cErr)
 
-	err := &Error{Kind: ErrorKind(cErr.kind)}
+	err := &Error{Kind: ErrorKind(cErr.kind), Missing: uint64(cErr.missing), NextSeq: uint64(cErr.next_seq)}
 	if cErr.message != nil {
 		err.Message = C.GoString(cErr.message)
 	}
@@ -825,63 +416,10 @@ func cStringArray(values []string) (**C.char, func()) {
 	return (**C.char)(unsafe.Pointer(&cValues[0])), cleanup
 }
 
-func bufferSize(input int) int {
-	if input <= 0 {
-		return 64
-	}
-	return input
-}
-
-func messageHasTags(message *api.Message, required []string) bool {
-	if len(required) == 0 {
-		return true
-	}
-	if message == nil {
-		return false
-	}
-	have := make(map[string]struct{}, len(message.Meta.Tags))
-	for _, tag := range message.Meta.Tags {
-		have[tag] = struct{}{}
-	}
-	for _, requiredTag := range required {
-		if _, ok := have[requiredTag]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 func closedError(target string) error {
 	return fmt.Errorf("%w: %s is closed", ErrClosed, target)
 }
 
 func invalidArgumentError(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidArgument, message)
-}
-
-// Start selects history explicitly. Its zero value means new messages.
-type Start = api.UDPStart
-
-func NewPosition() Start        { return api.UDPStartNewPosition() }
-func All() Start                { return api.UDPStartAtSequence(0) }
-func Last(n uint64) Start       { return api.UDPStartLastCount(n) }
-func Since(ns uint64) Start     { return api.UDPStartSinceNs(ns) }
-func Sequence(seq uint64) Start { return api.UDPStartAtSequence(seq) }
-func followOptions(start Start, max *uint64, timeout *uint64, gap bool, finite bool) C.plsm_follow_options_t {
-	options := C.plsm_follow_options_t{struct_size: C.uint32_t(C.sizeof_plsm_follow_options_t), start_kind: C.uint32_t(start.Kind), start_value: C.uint64_t(start.Value)}
-	if max != nil {
-		options.has_max = 1
-		options.max_messages = C.uint64_t(*max)
-	}
-	if timeout != nil {
-		options.has_timeout = 1
-		options.timeout_ms = C.uint64_t(*timeout)
-	}
-	if gap {
-		options.gap_policy = C.PLSM_GAP_ERROR
-	}
-	if finite {
-		options.finite = 1
-	}
-	return options
 }

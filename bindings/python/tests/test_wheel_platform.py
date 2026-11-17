@@ -19,7 +19,7 @@ class WheelPlatformTests(unittest.TestCase):
     def tag(self, library, cli, original='macosx_11_0_universal2'):
         with tempfile.TemporaryDirectory() as directory:
             native = Path(directory)
-            (native / 'libplasmite.dylib').write_bytes(library)
+            (native / 'libplasmite.2.dylib').write_bytes(library)
             (native / 'plasmite').write_bytes(cli)
             return macos_platform_tag(native, original)
 
@@ -53,7 +53,7 @@ class WheelPlatformTests(unittest.TestCase):
             root = Path(directory)
             native = root / "_native"
             native.mkdir()
-            (native / "libplasmite.dylib").write_bytes(binary("arm64", (11, 0, 0)))
+            (native / "libplasmite.2.dylib").write_bytes(binary("arm64", (11, 0, 0)))
             (native / "plasmite").write_bytes(binary("arm64", (11, 0, 0)))
             (root / "_views_native.abi3.so").write_bytes(binary("arm64", (13, 0, 0)))
             self.assertEqual(
