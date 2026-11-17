@@ -197,7 +197,7 @@ check_pool_version "$POOL_DIR/cookbook-smoke.plasmite"
   node - "$POOL_DIR" <<'JS'
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
-const { Client, parseMessage } = require("./bindings/node");
+const { Client, FollowStart, parseMessage } = require("./bindings/node");
 const poolDir = process.argv[2];
 const client = new Client(poolDir);
 const pool = client.openPool("cookbook-smoke");
@@ -205,7 +205,7 @@ try {
   const seed = pool.get(1n);
   assert.deepEqual(seed.data, { task: "resize", id: 1 });
   assert.deepEqual(seed.tags, ["cookbook"]);
-  const stream = pool.openStream(2n, 1n, 5000n);
+  const stream = pool.openFollow(FollowStart.sequence(2n), 1n, 5000n);
   try {
     execFileSync(process.env.PLASMITE_BIN, [
       "--dir", poolDir, "feed", "cookbook-smoke", '{"writer":"cli"}', "--tag", "external",

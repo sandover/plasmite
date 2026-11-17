@@ -9,13 +9,13 @@ use plasmite::api::Cursor;
 use plasmite::api::CursorResult;
 use plasmite::api::Error;
 use plasmite::api::ErrorKind;
+use plasmite::api::FollowOptions;
 use plasmite::api::Pool;
 use plasmite::api::PoolRef;
 use plasmite::api::RemoteClient;
+use plasmite::api::RemoteFollow;
+use plasmite::api::RemoteLite3Follow;
 use plasmite::api::RemoteLite3Frame;
-use plasmite::api::RemoteLite3Tail;
-use plasmite::api::RemoteTail;
-use plasmite::api::TailOptions;
 use plasmite::api::notify;
 use plasmite::api::notify::NotifyWait;
 use plasmite::api::{UdpClient, UdpEvent, UdpFollowOptions, UdpStart};
@@ -126,7 +126,7 @@ impl FollowDeadline {
     }
 }
 
-// Sequence bounds and relative time use one start snapshot. Tail selects retained
+// Sequence bounds and relative time use one start snapshot. Follow selects retained
 // frames, not matching frames; all selection predicates run after that selection.
 fn history_start(oldest: u64, newest: u64, cfg: &FollowConfig) -> u64 {
     if oldest == 0 {
@@ -268,8 +268,8 @@ fn matches_raw(cfg: &FollowConfig, timestamp_ns: u64, payload: &[u8]) -> Result<
 }
 
 enum RemoteStream {
-    Json(RemoteTail),
-    Lite3(RemoteLite3Tail),
+    Json(RemoteFollow),
+    Lite3(RemoteLite3Follow),
 }
 
 enum RemoteRecord {
@@ -350,8 +350,8 @@ pub(crate) fn follow_remote(
         if deadline.expired() {
             return Ok(drops.finish(124));
         }
-        let mut options = TailOptions::new();
-        options.since_seq = Some(expected);
+        let mut options = FollowOptions::new();
+        options.start = plasmite::api::FollowStart::Sequence(expected);
         // Finite reads and cancellable duplex sessions use short server waits
         // so they can observe retention/cancellation without another message.
         // An ordinary unbounded follow uses the server's streaming lifetime.
@@ -364,9 +364,9 @@ pub(crate) fn follow_remote(
             );
         }
         let result = if cfg.output_mode.is_binary() {
-            remote_pool.tail_lite3(options).map(RemoteStream::Lite3)
+            remote_pool.follow_lite3(options).map(RemoteStream::Lite3)
         } else {
-            remote_pool.tail(options).map(RemoteStream::Json)
+            remote_pool.follow(options).map(RemoteStream::Json)
         };
         let mut tail = result?;
         while let Some(record) = tail.next_record()? {

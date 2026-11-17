@@ -35,7 +35,7 @@ def worker(args):
                 due += args.interval_ms / 1000
                 count += 1
         else:
-            for message in pool.tail(since_seq=1, max_messages=args.messages,
+            for message in pool.follow(start=plasmite.FollowStart.sequence(1), max_messages=args.messages,
                                      timeout_ms=1000 if args.idle else 10000,
                                      error_on_gap=True):
                 received = time.monotonic_ns()

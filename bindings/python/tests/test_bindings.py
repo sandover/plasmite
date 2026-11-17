@@ -7,6 +7,7 @@ Notes: Uses temporary directories and avoids global state.
 """
 
 from __future__ import annotations
+from plasmite import FollowStart
 
 import json
 import os
@@ -44,7 +45,7 @@ from plasmite import (
     UdpFrame,
     UdpGap,
     UdpProgress,
-    UdpStart,
+    FollowStart,
     parse_message,
 )
 
@@ -228,7 +229,7 @@ class BindingTests(unittest.TestCase):
 
     def test_tail_timeout_and_close(self) -> None:
         with self._client_pool("tail") as (_, pool):
-            stream = pool.open_stream(since_seq=9999, max_messages=1, timeout_ms=10)
+            stream = pool.open_follow(start=FollowStart.sequence(9999), max_messages=1, timeout_ms=10)
             self.assertIsNone(stream.next_json())
             stream.close()
             stream.close()
@@ -239,8 +240,8 @@ class BindingTests(unittest.TestCase):
             pool.append({"kind": "two"}, ["iter"])
             pool.append({"kind": "three"}, ["iter"])
 
-            stream = pool.open_stream(
-                since_seq=first.seq, max_messages=3, timeout_ms=50
+            stream = pool.open_follow(
+                start=FollowStart.sequence(first.seq), max_messages=3, timeout_ms=50
             )
             seen = [parse_message(raw).data["kind"] for raw in stream]
             self.assertEqual(seen, ["one", "two", "three"])
@@ -251,8 +252,8 @@ class BindingTests(unittest.TestCase):
             seq2 = pool.append_lite3(frame_seed.payload, Durability.FAST)
             pool.append_lite3(frame_seed.payload, Durability.FAST)
 
-            lite3_stream = pool.open_lite3_stream(
-                since_seq=seq2, max_messages=2, timeout_ms=50
+            lite3_stream = pool.open_lite3_follow(
+                start=FollowStart.sequence(seq2), max_messages=2, timeout_ms=50
             )
             frame_seqs = [frame.seq for frame in lite3_stream]
             self.assertEqual(frame_seqs, [seq2, seq2 + 1])
@@ -264,7 +265,7 @@ class BindingTests(unittest.TestCase):
             pool.append_json(b'{"kind":"drop"}', ["drop"], Durability.FAST)
             pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
 
-            results = list(pool.tail(max_messages=1, timeout_ms=50, tags=["keep"]))
+            results = list(pool.follow(start=FollowStart.all(), max_messages=1, timeout_ms=50, tags=["keep"]))
             self.assertEqual(len(results), 1)
             message = results[0]
             self.assertIsInstance(message, Message)
@@ -278,8 +279,8 @@ class BindingTests(unittest.TestCase):
 
             with self.assertRaises(RetentionGapError) as raised:
                 next(
-                    pool.tail(
-                        since_seq=first.seq,
+                    pool.follow(
+                        start=FollowStart.sequence(first.seq),
                         timeout_ms=50,
                         tags=["never"],
                         error_on_gap=True,
@@ -289,8 +290,8 @@ class BindingTests(unittest.TestCase):
             self.assertEqual(raised.exception.seq, first.seq)
 
             continuing = next(
-                pool.tail(
-                    since_seq=first.seq,
+                pool.follow(
+                    start=FollowStart.sequence(first.seq),
                     max_messages=1,
                     timeout_ms=50,
                 )
@@ -298,10 +299,10 @@ class BindingTests(unittest.TestCase):
             self.assertGreater(continuing.seq, first.seq)
             pool.close()
 
-    def test_open_stream_reports_first_unread_sequence_after_overwrite(self) -> None:
+    def test_open_follow_reports_first_unread_sequence_after_overwrite(self) -> None:
         with self._new_client() as client, client.create_pool("slow-reader", 64 * 1024) as pool:
             seed = pool.append({"kind": "seed"})
-            with pool.open_stream(since_seq=seed.seq, timeout_ms=500, error_on_gap=True) as stream:
+            with pool.open_follow(start=FollowStart.sequence(seed.seq), timeout_ms=500, error_on_gap=True) as stream:
                 self.assertEqual(parse_message(stream.next_json()).seq, seed.seq)
                 lost = pool.append({"kind": "lost"})
                 self._fill_past(pool, lost.seq)
@@ -316,8 +317,8 @@ class BindingTests(unittest.TestCase):
             first = pool.append({"kind": "first"}, [])
             self._fill_past(pool, first.seq)
 
-            stream = pool.open_lite3_stream(
-                since_seq=first.seq,
+            stream = pool.open_lite3_follow(
+                start=FollowStart.sequence(first.seq),
                 timeout_ms=50,
                 error_on_gap=True,
             )
@@ -356,8 +357,8 @@ class BindingTests(unittest.TestCase):
             frame2 = pool.get_lite3(seq2)
             self.assertEqual(frame2.payload, frame.payload)
 
-            stream = pool.open_lite3_stream(
-                since_seq=seq2, max_messages=1, timeout_ms=50
+            stream = pool.open_lite3_follow(
+                start=FollowStart.sequence(seq2), max_messages=1, timeout_ms=50
             )
             next_frame = stream.next()
             self.assertIsNotNone(next_frame)
@@ -377,8 +378,8 @@ class BindingTests(unittest.TestCase):
             with client.create_pool("ctx", TEST_POOL_SIZE_BYTES) as pool:
                 msg = pool.append_json(b'{"x":1}', [], Durability.FAST)
                 parsed = parse_message(msg)
-                with pool.open_stream(
-                    since_seq=parsed.seq, max_messages=1, timeout_ms=50
+                with pool.open_follow(
+                    start=FollowStart.sequence(parsed.seq), max_messages=1, timeout_ms=50
                 ) as stream:
                     self.assertIsNotNone(stream.next_json())
 
@@ -399,6 +400,20 @@ class BindingTests(unittest.TestCase):
             with self.assertRaises(PlasmiteError):
                 pool.get_json(1)
 
+    def test_follow_starts_now_and_history_is_explicit(self):
+        with self._new_client() as client, client.create_pool("follow-choice", TEST_POOL_SIZE_BYTES) as pool:
+            pool.append({"n": 1}, ["skip"])
+            pool.append({"n": 2}, ["keep"])
+            with pool.open_follow() as stream:
+                self.assertEqual(stream.next_wait(0)[0], 0)
+                appended = pool.append({"n": 3}, ["keep"])
+                status, raw = stream.next_wait(100)
+                self.assertEqual(status, 1)
+                self.assertEqual(json.loads(raw)["seq"], appended.seq)
+            self.assertEqual([m.seq for m in pool.follow(start=FollowStart.last(2), finite=True)], [2, 3])
+            self.assertEqual([m.seq for m in pool.follow_views(start=FollowStart.all(), finite=True)], [1, 2, 3])
+            self.assertEqual(list(pool.follow(start=FollowStart.last(0), finite=True)), [])
+
     def test_unsigned_64_bit_arguments_do_not_wrap(self) -> None:
         overflow = (1 << 64) + 1
         with self._new_client() as client:
@@ -414,11 +429,11 @@ class BindingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "seq must fit"):
                     pool.get_lite3(overflow)
 
-                for open_stream in (pool.open_stream, pool.open_lite3_stream):
-                    for argument in ("since_seq", "max_messages", "timeout_ms"):
-                        with self.subTest(stream=open_stream.__name__, argument=argument):
-                            with self.assertRaisesRegex(ValueError, f"{argument} must fit"):
-                                open_stream(**{argument: overflow})
+                for open_follow in (pool.open_follow, pool.open_lite3_follow):
+                    for argument in ("start", "max_messages", "timeout_ms"):
+                        with self.subTest(stream=open_follow.__name__, argument=argument):
+                            with self.assertRaisesRegex(ValueError, f"{'seq' if argument == 'start' else argument} must fit"):
+                                open_follow(**{argument: FollowStart.sequence(overflow) if argument == "start" else overflow})
 
                 with self.assertRaises(NotFoundError):
                     pool.get_json((1 << 64) - 1)
@@ -507,7 +522,7 @@ class BindingTests(unittest.TestCase):
                 with UdpClient(f"udp://127.0.0.1:{peer.getsockname()[1]}") as client:
                     with client.open_pool("sensors") as pool:
                         open_follow = pool.follow_views if views else pool.follow
-                        with open_follow(UdpFollowOptions(start=UdpStart.last(4), live=False)) as follow:
+                        with open_follow(UdpFollowOptions(start=FollowStart.last(4), finite=True)) as follow:
                             events = [follow.next_event(timeout_ms=1000) for _ in range(7)]
                             self.assertIsNone(follow.next_event(timeout_ms=0))
                 frame_type = MessageView if views else UdpFrame
@@ -576,7 +591,7 @@ class BindingTests(unittest.TestCase):
                     with UdpClient(f"udp://127.0.0.1:{port}") as udp_client:
                         with udp_client.open_pool("udp-sdk") as udp_pool:
                             options = UdpFollowOptions(
-                                start=UdpStart.sequence(original.seq + 1), live=True
+                                start=FollowStart.sequence(original.seq + 1), finite=False
                             )
                             with udp_pool.follow(options) as follow:
                                 self.assertIsNone(
@@ -605,7 +620,7 @@ class BindingTests(unittest.TestCase):
                             large_start = (1 << 53) + 1
                             with udp_pool.follow(
                                 UdpFollowOptions(
-                                    start=UdpStart.sequence(large_start), live=False
+                                    start=FollowStart.sequence(large_start), finite=True
                                 )
                             ) as large_follow:
                                 progress = large_follow.next_event(timeout_ms=1000)

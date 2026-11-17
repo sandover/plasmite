@@ -22,10 +22,10 @@ type ViewStream struct {
 	wait   uint64
 }
 
-// OpenViewStream shares local tail ordering, filtering, matching limits and gap
-// policy. Timeout retains TailOptions' bounded polling-wait meaning. The stream
+// OpenViewFollow shares local tail ordering, filtering, matching limits and gap
+// policy. Timeout retains FollowOptions' bounded polling-wait meaning. The stream
 // retains an independent native pool handle and can outlive its source Pool.
-func (p *Pool) OpenViewStream(opts TailOptions) (*ViewStream, error) {
+func (p *Pool) OpenViewFollow(opts FollowOptions) (*ViewStream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -34,18 +34,7 @@ func (p *Pool) OpenViewStream(opts TailOptions) (*ViewStream, error) {
 	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
-	options := C.plsm_stream_options_t{struct_size: C.uint32_t(C.sizeof_plsm_stream_options_t)}
-	if opts.SinceSeq != nil {
-		options.has_since = 1
-		options.since_seq = C.uint64_t(*opts.SinceSeq)
-	}
-	if opts.MaxMessages != nil {
-		options.has_max = 1
-		options.max_messages = C.uint64_t(*opts.MaxMessages)
-	}
-	if opts.ErrorOnGap {
-		options.gap_policy = C.PLSM_GAP_ERROR
-	}
+	options := followOptions(opts.Start, opts.MaxMessages, nil, opts.ErrorOnGap, opts.Finite)
 	tags := make([]C.plsm_text_t, len(opts.Tags))
 	var pin runtime.Pinner
 	defer pin.Unpin()
@@ -66,7 +55,7 @@ func (p *Pool) OpenViewStream(opts TailOptions) (*ViewStream, error) {
 	}
 	var out *C.plsm_stream_t
 	var nativeError *C.plsm_error_t
-	status := C.plsm_view_stream_open(p.ptr, &options, first, C.size_t(len(tags)), &out, &nativeError)
+	status := C.plsm_pool_follow_views(p.ptr, &options, first, C.size_t(len(tags)), &out, &nativeError)
 	runtime.KeepAlive(tags)
 	if status != 0 {
 		return nil, fromCError(nativeError)
@@ -135,14 +124,18 @@ func (s *ViewStream) Close() {
 	}
 }
 
-// TailViews defaults to an unbuffered channel; positive Buffer opts into a queue. It
+// FollowViews defaults to an unbuffered channel; positive Buffer opts into a queue. It
 // checks context and Pool.Close between native waits and returns retained views.
-func (p *Pool) TailViews(ctx context.Context, opts TailOptions) (<-chan *MessageView, <-chan error) {
+func (p *Pool) FollowViews(ctx context.Context, opts FollowOptions) (<-chan *MessageView, <-chan error) {
 	out := make(chan *MessageView, max(opts.Buffer, 0))
 	errs := make(chan error, 1)
+	stream, err := p.OpenViewFollow(opts)
 	go func() {
 		defer close(out)
 		defer close(errs)
+		if stream != nil {
+			defer stream.Close()
+		}
 		if ctx == nil {
 			errs <- invalidArgumentError("context is nil")
 			return
@@ -150,12 +143,10 @@ func (p *Pool) TailViews(ctx context.Context, opts TailOptions) (<-chan *Message
 		if opts.MaxMessages != nil && *opts.MaxMessages == 0 {
 			return
 		}
-		stream, err := p.OpenViewStream(opts)
 		if err != nil {
 			errs <- err
 			return
 		}
-		defer stream.Close()
 		for {
 			if err := ctx.Err(); err != nil {
 				errs <- err

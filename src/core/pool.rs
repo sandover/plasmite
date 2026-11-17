@@ -2419,7 +2419,7 @@ mod tests {
 
     #[test]
     fn notify_reader_child() {
-        use crate::api::{PoolApiExt, TailOptions};
+        use crate::api::{FollowOptions, PoolApiExt};
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
         let Some(path) = std::env::var_os("PLASMITE_NOTIFY_READER_PATH") else {
@@ -2430,11 +2430,14 @@ mod tests {
         let marker = |kind: &str| path.with_extension(format!("{reader_id}{kind}"));
         let reader = Pool::open(&path).expect("independent reader");
         let cancelled = Arc::new(AtomicBool::new(false));
-        let mut options = TailOptions::new();
+        let mut options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
         options.poll_interval = Duration::from_millis(5);
         options.timeout = Some(Duration::from_secs(3));
         options.cancel = Some(Arc::clone(&cancelled));
-        let mut tail = reader.tail(options);
+        let mut tail = reader.follow(options);
         // The separate process registers its waiter before any append.
         fs::write(marker("ready"), b"ready").expect("ready");
         for expected in 1..=128 {

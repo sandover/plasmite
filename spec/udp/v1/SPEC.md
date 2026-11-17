@@ -173,3 +173,11 @@ congestion control; this version supports controlled networks only.
 Server readiness follows all successful binds. Shutdown stops admission,
 cancels followers, finishes any active append, joins workers, and releases
 sockets. Saved HTTPS keys and revocation do not govern UDP.
+
+## Shared follow selection vocabulary
+
+Language clients use the shared follow selection vocabulary: new by default,
+last N, since a timestamp, or an inclusive sequence. Selecting sequence zero
+expressly requests all retained history. This vocabulary does not change UDP's
+wire encoding, ordering, finite completion or delivery guarantees. The shared
+[API contract](../../api/v0/SPEC.md) records the authorized 1.x naming transition.

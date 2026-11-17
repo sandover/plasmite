@@ -147,3 +147,12 @@ Cargo watches tracked files and Git state to refresh build identity when
 source, commits, or tags change. Unchanged builds reuse their artifacts.
 The `.dirty` marker follows Git's tracked-file convention: stage new files
 to include them in the build identity.
+
+## Authorized follow compatibility exception
+
+The forthcoming 1.x release may change public reader names from tail to follow
+and make new messages the default. The maintainer explicitly approved this
+exception to additive-only 1.x compatibility. Complete the shared API contract,
+binding migration and required gates before landing the change. State the rename,
+explicit history choices and changed defaults in release notes and upgrade
+instructions. This authorization does not publish a release or waive validation.

@@ -2,8 +2,8 @@
 
 
 def data(plasmite, pool, messages, batch_count, batch_bytes, conversion):
-    with pool.tail_views(
-        since_seq=1, max_messages=messages, timeout_ms=120_000, error_on_gap=True
+    with pool.follow_views(
+        start=plasmite.FollowStart.sequence(1), max_messages=messages, timeout_ms=120_000, error_on_gap=True
     ) as stream:
 
         def convert(message):

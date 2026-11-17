@@ -83,11 +83,11 @@ func BenchmarkOwnedStreams(b *testing.B) {
 					open := func() {
 						since, max := uint64(1), uint64(window)
 						if strings.HasPrefix(lane, "view") {
-							viewStream, err = pool.OpenViewStream(TailOptions{SinceSeq: &since, MaxMessages: &max})
+							viewStream, err = pool.OpenViewFollow(FollowOptions{Start: Sequence(since), MaxMessages: &max})
 						} else if strings.HasPrefix(lane, "raw") {
-							rawStream, err = pool.OpenLite3Stream(&since, &max, nil)
+							rawStream, err = pool.OpenLite3Follow(Sequence(since), &max, nil)
 						} else {
-							jsonStream, err = pool.OpenStream(&since, &max, nil)
+							jsonStream, err = pool.OpenFollow(Sequence(since), &max, nil)
 						}
 						if err != nil {
 							b.Fatal(err)

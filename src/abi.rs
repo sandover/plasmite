@@ -12,7 +12,7 @@
 #![allow(clippy::result_large_err)]
 
 use crate::api::{
-    GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions, TailOutcome, TailState,
+    FollowOptions, GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOutcome, TailState,
 };
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::Pool;
@@ -136,9 +136,9 @@ pub struct plsm_stream_options {
     reserved: u32,
 }
 
-#[derive(Clone, Copy)]
 struct StreamOpenOptions {
-    since_seq: Option<u64>,
+    start: crate::api::FollowStart,
+    live: bool,
     max_messages: Option<usize>,
     timeout: Option<Duration>,
     gap_policy: GapPolicy,
@@ -527,6 +527,15 @@ pub extern "C" fn plsm_stream_open_ex(
         Ok(options) => options,
         Err(code) => return code,
     };
+    open_json_follow(pool, options, out_stream, out_err)
+}
+
+fn open_json_follow(
+    pool: *mut plsm_pool,
+    options: StreamOpenOptions,
+    out_stream: *mut *mut plsm_stream,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
     let pool = match borrow_pool(pool, out_err) {
         Ok(pool) => pool,
         Err(code) => return code,
@@ -540,14 +549,15 @@ pub extern "C" fn plsm_stream_open_ex(
     let cancel = Arc::new(AtomicBool::new(false));
     let state = TailState::new(
         &pool.pool,
-        TailOptions {
-            since_seq: options.since_seq,
+        FollowOptions {
+            start: options.start,
+            live: options.live,
             max_messages: options.max_messages,
             timeout: options.timeout,
             gap_policy: options.gap_policy,
             notify: true,
             cancel: Some(cancel.clone()),
-            ..TailOptions::default()
+            ..Default::default()
         },
     );
     let info = match pool.pool.info() {
@@ -632,6 +642,15 @@ pub extern "C" fn plsm_lite3_stream_open_ex(
         Ok(options) => options,
         Err(code) => return code,
     };
+    open_binary_follow(pool, options, out_stream, out_err)
+}
+
+fn open_binary_follow(
+    pool: *mut plsm_pool,
+    options: StreamOpenOptions,
+    out_stream: *mut *mut plsm_lite3_stream,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
     let pool = match borrow_pool(pool, out_err) {
         Ok(pool) => pool,
         Err(code) => return code,
@@ -645,14 +664,15 @@ pub extern "C" fn plsm_lite3_stream_open_ex(
     let cancel = Arc::new(AtomicBool::new(false));
     let state = TailState::new(
         &pool.pool,
-        TailOptions {
-            since_seq: options.since_seq,
+        FollowOptions {
+            start: options.start,
+            live: options.live,
             max_messages: options.max_messages,
             timeout: options.timeout,
             gap_policy: options.gap_policy,
             notify: true,
             cancel: Some(cancel.clone()),
-            ..TailOptions::default()
+            ..Default::default()
         },
     );
     let info = match pool.pool.info() {
@@ -1398,7 +1418,12 @@ fn parse_stream_options(
         None
     };
     Ok(StreamOpenOptions {
-        since_seq: (options.has_since != 0).then_some(options.since_seq),
+        start: if options.has_since != 0 {
+            crate::api::FollowStart::Sequence(options.since_seq)
+        } else {
+            crate::api::FollowStart::all()
+        },
+        live: true,
         max_messages,
         timeout: (options.has_timeout != 0).then(|| Duration::from_millis(options.timeout_ms)),
         gap_policy,
@@ -2769,3 +2794,98 @@ mod tests {
 
 #[path = "abi_batches.rs"]
 mod batches;
+
+#[repr(C)]
+pub struct plsm_follow_options {
+    struct_size: u32,
+    gap_policy: u32,
+    start_value: u64,
+    max_messages: u64,
+    timeout_ms: u64,
+    start_kind: u32,
+    has_max: u32,
+    has_timeout: u32,
+    finite: u32,
+}
+
+fn parse_follow_options(
+    options: *const plsm_follow_options,
+    error: *mut *mut plsm_error,
+) -> Result<StreamOpenOptions, i32> {
+    if options.is_null() {
+        return Err(fail(
+            error,
+            Error::new(ErrorKind::Usage).with_message("follow options are null"),
+        ));
+    }
+    let size = unsafe { std::ptr::addr_of!((*options).struct_size).read() } as usize;
+    if size < std::mem::size_of::<plsm_follow_options>() {
+        return Err(fail(
+            error,
+            Error::new(ErrorKind::Usage).with_message("follow options are too small"),
+        ));
+    }
+    let options = unsafe { &*options };
+    use crate::api::FollowStart;
+    let start = match options.start_kind {
+        0 => FollowStart::New,
+        1 => FollowStart::Last(options.start_value),
+        2 => FollowStart::Since(options.start_value),
+        3 => FollowStart::Sequence(options.start_value),
+        _ => {
+            return Err(fail(
+                error,
+                Error::new(ErrorKind::Usage).with_message("invalid follow start kind"),
+            ));
+        }
+    };
+    if options.finite > 1 {
+        return Err(fail(
+            error,
+            Error::new(ErrorKind::Usage).with_message("finite must be zero or one"),
+        ));
+    }
+    let legacy = plsm_stream_options {
+        struct_size: std::mem::size_of::<plsm_stream_options>() as u32,
+        gap_policy: options.gap_policy,
+        since_seq: 0,
+        max_messages: options.max_messages,
+        timeout_ms: options.timeout_ms,
+        has_since: 0,
+        has_max: options.has_max,
+        has_timeout: options.has_timeout,
+        reserved: 0,
+    };
+    let mut parsed = parse_stream_options(&legacy, error)?;
+    parsed.start = start;
+    parsed.live = options.finite == 0;
+    Ok(parsed)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_follow(
+    pool: *mut plsm_pool,
+    options: *const plsm_follow_options,
+    out_stream: *mut *mut plsm_stream,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let options = match parse_follow_options(options, out_err) {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
+    open_json_follow(pool, options, out_stream, out_err)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_follow_lite3(
+    pool: *mut plsm_pool,
+    options: *const plsm_follow_options,
+    out_stream: *mut *mut plsm_lite3_stream,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let options = match parse_follow_options(options, out_err) {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
+    open_binary_follow(pool, options, out_stream, out_err)
+}

@@ -554,7 +554,7 @@ mod tests {
         let ring_size = 512usize;
         let mut storage = vec![0u8; RING_OFFSET + ring_size];
 
-        // Tail frame bytes at offset 0 are all zeroes (invalid magic). If `plan_append` tried to
+        // Follow frame bytes at offset 0 are all zeroes (invalid magic). If `plan_append` tried to
         // decode them while freeing space, it would return Corrupt.
         //
         // We still need a valid new tail frame so `tail_next_off` can be computed for the next

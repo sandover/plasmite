@@ -220,13 +220,13 @@ func (p *Pool) follow(options FollowOptions, raw bool, views bool) (*Follow, err
 	var cErr *C.plsm_error_t
 	var rc C.int
 	if views {
-		rc = C.plsm_udp_pool_follow_views(p.ptr, C.uint32_t(options.Start.Kind), C.uint64_t(options.Start.Value), boolToUint32(options.Live), &out, &cErr)
+		rc = C.plsm_udp_pool_follow_views(p.ptr, C.uint32_t(options.Start.Kind), C.uint64_t(options.Start.Value), boolToUint32(!options.Finite), &out, &cErr)
 	} else {
 		rc = C.plsm_udp_pool_follow(
 			p.ptr,
 			C.uint32_t(options.Start.Kind),
 			C.uint64_t(options.Start.Value),
-			boolToUint32(options.Live),
+			boolToUint32(!options.Finite),
 			&out,
 			&cErr,
 		)
@@ -478,3 +478,5 @@ func durationMillisCeil(value time.Duration) uint64 {
 	}
 	return uint64((value + time.Millisecond - 1) / time.Millisecond)
 }
+
+func All() Start { return Sequence(0) }

@@ -135,7 +135,7 @@ fn frame(stream: &mut UdpFollow) -> Result<plasmite::api::UdpFrame, Box<dyn std:
 fn send_live_follow_retains_original_attachment_and_real_identity() -> TestResult {
     let server = Server::start(true, 64)?;
     let udp = server.udp()?;
-    let mut stream = udp.follow(UdpFollowOptions::new())?;
+    let mut stream = udp.follow(UdpFollowOptions::default())?;
     let payload = plasmite::api::lite3::encode_message(&["test".into()], &json!({"sample":42}))?;
     udp.send_lite3(payload.as_slice())?;
     let received = frame(&mut stream)?;
@@ -153,7 +153,7 @@ fn localhost_uses_ipv4_and_explicit_ipv6_supports_udp_feed_and_follow() -> TestR
     let ipv4 = Server::start(true, 64)?;
     let local = UdpClient::new(format!("udp://localhost:{}", ipv4.address.port()))?
         .open_pool(&PoolRef::name("events"))?;
-    let mut stream = local.follow(UdpFollowOptions::new())?;
+    let mut stream = local.follow(UdpFollowOptions::default())?;
     let ipv4_value = json!({"family":"ipv4"});
     local.send_json(&ipv4_value, &[])?;
     assert_eq!(frame(&mut stream)?.message()?.data, ipv4_value);
@@ -175,7 +175,7 @@ fn localhost_uses_ipv4_and_explicit_ipv6_supports_udp_feed_and_follow() -> TestR
     };
     let endpoint = format!("udp://[::1]:{}", ipv6.address.port());
     let local = UdpClient::new(endpoint)?.open_pool(&PoolRef::name("events"))?;
-    let mut stream = local.follow(UdpFollowOptions::new())?;
+    let mut stream = local.follow(UdpFollowOptions::default())?;
     let ipv6_value = json!({"family":"ipv6"});
     local.send_json(&ipv6_value, &[])?;
     assert_eq!(frame(&mut stream)?.message()?.data, ipv6_value);
@@ -208,7 +208,7 @@ fn maximum_sized_lite3_message_is_stored_and_followed_byte_for_byte() -> TestRes
         ErrorKind::Usage
     );
 
-    let mut stream = udp.follow(UdpFollowOptions::new())?;
+    let mut stream = udp.follow(UdpFollowOptions::default())?;
     udp.send_lite3(payload.as_slice())?;
     let received = frame(&mut stream)?;
     assert_eq!(received.seq, 1);
@@ -228,7 +228,7 @@ fn pool_created_after_server_start_accepts_udp_append_and_follow() -> TestResult
     local.create_pool(&PoolRef::name("later"), PoolOptions::new(1024 * 1024))?;
     let udp =
         UdpClient::new(format!("udp://{}", server.address))?.open_pool(&PoolRef::name("later"))?;
-    let mut stream = udp.follow(UdpFollowOptions::new())?;
+    let mut stream = udp.follow(UdpFollowOptions::default())?;
     let value = json!({"created_after_start":true});
     udp.send_json(&value, &[])?;
     let received = frame(&mut stream)?;
@@ -330,7 +330,7 @@ fn input_only_server_refuses_reads_and_verified_capacity_is_bounded() -> TestRes
     assert_eq!(
         input
             .udp()?
-            .follow(UdpFollowOptions::new())
+            .follow(UdpFollowOptions::default())
             .err()
             .unwrap()
             .kind(),
@@ -348,7 +348,7 @@ fn input_only_server_refuses_reads_and_verified_capacity_is_bounded() -> TestRes
         assert_eq!(
             server
                 .udp()?
-                .follow(UdpFollowOptions::new())
+                .follow(UdpFollowOptions::default())
                 .err()
                 .unwrap()
                 .kind(),
@@ -357,7 +357,7 @@ fn input_only_server_refuses_reads_and_verified_capacity_is_bounded() -> TestRes
         first.close();
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            match server.udp()?.follow(UdpFollowOptions::new()) {
+            match server.udp()?.follow(UdpFollowOptions::default()) {
                 Ok(mut stream) => {
                     stream.close();
                     break;
@@ -411,7 +411,7 @@ fn since_handles_nonmonotone_timestamps_and_oversized_stored_messages() -> TestR
 fn replacing_a_pool_ends_the_old_stream_instead_of_resetting_sequence() -> TestResult {
     let server = Server::start(true, 64)?;
     let udp = server.udp()?;
-    let mut stream = udp.follow(UdpFollowOptions::new())?;
+    let mut stream = udp.follow(UdpFollowOptions::default())?;
     server.append(json!({"old":true}), 100)?;
     assert_eq!(frame(&mut stream)?.seq, 1);
     let old = server.pools.join("events.plasmite");
@@ -506,7 +506,7 @@ fn completed_subscription_expiry_releases_capacity() -> TestResult {
     assert_eq!(
         server
             .udp()?
-            .follow(UdpFollowOptions::new())
+            .follow(UdpFollowOptions::default())
             .err()
             .unwrap()
             .kind(),
@@ -514,7 +514,7 @@ fn completed_subscription_expiry_releases_capacity() -> TestResult {
     );
     // Keep the finished client socket open: CLOSE must not release the record.
     thread::sleep(Duration::from_secs(31));
-    let mut next = server.udp()?.follow(UdpFollowOptions::new())?;
+    let mut next = server.udp()?.follow(UdpFollowOptions::default())?;
     next.close();
     finite.close();
     Ok(())
@@ -539,7 +539,7 @@ fn close_during_history_selection_releases_the_subscriber_slot() -> TestResult {
     // listener can still admit requests and see that its one slot is occupied.
     let udp = server.udp()?;
     assert_eq!(
-        udp.follow(UdpFollowOptions::new())
+        udp.follow(UdpFollowOptions::default())
             .err()
             .expect("occupied slot")
             .kind(),
@@ -552,7 +552,7 @@ fn close_during_history_selection_releases_the_subscriber_slot() -> TestResult {
 
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        match udp.follow(UdpFollowOptions::new()) {
+        match udp.follow(UdpFollowOptions::default()) {
             Ok(mut stream) => {
                 stream.close();
                 break;

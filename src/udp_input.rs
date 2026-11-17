@@ -221,6 +221,7 @@ fn select_start(
         .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("pool sequence exhausted"))?;
     let mut cursor = Cursor::new();
     match start {
+        wire::Start::New if !sub.selection.live => Ok((oldest, upper, cursor, None)),
         wire::Start::New => {
             cursor.seek_to(header.head_off as usize);
             Ok((after, upper, cursor, None))
@@ -232,10 +233,7 @@ fn select_start(
             Ok((after.saturating_sub(*n).max(oldest), upper, cursor, None))
         }
         wire::Start::Sequence(seq) => {
-            if *seq == 0 {
-                return Err(Error::new(ErrorKind::Usage).with_message("sequence must be positive"));
-            }
-            Ok((*seq, upper, cursor, None))
+            Ok((if *seq == 0 { oldest } else { *seq }, upper, cursor, None))
         }
         wire::Start::Since(timestamp) => {
             let deadline = Instant::now() + Duration::from_millis(wire::STARTUP_MS);

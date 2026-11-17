@@ -13,7 +13,7 @@ import (
 	"github.com/sandover/plasmite/bindings/go/api"
 )
 
-// Tail owns a hidden goroutine that reads an independent stream. Applications cannot
+// Follow owns a hidden goroutine that reads an independent stream. Applications cannot
 // serialize its pool access with foreground native calls or Close themselves.
 func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 	client := newTestClient(t)
@@ -29,9 +29,9 @@ func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	opts := TailOptions{SinceSeq: uint64Ptr(seed.Seq), Timeout: 2 * time.Millisecond, Buffer: 8}
-	out, tailErrors := pool.Tail(ctx, opts)
-	lite3Out, lite3Errors := pool.TailLite3(ctx, opts)
+	opts := FollowOptions{Start: Sequence(seed.Seq), Timeout: 2 * time.Millisecond, Buffer: 8}
+	out, tailErrors := pool.Follow(ctx, opts)
+	lite3Out, lite3Errors := pool.FollowLite3(ctx, opts)
 	select {
 	case message := <-out:
 		if message == nil || message.Seq != seed.Seq {
@@ -59,7 +59,7 @@ func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 
 	// A stream that has already opened retains its independent native handle.
 	timeout := uint64(500)
-	independent, err := pool.OpenStream(uint64Ptr(seed.Seq), uint64Ptr(1), &timeout)
+	independent, err := pool.OpenFollow(Sequence(seed.Seq), uint64Ptr(1), &timeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 		return err
 	})
 	work(func() error {
-		stream, err := pool.OpenLite3Stream(uint64Ptr(seed.Seq), uint64Ptr(1), &timeout)
+		stream, err := pool.OpenLite3Follow(Sequence(seed.Seq), uint64Ptr(1), &timeout)
 		if err != nil {
 			return err
 		}
@@ -176,7 +176,7 @@ func TestTailBoundedWaitsCancelAndCountMatches(t *testing.T) {
 	}
 	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stop()
-	out, errs := pool.Tail(ctx, TailOptions{Tags: []string{"keep"}, MaxMessages: uint64Ptr(2), Timeout: time.Millisecond})
+	out, errs := pool.Follow(ctx, FollowOptions{Start: All(), Tags: []string{"keep"}, MaxMessages: uint64Ptr(2), Timeout: time.Millisecond})
 	var sequences []uint64
 	for message := range out {
 		sequences = append(sequences, message.Seq)
@@ -190,12 +190,12 @@ func TestTailBoundedWaitsCancelAndCountMatches(t *testing.T) {
 
 	for _, raw := range []bool{false, true} {
 		ctx, cancel := context.WithCancel(context.Background())
-		opts := TailOptions{SinceSeq: uint64Ptr(6), Timeout: 10 * time.Second}
+		opts := FollowOptions{Start: Sequence(6), Timeout: 10 * time.Second}
 		var errs <-chan error
 		if raw {
-			_, errs = pool.TailLite3(ctx, opts)
+			_, errs = pool.FollowLite3(ctx, opts)
 		} else {
-			_, errs = pool.Tail(ctx, opts)
+			_, errs = pool.Follow(ctx, opts)
 		}
 		cancel()
 		select {
@@ -212,7 +212,7 @@ func TestTailBoundedWaitsCancelAndCountMatches(t *testing.T) {
 func TestNativeWaitExpiryKeepsTheCursor(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "wait-position")
-	stream, err := pool.(*Pool).openStream(uint64Ptr(1), uint64Ptr(1), nil, true)
+	stream, err := pool.(*Pool).openFollow(Sequence(1), uint64Ptr(1), nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,14 +295,14 @@ func TestStreamsConcurrentReadAndClose(t *testing.T) {
 			var next func() error
 			var closeStream func()
 			if lite3 {
-				stream, err := pool.OpenLite3Stream(nil, nil, &timeout)
+				stream, err := pool.OpenLite3Follow(NewPosition(), nil, &timeout)
 				if err != nil {
 					t.Fatal(err)
 				}
 				next = func() error { _, err := stream.Next(); return err }
 				closeStream = stream.Close
 			} else {
-				stream, err := pool.OpenStream(nil, nil, &timeout)
+				stream, err := pool.OpenFollow(NewPosition(), nil, &timeout)
 				if err != nil {
 					t.Fatal(err)
 				}

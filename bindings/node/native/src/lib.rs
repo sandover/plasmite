@@ -106,7 +106,7 @@ struct plsm_error_t {
 }
 
 #[repr(C)]
-struct plsm_stream_options_t {
+struct plsm_follow_options_t {
     struct_size: u32,
     gap_policy: u32,
     since_seq: u64,
@@ -134,7 +134,7 @@ fn stream_views_available(udp: bool) -> bool {
                 })
         };
         (
-            has(&[c"plsm_view_stream_open", c"plsm_view_stream_next"]),
+            has(&[c"plsm_pool_follow_views", c"plsm_view_stream_next"]),
             has(&[c"plsm_udp_pool_follow_views", c"plsm_udp_follow_next_view"]),
         )
     });
@@ -146,9 +146,9 @@ fn stream_views_available(_: bool) -> bool {
 }
 
 unsafe extern "C" {
-    fn plsm_view_stream_open(
+    fn plsm_pool_follow_views(
         pool: *mut plsm_pool_t,
-        options: *const plsm_stream_options_t,
+        options: *const plsm_follow_options_t,
         tags: *const TextSpan,
         count: usize,
         out: *mut *mut plsm_stream_t,
@@ -254,48 +254,8 @@ unsafe extern "C" {
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
 
-    fn plsm_stream_open(
-        pool: *mut plsm_pool_t,
-        since_seq: u64,
-        has_since: u32,
-        max_messages: u64,
-        has_max: u32,
-        timeout_ms: u64,
-        has_timeout: u32,
-        out_stream: *mut *mut plsm_stream_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
-    fn plsm_stream_open_ex(
-        pool: *mut plsm_pool_t,
-        options: *const plsm_stream_options_t,
-        out_stream: *mut *mut plsm_stream_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
-
-    fn plsm_lite3_stream_open(
-        pool: *mut plsm_pool_t,
-        since_seq: u64,
-        has_since: u32,
-        max_messages: u64,
-        has_max: u32,
-        timeout_ms: u64,
-        has_timeout: u32,
-        out_stream: *mut *mut plsm_lite3_stream_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
-    fn plsm_lite3_stream_open_ex(
-        pool: *mut plsm_pool_t,
-        options: *const plsm_stream_options_t,
-        out_stream: *mut *mut plsm_lite3_stream_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
-
-    fn plsm_stream_next(
-        stream: *mut plsm_stream_t,
-        out_message: *mut plsm_buf_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
-
+    fn plsm_pool_follow(pool: *mut plsm_pool_t, options: *const plsm_follow_options_t, out: *mut *mut plsm_stream_t, error: *mut *mut plsm_error_t) -> i32;
+    fn plsm_pool_follow_lite3(pool: *mut plsm_pool_t, options: *const plsm_follow_options_t, out: *mut *mut plsm_lite3_stream_t, error: *mut *mut plsm_error_t) -> i32;
     fn plsm_lite3_stream_next(
         stream: *mut plsm_lite3_stream_t,
         out_frame: *mut plsm_lite3_frame_t,
@@ -316,6 +276,7 @@ unsafe extern "C" {
     ) -> c_int;
     fn plsm_stream_cancel(stream: *mut plsm_stream_t);
     fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream_t);
+    fn plsm_stream_next(stream: *mut plsm_stream_t, out: *mut plsm_buf_t, error: *mut *mut plsm_error_t) -> i32;
     fn plsm_stream_free(stream: *mut plsm_stream_t);
     fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream_t);
 
@@ -730,13 +691,15 @@ impl Pool {
     }
 
     #[napi]
-    pub fn open_stream(
+    pub fn open_follow(
         &self,
         env: Env,
         since_seq: Option<Either<u32, BigInt>>,
         max_messages: Option<Either<u32, BigInt>>,
         timeout_ms: Option<Either<u32, BigInt>>,
         error_on_gap: bool,
+        start_kind: u32,
+        finite: bool,
     ) -> Result<Stream> {
         let _operation = self.operation(env)?;
         let since_seq = since_seq
@@ -750,31 +713,8 @@ impl Pool {
             .transpose()?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
-        let rc = if error_on_gap {
-            let options = stream_options(since_seq, max_messages, timeout_ms, true);
-            unsafe {
-                plsm_stream_open_ex(
-                    self.handle.as_ref().expect("open pool").ptr,
-                    &options,
-                    &mut out,
-                    &mut err,
-                )
-            }
-        } else {
-            unsafe {
-                plsm_stream_open(
-                    self.handle.as_ref().expect("open pool").ptr,
-                    since_seq.unwrap_or(0),
-                    if since_seq.is_some() { 1 } else { 0 },
-                    max_messages.unwrap_or(0),
-                    if max_messages.is_some() { 1 } else { 0 },
-                    timeout_ms.unwrap_or(0),
-                    if timeout_ms.is_some() { 1 } else { 0 },
-                    &mut out,
-                    &mut err,
-                )
-            }
-        };
+        let options = stream_options(since_seq, max_messages, timeout_ms, error_on_gap, start_kind, finite);
+        let rc = unsafe { plsm_pool_follow(self.handle.as_ref().expect("open pool").ptr, &options, &mut out, &mut err) };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -784,13 +724,15 @@ impl Pool {
     }
 
     #[napi]
-    pub fn open_lite3_stream(
+    pub fn open_lite3_follow(
         &self,
         env: Env,
         since_seq: Option<Either<u32, BigInt>>,
         max_messages: Option<Either<u32, BigInt>>,
         timeout_ms: Option<Either<u32, BigInt>>,
         error_on_gap: bool,
+        start_kind: u32,
+        finite: bool,
     ) -> Result<Lite3Stream> {
         let _operation = self.operation(env)?;
         let since_seq = since_seq
@@ -804,31 +746,8 @@ impl Pool {
             .transpose()?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
-        let rc = if error_on_gap {
-            let options = stream_options(since_seq, max_messages, timeout_ms, true);
-            unsafe {
-                plsm_lite3_stream_open_ex(
-                    self.handle.as_ref().expect("open pool").ptr,
-                    &options,
-                    &mut out,
-                    &mut err,
-                )
-            }
-        } else {
-            unsafe {
-                plsm_lite3_stream_open(
-                    self.handle.as_ref().expect("open pool").ptr,
-                    since_seq.unwrap_or(0),
-                    if since_seq.is_some() { 1 } else { 0 },
-                    max_messages.unwrap_or(0),
-                    if max_messages.is_some() { 1 } else { 0 },
-                    timeout_ms.unwrap_or(0),
-                    if timeout_ms.is_some() { 1 } else { 0 },
-                    &mut out,
-                    &mut err,
-                )
-            }
-        };
+        let options = stream_options(since_seq, max_messages, timeout_ms, error_on_gap, start_kind, finite);
+        let rc = unsafe { plsm_pool_follow_lite3(self.handle.as_ref().expect("open pool").ptr, &options, &mut out, &mut err) };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -838,7 +757,7 @@ impl Pool {
     }
 
     #[napi]
-    pub fn open_view_stream(
+    pub fn open_view_follow(
         &self,
         env: Env,
         since_seq: Option<Either<u32, BigInt>>,
@@ -846,6 +765,8 @@ impl Pool {
         timeout_ms: Option<Either<u32, BigInt>>,
         error_on_gap: bool,
         tags: Vec<String>,
+        start_kind: u32,
+        finite: bool,
     ) -> Result<Stream> {
         if !stream_views_available(false) {
             return Err(pool_error(
@@ -861,7 +782,7 @@ impl Pool {
                 .map(|v| to_u64(v, "max_messages"))
                 .transpose()?,
             timeout_ms.map(|v| to_u64(v, "timeout_ms")).transpose()?,
-            error_on_gap,
+            error_on_gap, start_kind, finite,
         );
         let spans: Vec<_> = tags
             .iter()
@@ -873,7 +794,7 @@ impl Pool {
         let mut out = ptr::null_mut();
         let mut error = ptr::null_mut();
         if unsafe {
-            plsm_view_stream_open(
+            plsm_pool_follow_views(
                 self.handle.as_ref().expect("open pool").ptr,
                 &options,
                 spans.as_ptr(),
@@ -2079,17 +2000,19 @@ fn stream_options(
     max_messages: Option<u64>,
     timeout_ms: Option<u64>,
     error_on_gap: bool,
-) -> plsm_stream_options_t {
-    plsm_stream_options_t {
-        struct_size: std::mem::size_of::<plsm_stream_options_t>() as u32,
+    start_kind: u32,
+    finite: bool,
+) -> plsm_follow_options_t {
+    plsm_follow_options_t {
+        struct_size: std::mem::size_of::<plsm_follow_options_t>() as u32,
         gap_policy: u32::from(error_on_gap),
         since_seq: since_seq.unwrap_or(0),
         max_messages: max_messages.unwrap_or(0),
         timeout_ms: timeout_ms.unwrap_or(0),
-        has_since: u32::from(since_seq.is_some()),
+        has_since: start_kind,
         has_max: u32::from(max_messages.is_some()),
         has_timeout: u32::from(timeout_ms.is_some()),
-        reserved: 0,
+        reserved: u32::from(finite),
     }
 }
 

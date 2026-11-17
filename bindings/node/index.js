@@ -1,3 +1,4 @@
+const { FollowStart, followStart } = require("./follow");
 /*
 Purpose: JavaScript entry point for the Plasmite Node binding.
 Key Exports: Client, Pool, Message, Stream, Durability, ErrorKind.
@@ -343,10 +344,11 @@ class Pool {
    * @param {boolean} [errorOnGap]
    * @returns {Stream}
    */
-  openStream(sinceSeq, maxMessages, timeoutMs, errorOnGap = false) {
+  openFollow(start, maxMessages, timeoutMs, errorOnGap = false, finite = false) {
+    const [kind, sinceSeq] = followStart(start);
     try {
       return new Stream(
-        this._inner.openStream(sinceSeq, maxMessages, timeoutMs, errorOnGap),
+        this._inner.openFollow(sinceSeq, maxMessages, timeoutMs, errorOnGap, kind, finite),
       );
     } catch (err) {
       throw wrapNativeError(err);
@@ -361,14 +363,15 @@ class Pool {
    * @param {boolean} [errorOnGap]
    * @returns {Lite3Stream}
    */
-  openLite3Stream(sinceSeq, maxMessages, timeoutMs, errorOnGap = false) {
+  openLite3Follow(start, maxMessages, timeoutMs, errorOnGap = false, finite = false) {
+    const [kind, sinceSeq] = followStart(start);
     try {
       return new Lite3Stream(
-        this._inner.openLite3Stream(
+        this._inner.openLite3Follow(
           sinceSeq,
           maxMessages,
           timeoutMs,
-          errorOnGap,
+          errorOnGap, kind, finite,
         ),
       );
     } catch (err) {
@@ -381,13 +384,14 @@ class Pool {
    * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[], errorOnGap?: boolean, signal?: AbortSignal}} [options]
    * @returns {AsyncGenerator<Message, void, unknown>}
    */
-  async *tail(options = {}) {
-    const { sinceSeq, maxMessages, timeoutMs, tags, errorOnGap = false, signal } = options;
+  async *follow(options = {}) {
+    if (options.sinceSeq !== undefined) throw new TypeError("use start: FollowStart.sequence(seq)");
+    const { start, finite = false, maxMessages, timeoutMs, tags, errorOnGap = false, signal } = options;
     const requiredTags = normalizeTagFilter(tags);
     const limit = normalizeOptionalCount(maxMessages, "maxMessages");
     const waitMs = BigInt(Math.floor(normalizePollingTimeout(timeoutMs)));
     if (limit === 0 || signal?.aborted) return;
-    const stream = this.openStream(sinceSeq ?? null, requiredTags.length ? null : limit, null, errorOnGap);
+    const stream = this.openFollow(start, requiredTags.length ? null : limit, null, errorOnGap, finite);
     const abort = () => stream.cancel();
     signal?.addEventListener("abort", abort, { once: true });
     let delivered = 0;
@@ -413,19 +417,21 @@ class Pool {
   }
 
   /** Pull independent immutable snapshots; no next item starts until demand. */
-  tailViews(options = {}) {
+  followViews(options = {}) {
+    if (options.sinceSeq !== undefined) throw new TypeError("use start: FollowStart.sequence(seq)");
     const pool = this;
     let stream;
     let stopped = false;
     async function* read() {
-      const { sinceSeq, maxMessages, timeoutMs, errorOnGap = false, signal } = options;
+      const { start, finite = false, maxMessages, timeoutMs, errorOnGap = false, signal } = options;
+      const [kind, sinceSeq] = followStart(start);
       const limit = normalizeOptionalCount(maxMessages, "maxMessages");
       const finiteWait = BigInt(Math.floor(normalizePollingTimeout(timeoutMs)));
       // An unlimited tail keeps one native read pending across quiet periods.
       const waitMs = limit === null ? 18446744073709551615n : finiteWait;
       if (signal?.aborted || stopped || limit === 0) return;
       const tags = snapshotTags(options.tags);
-      try { stream = pool._inner.openViewStream(sinceSeq ?? null, maxMessages ?? null, null, errorOnGap, tags); }
+      try { stream = pool._inner.openViewFollow(sinceSeq ?? null, maxMessages ?? null, null, errorOnGap, tags, kind, finite); }
       catch (error) { throw wrapNativeError(error); }
       const abort = () => stream.cancel();
       signal?.addEventListener("abort", abort, { once: true });
@@ -644,12 +650,7 @@ class Lite3Stream {
   }
 }
 
-const UdpStart = Object.freeze({
-  new: () => Object.freeze({ kind: "new" }),
-  last: (count) => Object.freeze({ kind: "last", count: normalizeUint64(count, "count") }),
-  since: (timestampNs) => Object.freeze({ kind: "since", timestampNs: normalizeUint64(timestampNs, "timestampNs") }),
-  sequence: (seq) => Object.freeze({ kind: "sequence", seq: normalizeUint64(seq, "seq") }),
-});
+const UdpStart = FollowStart;
 
 class UdpClient {
   constructor(endpoint) {
@@ -716,8 +717,9 @@ class UdpPool {
   followViews(options = {}) { return this._follow(options, true); }
 
   _follow(options, views) {
+    if (options.live !== undefined) throw new TypeError("use finite instead of live");
     const start = options.start ?? UdpStart.new();
-    const live = options.live ?? true;
+    const live = !(options.finite ?? false);
     let startKind;
     let startValue = 0n;
     switch (start.kind) {
@@ -901,6 +903,7 @@ function normalizeUint64(value, name) {
 }
 
 module.exports = {
+  FollowStart,
   toNative, toJson, toLite3,
   Client,
   Pool,

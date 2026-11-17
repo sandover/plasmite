@@ -1,6 +1,6 @@
 //! Prepared-history consumer measurement. Allocation diagnostics run separately.
 use plasmite::api::{
-    AppendOptions, Durability, GapPolicy, Meta, Pool, PoolApiExt, PoolOptions, TailOptions,
+    AppendOptions, Durability, GapPolicy, Meta, Pool, PoolApiExt, PoolOptions, FollowOptions,
     lite3::encode_message,
 };
 use serde_json::{Value, json};
@@ -57,9 +57,9 @@ fn cpu(value: &libc::rusage) -> f64 {
         + (value.ru_utime.tv_usec + value.ru_stime.tv_usec) as f64 / 1_000_000.0
 }
 
-fn options(count: usize, mode: &str) -> TailOptions {
-    TailOptions {
-        since_seq: Some(1),
+fn options(count: usize, mode: &str) -> FollowOptions {
+    FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(1),
         max_messages: Some(count),
         notify: false,
         gap_policy: GapPolicy::Error,
@@ -68,13 +68,13 @@ fn options(count: usize, mode: &str) -> TailOptions {
         } else {
             vec![]
         },
-        ..TailOptions::new()
+        ..FollowOptions::new()
     }
 }
 
 fn consume(pool: &Pool, mode: &str, count: usize, payload: &[u8], data: &Value) {
     if mode == "json" {
-        let mut tail = pool.tail(options(count, mode));
+        let mut tail = pool.follow(options(count, mode));
         for seq in 1..=count as u64 {
             let message = tail.next_message().unwrap().unwrap();
             assert_eq!(message.seq, seq);
@@ -98,7 +98,7 @@ fn consume(pool: &Pool, mode: &str, count: usize, payload: &[u8], data: &Value) 
         }
     } else {
         assert!(mode == "raw" || mode == "tags");
-        let mut tail = pool.tail_lite3(options(count, mode));
+        let mut tail = pool.follow_lite3(options(count, mode));
         for seq in 1..=count as u64 {
             let frame = tail.next_frame().unwrap().unwrap();
             assert_eq!(frame.seq, seq);

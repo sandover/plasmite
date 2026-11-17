@@ -1692,7 +1692,7 @@ fn follow_remote_url_rejects_api_shaped_path() {
     let output = cmd()
         .args([
             "follow",
-            "http://localhost:9170/v0/pools/demo/tail",
+            "http://localhost:9170/v0/pools/demo/follow",
             "--format",
             "json",
         ])

@@ -77,7 +77,7 @@ PLASMITE_SDK_DIR=/path/to/sdk uv build
 ## Usage
 
 ```python
-from plasmite import Client, Durability, NotFoundError
+from plasmite import FollowStart, Client, Durability, NotFoundError
 
 with Client("./data") as client:
     with client.pool("docs", 64 * 1024 * 1024) as pool:
@@ -87,7 +87,7 @@ with Client("./data") as client:
         fetched = pool.get(msg.seq)
         print(fetched.data["text"])
 
-        for item in pool.tail(tags=["note"], max_messages=1, timeout_ms=100):
+        for item in pool.follow(start=FollowStart.sequence(msg.seq), tags=["note"], max_messages=1, timeout_ms=100):
             print(item.seq, item.tags, item.data)
 
     try:
@@ -96,11 +96,11 @@ with Client("./data") as client:
         print("pool not found")
 ```
 
-`Pool.append(...)`, `Pool.get(...)`, and `Pool.tail(...)` return typed `Message` values by default.
+`Pool.append(...)`, `Pool.get(...)`, and `Pool.follow(...)` return typed `Message` values by default.
 
 Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire bytes.
 
-`Pool.tail(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
+`Pool.follow(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
 
 ## Immutable message views
 
@@ -171,7 +171,7 @@ extra copying and runtime-call costs.
 ### Streaming and forwarding
 
 ```python
-with pool.tail_views(tags=["sensor"], since_seq=1) as stream:
+with pool.follow_views(tags=["sensor"], start=FollowStart.sequence(1)) as stream:
     message = next(stream)                    # acquires exactly one snapshot
     batch = stream.next_batch(16, 256 * 1024)  # explicit count and encoded-byte bounds
     for message in batch:
@@ -236,11 +236,11 @@ change awaits a major release. Finite follows end on terminal progress and may
 leave DATA in flight.
 
 ```python
-from plasmite import UdpClient, UdpFollowOptions, UdpFrame, UdpStart
+from plasmite import UdpClient, UdpFollowOptions, UdpFrame, FollowStart
 
 with UdpClient("udp://127.0.0.1:9701") as client:
     with client.open_pool("sensors") as pool:
-        with pool.follow(UdpFollowOptions(start=UdpStart.new(), live=True)) as follow:
+        with pool.follow(UdpFollowOptions(start=FollowStart.new(), finite=False)) as follow:
             pool.send_json({"temperature": 23}, tags=["sensor"])
             for event in follow:
                 if isinstance(event, UdpFrame):
@@ -248,8 +248,8 @@ with UdpClient("udp://127.0.0.1:9701") as client:
                     print(message.seq, message.data)
 ```
 
-Use `UdpStart.last(count)`, `UdpStart.since_ns(timestamp_ns)`, or
-`UdpStart.sequence(seq)` to select retained history. Pass a finite
+Use `FollowStart.last(count)`, `FollowStart.since_ns(timestamp_ns)`, or
+`FollowStart.sequence(seq)` to select retained history. Pass a finite
 `timeout_ms` to `next_event` when a caller needs a bounded wait; `close()` and
 `cancel()` interrupt an active wait within 50 milliseconds.
 
@@ -261,7 +261,7 @@ distinguish that loss from an ordinary lack of matching messages:
 from plasmite import RetentionGapError
 
 try:
-    for item in pool.tail(since_seq=last_seq + 1, error_on_gap=True):
+    for item in pool.follow(start=FollowStart.sequence(last_seq + 1), error_on_gap=True):
         process(item)
 except RetentionGapError as err:
     print(f"rebuild required; first missing sequence: {err.seq}")
@@ -329,3 +329,13 @@ encoded Lite3 bytes. They return `AppendReceipt` without echoing or decoding the
 data. Existing `append` returns a full Message. New identity methods require a
 matching native library; older libraries raise `NotImplementedError` before
 commit. Input validation and durability follow the existing append methods.
+
+## Follow defaults and history
+
+`pool.follow()` and `pool.follow_views()` wait for new messages by default.
+They open on first iteration. Choose history with `start=FollowStart.all()`,
+`.last(count)`, `.since_ns(unix_ns)` or `.sequence(seq)`; sequence is inclusive.
+Use `finite=True` to stop at the opening history boundary. Finite mode alone
+reads all retained history. Last-N selection counts records before tag filters.
+These choices also apply to `open_follow` and `open_lite3_follow`; those methods
+open immediately. UDP options use the same FollowStart and finite vocabulary.

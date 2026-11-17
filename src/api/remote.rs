@@ -1,12 +1,12 @@
 //! Purpose: Provide an HTTP client for the Plasmite v0 protocol (JSON + Lite3 bytes).
-//! Exports: `RemoteClient`, `RemotePool`, `RemoteTail`, `RemoteLite3Tail`, `RemoteLite3Frame`.
+//! Exports: `RemoteClient`, `RemotePool`, `RemoteFollow`, `RemoteLite3Follow`, `RemoteLite3Frame`.
 //! Role: Transport-agnostic client that mirrors local pool operations remotely.
 //! Invariants: Requests/response envelopes align with spec/remote/v0/SPEC.md.
 //! Invariants: Pool refs resolve to a base URL + pool identifier (name only).
-//! Invariants: Tail streams are JSONL (messages) or framed Lite3 bytes (fast path).
+//! Invariants: Follow streams are JSONL (messages) or framed Lite3 bytes (fast path).
 #![allow(clippy::result_large_err)]
 
-use super::{GapPolicy, Message, Meta, PoolRef, TailOptions};
+use super::{FollowOptions, GapPolicy, Message, Meta, PoolRef};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::{
     AppendOptions, Bounds, Durability, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
@@ -59,11 +59,11 @@ pub struct RemotePool {
     pool_ref: PoolRef,
 }
 
-pub struct RemoteTail {
+pub struct RemoteFollow {
     reader: Option<TailReader>,
 }
 
-pub struct RemoteLite3Tail {
+pub struct RemoteLite3Follow {
     reader: Option<TailReader>,
 }
 
@@ -590,33 +590,46 @@ impl RemotePool {
         })
     }
 
-    pub fn tail(&self, options: TailOptions) -> ApiResult<RemoteTail> {
-        Ok(RemoteTail {
-            reader: Some(self.open_tail("tail", "application/json", options)?),
+    pub fn follow(&self, options: FollowOptions) -> ApiResult<RemoteFollow> {
+        Ok(RemoteFollow {
+            reader: Some(self.open_tail("follow", "application/json", options)?),
         })
     }
 
-    pub fn tail_lite3(&self, options: TailOptions) -> ApiResult<RemoteLite3Tail> {
+    pub fn follow_lite3(&self, options: FollowOptions) -> ApiResult<RemoteLite3Follow> {
         if options.gap_policy == GapPolicy::Error {
             return Err(Error::new(ErrorKind::Usage).with_message(
                 "remote Lite3 tails do not support fail-closed retention gaps because the stream has no error frame",
             ));
         }
-        Ok(RemoteLite3Tail {
+        Ok(RemoteLite3Follow {
             reader: Some(self.open_tail(
-                "tail_lite3",
+                "follow_lite3",
                 "application/x-plasmite-lite3-stream",
                 options,
             )?),
         })
     }
 
-    fn open_tail(&self, route: &str, accept: &str, options: TailOptions) -> ApiResult<TailReader> {
+    fn open_tail(
+        &self,
+        route: &str,
+        accept: &str,
+        options: FollowOptions,
+    ) -> ApiResult<TailReader> {
         let mut url = build_url(&self.base_url, &["v0", "pools", &self.pool, route])?;
         {
             let mut pairs = url.query_pairs_mut();
-            if let Some(since) = options.since_seq {
-                pairs.append_pair("since_seq", &since.to_string());
+            let (kind, value) = match options.start {
+                super::FollowStart::New => ("new", 0),
+                super::FollowStart::Last(n) => ("last", n),
+                super::FollowStart::Since(n) => ("since", n),
+                super::FollowStart::Sequence(n) => ("sequence", n),
+            };
+            pairs.append_pair("start", kind);
+            pairs.append_pair("start_value", &value.to_string());
+            if !options.live {
+                pairs.append_pair("finite", "true");
             }
             if let Some(max) = options.max_messages {
                 pairs.append_pair("max", &max.to_string());
@@ -642,7 +655,7 @@ impl RemotePool {
     }
 }
 
-impl RemoteTail {
+impl RemoteFollow {
     pub fn next_message(&mut self) -> ApiResult<Option<Message>> {
         let message = (|| {
             loop {
@@ -693,7 +706,7 @@ impl RemoteTail {
     }
 }
 
-impl RemoteLite3Tail {
+impl RemoteLite3Follow {
     pub fn next_frame(&mut self) -> ApiResult<Option<RemoteLite3Frame>> {
         let frame = (|| {
             let Some(reader) = self.reader.as_mut() else {
@@ -1050,7 +1063,7 @@ fn durability_to_str(durability: Durability) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteClient, RemoteLite3Tail, RemoteTail, TailReader, extract_pool_from_url,
+        RemoteClient, RemoteFollow, RemoteLite3Follow, TailReader, extract_pool_from_url,
         normalize_base_url, parse_error_response, parse_pool_uri, read_jsonl_line,
         read_lite3_response,
     };
@@ -1255,14 +1268,14 @@ mod tests {
     fn jsonl_tail_preserves_nested_payload_and_missing_data_errors() {
         let payload = serde_json::json!({"array": [{"integer": u64::MAX}, null, [true, "x"]], "object": {"seq": 3}});
         let line = serde_json::json!({"seq": u64::MAX, "time": "2026-01-01T00:00:00Z", "meta": {"tags": ["nested"]}, "data": payload}).to_string();
-        let mut tail = RemoteTail {
+        let mut tail = RemoteFollow {
             reader: Some(BufReader::new(Box::new(Cursor::new(line)))),
         };
         let message = tail.next_message().unwrap().unwrap();
         assert_eq!(message.seq, u64::MAX);
         assert_eq!(message.data, payload);
         assert_eq!(message.meta.tags, ["nested"]);
-        let mut missing = RemoteTail {
+        let mut missing = RemoteFollow {
             reader: Some(BufReader::new(Box::new(Cursor::new(
                 r#"{"seq":1,"time":"2026-01-01T00:00:00Z","meta":{"tags":[]}}"#,
             )))),
@@ -1275,7 +1288,7 @@ mod tests {
     fn jsonl_tail_closes_after_malformed_line() {
         const VALID: &str =
             "{\"seq\":1,\"time\":\"2026-01-01T00:00:00Z\",\"meta\":{\"tags\":[]},\"data\":{}}\n";
-        let mut valid_tail = RemoteTail {
+        let mut valid_tail = RemoteFollow {
             reader: Some(BufReader::new(Box::new(Cursor::new(VALID.as_bytes())))),
         };
         assert_eq!(
@@ -1284,7 +1297,7 @@ mod tests {
         );
 
         for malformed in ["not json\n", "{}\n", "{\"error\":{}}\n"] {
-            let mut tail = RemoteTail {
+            let mut tail = RemoteFollow {
                 reader: Some(BufReader::new(Box::new(Cursor::new(format!(
                     "{malformed}{VALID}"
                 ))))),
@@ -1327,7 +1340,7 @@ mod tests {
             header,
             sent_header: false,
         };
-        let mut tail = RemoteLite3Tail {
+        let mut tail = RemoteLite3Follow {
             reader: Some(BufReader::new(Box::new(reader))),
         };
 
@@ -1342,7 +1355,7 @@ mod tests {
         header[16..20].copy_from_slice(&2u32.to_be_bytes());
         let mut bytes = header.to_vec();
         bytes.push(1);
-        let mut tail = RemoteLite3Tail {
+        let mut tail = RemoteLite3Follow {
             reader: Some(BufReader::new(Box::new(Cursor::new(bytes)))),
         };
 

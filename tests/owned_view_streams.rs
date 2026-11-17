@@ -1,5 +1,5 @@
 use plasmite::api::{
-    AppendOptions, Durability, ErrorKind, GapPolicy, Pool, PoolApiExt, PoolOptions, TailOptions,
+    AppendOptions, Durability, ErrorKind, FollowOptions, GapPolicy, Pool, PoolApiExt, PoolOptions,
 };
 use serde::Deserialize;
 use std::sync::{
@@ -8,12 +8,12 @@ use std::sync::{
 };
 use std::time::Duration;
 
-fn options() -> TailOptions {
-    TailOptions {
-        since_seq: Some(1),
+fn options() -> FollowOptions {
+    FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(1),
         timeout: Some(Duration::from_millis(100)),
         notify: false,
-        ..TailOptions::new()
+        ..Default::default()
     }
 }
 
@@ -34,7 +34,7 @@ fn view_tail_filters_counts_and_retains_each_snapshot() {
     selected.tags = vec!["α\0β".into()];
     selected.max_messages = Some(2);
     let retained = pool
-        .tail_views(selected)
+        .follow_views(selected)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     assert_eq!(retained.iter().map(|v| v.seq).collect::<Vec<_>>(), [2, 3]);
@@ -80,18 +80,25 @@ fn view_tail_reuses_gap_cancel_and_zero_limit_policy() {
     }
     let mut strict = options();
     strict.gap_policy = GapPolicy::Error;
-    let mut tail = pool.tail_views(strict);
+    let mut tail = pool.follow_views(strict);
     assert!(matches!(tail.next_view(),Err(e) if e.kind()==ErrorKind::RetentionGap));
     assert!(tail.next_view().unwrap().is_none());
     let cancel = Arc::new(AtomicBool::new(true));
     let mut cancelled = options();
     cancelled.cancel = Some(cancel.clone());
-    assert!(pool.tail_views(cancelled).next_view().unwrap().is_none());
+    assert!(pool.follow_views(cancelled).next_view().unwrap().is_none());
     cancel.store(false, Ordering::Release);
     let mut empty = options();
     empty.max_messages = Some(0);
-    assert!(pool.tail_views(empty).next_view().unwrap().is_none());
+    assert!(pool.follow_views(empty).next_view().unwrap().is_none());
     let mut continued = options();
     continued.max_messages = Some(1);
-    assert!(pool.tail_views(continued).next_view().unwrap().unwrap().seq > 1);
+    assert!(
+        pool.follow_views(continued)
+            .next_view()
+            .unwrap()
+            .unwrap()
+            .seq
+            > 1
+    );
 }

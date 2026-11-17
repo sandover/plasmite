@@ -1,3 +1,4 @@
+const { followStart } = require("./follow");
 /*
 Purpose: Provide an HTTP/JSON RemoteClient for the Node binding.
 Key Exports: RemoteClient, RemotePool, RemoteError.
@@ -239,9 +240,9 @@ class RemotePool {
     return require("./portable").decodeMessage(frame.payload, frame.seq, frame.timestampNs);
   }
 
-  async *tailViews(options = {}) {
+  async *followViews(options = {}) {
     const backend = require("./portable");
-    for await (const frame of this._tailLite3(options, false)) {
+    for await (const frame of this._followLite3(options, false)) {
       yield await backend.decodeMessage(frame.payload, frame.seq, frame.timestampNs);
     }
   }
@@ -277,13 +278,13 @@ class RemotePool {
   }
 
   /** Stream complete owned frames without building message objects. */
-  async *tailLite3(options = {}) {
-    yield* this._tailLite3(options, true);
+  async *followLite3(options = {}) {
+    yield* this._followLite3(options, true);
   }
 
-  async *_tailLite3(options, owned) {
+  async *_followLite3(options, owned) {
     if (options.errorOnGap === true) throw new Error("binary HTTP tails cannot report terminal retention gaps");
-    const url = tailUrl(this.client.baseUrl, this.pool, "tail_lite3", options);
+    const url = tailUrl(this.client.baseUrl, this.pool, "follow_lite3", options);
     const request = requestController(options.signal);
     let input;
     try {
@@ -312,11 +313,9 @@ class RemotePool {
    * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number, tags?: string[], errorOnGap?: boolean}} [options]
    * @returns {AsyncGenerator<import("./message").Message, void, unknown>}
    */
-  async *tail(options = {}) {
-    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "tail"]);
-    if (options.sinceSeq !== undefined) {
-      url.searchParams.set("since_seq", String(options.sinceSeq));
-    }
+  async *follow(options = {}) {
+    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "follow"]);
+    setFollowStart(url, options);
     if (options.maxMessages !== undefined) {
       url.searchParams.set("max", String(options.maxMessages));
     }
@@ -361,7 +360,7 @@ class RemotePool {
 
 function tailUrl(baseUrl, pool, route, options) {
   const url = buildUrl(baseUrl, ["v0", "pools", pool, route]);
-  if (options.sinceSeq !== undefined) url.searchParams.set("since_seq", String(normalizeMessageSeq(options.sinceSeq)));
+  setFollowStart(url, options);
   if (options.maxMessages !== undefined) url.searchParams.set("max", String(normalizeMessageSeq(options.maxMessages)));
   if (options.timeoutMs !== undefined) url.searchParams.set("timeout_ms", String(options.timeoutMs));
   for (const tag of options.tags || []) url.searchParams.append("tag", String(tag));
@@ -524,3 +523,11 @@ module.exports = {
   RemotePool,
   RemoteError,
 };
+
+function setFollowStart(url, options) {
+  if (options.sinceSeq !== undefined) throw new TypeError("use start: FollowStart.sequence(seq)");
+  const [kind, value] = followStart(options.start);
+  url.searchParams.set("start", ["new", "last", "since", "sequence"][kind]);
+  url.searchParams.set("start_value", String(value));
+  if (options.finite) url.searchParams.set("finite", "true");
+}

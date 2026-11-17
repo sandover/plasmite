@@ -123,19 +123,21 @@ export class Pool {
   get(seq: number | bigint): Message
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
-  tail(options?: LocalTailOptions): AsyncGenerator<Message, void, unknown>
-  tailViews<T = unknown>(options?: LocalTailOptions): AsyncGenerator<MessageView<T>, void, unknown>
-  openStream(
-    sinceSeq?: number | bigint | null,
+  follow(options?: LocalFollowOptions): AsyncGenerator<Message, void, unknown>
+  followViews<T = unknown>(options?: LocalFollowOptions): AsyncGenerator<MessageView<T>, void, unknown>
+  openFollow(
+    start?: FollowStart,
     maxMessages?: number | bigint | null,
     timeoutMs?: number | bigint | null,
     errorOnGap?: boolean,
+    finite?: boolean,
   ): Stream
-  openLite3Stream(
-    sinceSeq?: number | bigint | null,
+  openLite3Follow(
+    start?: FollowStart,
     maxMessages?: number | bigint | null,
     timeoutMs?: number | bigint | null,
     errorOnGap?: boolean,
+    finite?: boolean,
   ): Lite3Stream
   close(): void
   [Symbol.dispose](): void
@@ -159,8 +161,9 @@ export class Lite3Stream {
   [Symbol.dispose](): void
 }
 
-export interface LocalTailOptions {
-  sinceSeq?: number | bigint
+export interface LocalFollowOptions {
+  start?: FollowStart
+  finite?: boolean
   maxMessages?: number | bigint
   timeoutMs?: number | bigint
   tags?: string[]
@@ -168,15 +171,15 @@ export interface LocalTailOptions {
   signal?: AbortSignal
 }
 
-export type UdpStart =
+export type FollowStart =
   | { kind: "new" }
   | { kind: "last"; count: number | bigint }
   | { kind: "since"; timestampNs: number | bigint }
   | { kind: "sequence"; seq: number | bigint }
 
 export interface UdpFollowOptions {
-  start?: UdpStart
-  live?: boolean
+  start?: FollowStart
+  finite?: boolean
 }
 
 export interface UdpWaitOptions {
@@ -202,11 +205,12 @@ export type UdpEvent =
       retentionGap: boolean
     }
 
-export const UdpStart: {
-  new: () => UdpStart
-  last(count: number | bigint): UdpStart
-  since(timestampNs: number | bigint): UdpStart
-  sequence(seq: number | bigint): UdpStart
+export const FollowStart: {
+  all: () => FollowStart
+  new: () => FollowStart
+  last(count: number | bigint): FollowStart
+  since(timestampNs: number | bigint): FollowStart
+  sequence(seq: number | bigint): FollowStart
 }
 
 export class UdpClient {
@@ -268,8 +272,9 @@ export interface RemotePoolInfo {
   index_inline: boolean
 }
 
-export interface RemoteTailOptions {
-  sinceSeq?: number | bigint
+export interface RemoteFollowOptions {
+  start?: FollowStart
+  finite?: boolean
   maxMessages?: number | bigint
   timeoutMs?: number
   tags?: string[]
@@ -313,7 +318,7 @@ export class RemotePool {
   poolRef(): string
   appendView<T = unknown>(data: unknown, tags?: readonly string[], durability?: Durability): Promise<MessageView<T>>
   getView<T = unknown>(seq: number | bigint, options?: { signal?: AbortSignal }): Promise<MessageView<T>>
-  tailViews<T = unknown>(options?: RemoteTailOptions): AsyncGenerator<MessageView<T>, void, unknown>
+  followViews<T = unknown>(options?: RemoteFollowOptions): AsyncGenerator<MessageView<T>, void, unknown>
   append(
     data: unknown,
     tags?: string[],
@@ -322,6 +327,11 @@ export class RemotePool {
   get(seq: number | bigint): Promise<Message>
   appendLite3(payload: Buffer, durability?: Durability): Promise<bigint>
   getLite3(seq: number | bigint, options?: { signal?: AbortSignal }): Promise<RemoteLite3Frame>
-  tailLite3(options?: RemoteTailOptions): AsyncGenerator<RemoteLite3Frame, void, unknown>
-  tail(options?: RemoteTailOptions): AsyncGenerator<Message, void, unknown>
+  followLite3(options?: RemoteFollowOptions): AsyncGenerator<RemoteLite3Frame, void, unknown>
+  follow(options?: RemoteFollowOptions): AsyncGenerator<Message, void, unknown>
 }
+
+
+
+export type UdpStart = FollowStart;
+export const UdpStart: typeof FollowStart;

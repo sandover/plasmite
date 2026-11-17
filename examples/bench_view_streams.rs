@@ -1,7 +1,7 @@
 //! Run one lane per process. Setup/encoding stays outside the timed consumer.
 //! Usage: bench_view_streams local|udp raw|raw_forward|view_selected|view_full|view_forward|json FIXTURE COUNT
 use plasmite::api::{
-    AppendOptions, Durability, Pool, PoolApiExt, PoolOptions, PoolRef, TailOptions, UdpClient,
+    AppendOptions, Durability, FollowOptions, Pool, PoolApiExt, PoolOptions, PoolRef, UdpClient,
     UdpEvent, UdpFollowOptions, UdpStart, UdpViewEvent,
 };
 use plasmite::view::MessageView;
@@ -93,11 +93,11 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
         pool.append_view(source, AppendOptions::new(123, Durability::Fast))
             .unwrap();
     }
-    let options = TailOptions {
-        since_seq: Some(1),
+    let options = FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(1),
         max_messages: Some(count),
         notify: false,
-        ..TailOptions::new()
+        ..FollowOptions::new()
     };
     let mut destination = Pool::create(
         dir.path().join("forward.plasmite"),
@@ -108,7 +108,7 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
     let mut sum = 0;
     match lane {
         "raw" | "raw_forward" => {
-            let mut tail = pool.tail_lite3(options);
+            let mut tail = pool.follow_lite3(options);
             while let Some(frame) = tail.next_frame().unwrap() {
                 if lane == "raw_forward" {
                     destination
@@ -120,14 +120,14 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
             }
         }
         "json" => {
-            let mut tail = pool.tail(options);
+            let mut tail = pool.follow(options);
             while let Some(message) = tail.next_message().unwrap() {
                 sum += message.data["value"].as_i64().unwrap();
                 black_box(message);
             }
         }
         _ => {
-            for view in pool.tail_views(options) {
+            for view in pool.follow_views(options) {
                 let view = view.unwrap();
                 sum += consume(&view, lane, &mut destination);
                 black_box(view);

@@ -17,7 +17,7 @@ pub const RENEW_MS: u64 = 10_000;
 pub const STARTUP_MS: u64 = 5_000;
 pub type Id = [u8; 16];
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     content = "value",
@@ -25,10 +25,18 @@ pub type Id = [u8; 16];
     deny_unknown_fields
 )]
 pub enum Start {
+    #[default]
     New,
     Last(u64),
     Since(u64),
     Sequence(u64),
+}
+
+impl Start {
+    /// Select all currently retained messages, then continue unless finite.
+    pub fn all() -> Self {
+        Self::Sequence(0)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

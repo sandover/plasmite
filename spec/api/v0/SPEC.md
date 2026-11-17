@@ -11,7 +11,7 @@ It is intentionally signature-free: language-level method/function signatures li
 ## Scope
 
 - This spec freezes cross-language semantics and invariants.
-- This spec does not freeze binding-specific naming, argument ordering, or doc examples.
+- Shared operation names and defaults form part of this contract. Bindings may use normal language casing, argument ordering and iteration conventions.
 - Secure native connections and access-key operations below describe the Rust
   API used by the CLI. Other bindings retain their documented local APIs;
   Node's HTTP client does not load saved native connections or implement
@@ -28,6 +28,57 @@ It is intentionally signature-free: language-level method/function signatures li
 - Any breaking change requires a new major API version. The secure-sharing
   release is a breaking major-version change and
   removes superseded secure connection options.
+
+
+## Follow transition: authorized 1.x compatibility exception
+
+The maintainer explicitly authorizes the follow rename and default change in the
+forthcoming 1.x release. This exception overrides additive-only compatibility
+for this transition. Other pending breaking changes retain their stated release
+requirements. Release notes and upgrade guidance must identify this exception.
+
+Every pool reader uses `follow` (`Follow` in Go). Omitted selection means new
+messages only. Callers request retained history explicitly. Selection uses one
+opening boundary; a lazy iterator opens when iteration first acquires its reader.
+Messages appended after that opening remain eligible, including before the first
+read. A later read must not choose a new starting boundary.
+
+The shared selection choices are new, all retained, last N retained records,
+since an absolute timestamp, and an inclusive sequence number. Timestamp selectors use absolute Unix nanoseconds; the CLI resolves relative
+times before choosing the boundary. Last N counts records before tag/payload filtering.
+History continues into live messages unless the caller explicitly requests a
+finite read. Finite mode alone selects all retained history, matching CLI `--no-follow`.
+A finite read stops at the opening upper sequence boundary while
+writers continue; an empty finite selection completes immediately. Conflicting
+selections fail with Usage rather than selecting one implicitly. History remains
+subject to bounded retention and the existing gap policy.
+
+| Existing source operation | Replacement |
+| --- | --- |
+| Rust `tail`, `follow_lite3`, `follow_views`, `FollowOptions` | `follow`, `follow_lite3`, `follow_views`, `FollowOptions` |
+| Python `tail`, `follow_views` | `follow`, `follow_views` |
+| JavaScript `tail`, `followLite3`, `followViews` | `follow`, `followLite3`, `followViews` |
+| Go `Tail`, `FollowLite3`, `FollowViews`, `FollowOptions` | `Follow`, `FollowLite3`, `FollowViews`, `FollowOptions` |
+| C stream-opening operations | pool follow-opening operations with explicit selection |
+| HTTP `/tail`, `/tail_lite3` | `/follow`, `/follow_lite3` |
+
+Corresponding public result types and exported helpers use Follow vocabulary.
+Generic stream handles, internal reader names and historical evidence need no
+mechanical rename. Current source APIs expose no competing tail-method aliases;
+tail may describe a last-N selection. Published C compatibility symbols must
+retain their original meaning under the header's versioning policy, rather than
+silently acquiring the new default. Old HTTP routes must not silently change
+meaning. New clients fail clearly against servers without follow support.
+
+A restart checkpoint records the last successfully handled message. To resume
+after sequence 100, select sequence 101. All-retained history begins at the oldest
+retained message and requires no assumption that sequence 1 still exists.
+
+This transition preserves ownership, exact identity, cancellation and timeout
+policies. Local/HTTP reads retain sequence order. UDP retains arrival order,
+duplicates, late packets and explicit skip/progress events; consistent selection
+names do not add reliable delivery. No application checkpoint timers, automatic
+retry or pool-info polling belong in the default follow operation.
 
 ## Owned-view interface (additive implementation target)
 
@@ -99,7 +150,7 @@ user hooks. A generic TypeScript schema assertion supplies no runtime validation
 | C | Explicit owner retain/release, borrowed tagged values and sequential/coarse reads; no allocation per child handle. |
 | Python | Mapping/Sequence indexing, iteration and readonly slices; to_native/to_json and an owning readonly buffer exporter. |
 | JavaScript | Asynchronous storage operations; synchronous Proxy properties and actual arrays; module-level toNative/toJson helpers. |
-| Go | Managed immutable bytes, blocking Get, explicit typed Decode and context-aware Tail; no Close per ordinary message. |
+| Go | Managed immutable bytes, blocking Get, explicit typed Decode and context-aware Follow; no Close per ordinary message. |
 
 Python Mapping equality and array-view/list equality compare contents without
 building temporary native trees. JavaScript array indices/length describe data;
@@ -327,7 +378,7 @@ The C interface adds bounded waits without changing legacy `*_next` calls:
   A transport timeout or incomplete successful-response body returns `Io`;
   an HTTP error response retains its status-based error mapping. System DNS
   resolution is not interruptible. Live tail bodies have no client request
-  deadline; caller `TailOptions` and server limits still apply.
+  deadline; caller `FollowOptions` and server limits still apply.
 - The Rust remote client caps Lite3 responses, Lite3 tail frames, and individual
   JSONL tail lines at 256 MiB. It rejects an oversized Lite3 frame before
   reading its payload and ends a stream after a framing or size error.
@@ -335,10 +386,11 @@ The C interface adds bounded waits without changing legacy `*_next` calls:
 Pools use bounded retention, so a stream cursor can be overtaken when writers
 wrap the ring buffer. Every tail tracks an expected sequence:
 
-- An explicit `since_seq` is inclusive and establishes that value as the first
-  expected sequence.
-- Without `since_seq`, the first available raw message establishes the
-  position. Missing history before that message is not reported as a gap.
+- An explicit sequence start is inclusive and establishes the first expected
+  sequence. Sequence zero (all retained) resolves to the opening oldest message.
+- A default follow establishes its first expected sequence after the opening
+  newest message. Last-N and time selection establish an explicit history boundary.
+  Readers report any later retention loss according to the selected gap policy.
 - Each raw message advances the expected sequence before tag or payload
   filtering. A filter therefore cannot conceal a retention gap.
 - A raw sequence greater than the expected sequence is a retention gap. A raw
@@ -444,7 +496,7 @@ its path.
 
 ### Rust owned-view streams
 
-`Pool::tail_views(TailOptions)` returns `ViewTail`, a pull-based iterator
+`Pool::follow_views(FollowOptions)` returns `ViewFollow`, a pull-based iterator
 whose items are `Result<MessageView, Error>`. `next_view()` also exposes the
 existing explicit `Result<Option<MessageView>, Error>` form. It uses the same
 local tail cursor, required-tag filter, matching-message limit, timeout,
@@ -478,8 +530,8 @@ readonly buffer copy. Both paths preserve independent message lifetimes.
 
 ### Go owned-view stream adapters
 
-`local.Pool.OpenViewStream(TailOptions)` returns a pull stream with `Next(ctx)`
-and `Close`; `TailViews(ctx, TailOptions)` returns view/error channels. Its
+`local.Pool.OpenViewStream(FollowOptions)` returns a pull stream with `Next(ctx)`
+and `Close`; `FollowViews(ctx, FollowOptions)` returns view/error channels. Its
 message channel defaults to unbuffered; positive Buffer explicitly bounds queued
 messages, plus one message awaiting delivery. Native tail state supplies filtering, matching
 limits, ordering and gap policy. Idle polling waits last at most 50 ms; active native reads retain the existing

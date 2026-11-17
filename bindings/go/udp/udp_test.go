@@ -218,7 +218,7 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	largeStart := (uint64(1) << 53) + 1
-	largeFollow, err := udpPool.Follow(FollowOptions{Start: Sequence(largeStart), Live: false})
+	largeFollow, err := udpPool.Follow(FollowOptions{Start: Sequence(largeStart), Finite: true})
 	if err != nil {
 		t.Fatalf("open follow above JavaScript's safe integer range: %v", err)
 	}
@@ -454,7 +454,7 @@ func checkNativeFramesRetainArrivalOrder(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	options := FollowOptions{Start: Last(4), Live: false}
+	options := FollowOptions{Start: Last(4), Finite: true}
 	var follow *Follow
 	switch mode {
 	case "raw":

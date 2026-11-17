@@ -1,3 +1,4 @@
+const { FollowStart } = require("../follow");
 /* Exact sequence IDs at local and remote JSON boundaries. */
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -84,7 +85,7 @@ test("remote append, fetch, and tail preserve exact uint64 message sequences", a
       ...numericForms,
     ]) {
       global.fetch = async (url) => new Response(
-        new URL(url).pathname.endsWith("/tail")
+        new URL(url).pathname.endsWith("/follow")
           ? `${envelope(source)}\n`
           : `{"message":${envelope(source)}}`,
         { headers: { "Content-Type": "application/json" } },
@@ -93,7 +94,7 @@ test("remote append, fetch, and tail preserve exact uint64 message sequences", a
       assertExact(await pool.append({ test: true }), seq);
       assertExact(await pool.get(BigInt(seq)), seq);
       const seen = [];
-      for await (const message of pool.tail({ maxMessages: 1 })) {
+      for await (const message of pool.follow({start: FollowStart.all(),  maxMessages: 1 })) {
         assertExact(message, seq);
         assert.equal(message.raw.toString(), envelope(source));
         seen.push(message.seq);
@@ -127,7 +128,7 @@ test("raw local and remote message sequences reject invalid uint64 boundaries", 
     ]) {
       assert.throws(() => parseMessage(Buffer.from(envelope(seq))));
       global.fetch = async (url) => new Response(
-        new URL(url).pathname.endsWith("/tail")
+        new URL(url).pathname.endsWith("/follow")
           ? `${envelope(seq)}\n`
           : `{"message":${envelope(seq)}}`,
       );
@@ -135,7 +136,7 @@ test("raw local and remote message sequences reject invalid uint64 boundaries", 
       await assert.rejects(pool.append({}));
       await assert.rejects(pool.get(1));
       await assert.rejects(async () => {
-        for await (const message of pool.tail()) {
+        for await (const message of pool.follow()) {
           assert.fail(`invalid message ${message.seq} was accepted`);
         }
       });

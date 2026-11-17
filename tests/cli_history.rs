@@ -562,7 +562,7 @@ fn stub_remote_tail_with_bounds(
             let mut body = vec![0; content_length];
             reader.read_exact(&mut body).expect("request body");
             requests += 1;
-            let tail = request.contains("/tail?");
+            let tail = request.contains("/follow?");
             let (status, body) = if tail {
                 match error {
                     Some(message) => (

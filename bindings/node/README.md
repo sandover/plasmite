@@ -23,7 +23,7 @@ those platforms need no Rust toolchain or compile step. See
 ### Local pools (native, in-process)
 
 ```js
-const { Client, Durability, ErrorKind, PlasmiteNativeError } = require("plasmite");
+const { FollowStart, Client, Durability, ErrorKind, PlasmiteNativeError } = require("plasmite");
 
 const client = new Client("./data");
 let pool;
@@ -99,17 +99,17 @@ after staging matching optimized native assets to repeat the focused comparison.
 
 ```js
 const controller = new AbortController();
-for await (const message of pool.tailViews({
-  tags: ["sensor"], sinceSeq: 1n, signal: controller.signal,
+for await (const message of pool.followViews({
+  tags: ["sensor"], start: FollowStart.sequence(1n), signal: controller.signal,
 })) {
   console.log(message.data.metrics.power);
   break; // Closes this reader; retained messages remain readable.
 }
 ```
 
-`tailViews` pulls one snapshot at a time without hidden prefetch or batching.
+`followViews` pulls one snapshot at a time without hidden prefetch or batching.
 It shares local tag filtering, gap policy and per-wait timeout behavior with
-`tail`. Abort the signal
+`follow`. Abort the signal
 when abandoning a pending read; breaking the iterator also cancels its wait.
 UDP `await udpPool.followViews(options)` uses the same follow lifecycle as
 `follow`; frame events carry the view in `event.message`. Gap and progress
@@ -157,7 +157,7 @@ stay compatible.
 ### Owned local and UDP streams (additive source API)
 
 ```js
-for await (const message of pool.tailViews({ tags: ["sensor"], maxMessages: 10 })) {
+for await (const message of pool.followViews({ tags: ["sensor"], maxMessages: 10 })) {
   console.log(message.data.metrics.power);
 }
 const follow = await udpPool.followViews();
@@ -168,14 +168,14 @@ try {
 } finally { follow.close(); }
 ```
 
-`tailViews<Reading>()` and `followViews<Reading>()` carry immutable snapshots;
+`followViews<Reading>()` and `followViews<Reading>()` carry immutable snapshots;
 retained children survive iterator cleanup, pool overwrite and handle close.
 UDP frame events contain `message`, sequence and nanosecond time. They omit the
 separate mutable payload Buffer. Gap and progress events keep their existing
 meaning and fields. Each iterator reads on demand and creates no default
 prefetch queue. A supplied type argument asserts the payload shape.
 
-For finite `tailViews`, `timeoutMs` bounds each read, as for `tail()`. A finite
+For finite `followViews`, `timeoutMs` bounds each read, as for `tail()`. A finite
 tail ends after a quiet wait. An unlimited tail keeps one native read pending
 until data or cancellation, without resolving empty JavaScript Promises. Required tags filter
 before the matching-message limit. `signal` cancels a pending local
@@ -215,7 +215,7 @@ const { UdpClient, UdpStart } = require("plasmite");
 (async () => {
   const client = new UdpClient("udp://127.0.0.1:9701");
   const pool = client.openPool("sensors");
-  const follow = await pool.follow({ start: UdpStart.new(), live: true });
+  const follow = await pool.follow({ start: UdpStart.new(), finite: false });
 
   try {
     pool.sendJson({ temperature: 23 }, ["sensor"]);
@@ -267,7 +267,7 @@ certificate checks and does not provide key pinning. Do not put a full access
 key in the token field.
 
 ```js
-const { RemoteClient } = require("plasmite");
+const { FollowStart, RemoteClient } = require("plasmite");
 
 (async () => {
   const client = new RemoteClient("http://127.0.0.1:9700");
@@ -285,8 +285,8 @@ const { RemoteClient } = require("plasmite");
   const got = await pool.get(message.seq);
   console.log(got.data); // => { kind: "deploy", sha: "abc123" }
 
-  // Tail — live-stream new messages (JSONL under the hood)
-  for await (const msg of pool.tail({ sinceSeq: message.seq, tags: ["ops"], maxMessages: 1 })) {
+  // Follow starting with the message just appended (JSONL under the hood)
+  for await (const msg of pool.follow({ start: FollowStart.sequence(message.seq), tags: ["ops"], maxMessages: 1 })) {
     console.log(msg.seq, msg.tags, msg.data);
   }
 })();
@@ -311,10 +311,10 @@ const { RemoteClient } = require("plasmite");
 | | `.get(seq)` | Get message by sequence number; returns typed `Message` |
 | | `.getJson(seq)` | Get message by sequence number; returns `Buffer` |
 | | `.getLite3(seq)` | Get lite3 frame by sequence number |
-| | `.tail(opts?)` | Async generator of typed `Message` values with optional tag filter |
-| | `.tailViews<T>(opts?)` | Pull independent immutable snapshots; filter tags before the limit |
-| | `.openStream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a message stream |
-| | `.openLite3Stream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a lite3 frame stream |
+| | `.follow(opts?)` | Async generator of typed `Message` values with optional tag filter |
+| | `.followViews<T>(opts?)` | Pull independent immutable snapshots; filter tags before the limit |
+| | `.openFollow(start?, max?, timeoutMs?, errorOnGap?)` | Open a message stream |
+| | `.openLite3Follow(start?, max?, timeoutMs?, errorOnGap?)` | Open a lite3 frame stream |
 | | `.close()` | Close the pool |
 | | `[Symbol.dispose]()` | Alias for `.close()` (used by explicit resource-management syntax when enabled) |
 | `Stream` | `.nextJson()` | Next message as `Buffer`, or `null` at end |
@@ -340,7 +340,7 @@ const { RemoteClient } = require("plasmite");
 - `Durability.Flush` — fsync after write (crash-safe)
 
 Sequence numbers accept `number` or `bigint`; use `bigint` when they exceed
-JavaScript's safe-integer range. `sinceSeq` is inclusive: to resume after the
+JavaScript's safe-integer range. `FollowStart.sequence(seq)` is inclusive: to resume after the
 last handled message, save `message.seq + 1n` as the next checkpoint.
 
 Local tails continue from the next retained message by default when their
@@ -348,8 +348,8 @@ cursor has fallen behind the ring buffer. Set `errorOnGap: true` when losing
 messages must stop the consumer:
 
 ```js
-for await (const message of pool.tail({
-  sinceSeq: checkpoint,
+for await (const message of pool.follow({
+  start: FollowStart.sequence(checkpoint),
   errorOnGap: true,
 })) {
   await handle(message);
@@ -366,13 +366,13 @@ message, and restart from a suitable checkpoint after deciding how to recover.
 `RemotePool` offers the same immutable data interface without a native addon:
 
 ```js
-const { RemoteClient, toLite3 } = require("plasmite");
+const { FollowStart, RemoteClient, toLite3 } = require("plasmite");
 const remote = await new RemoteClient("http://127.0.0.1:9700").openPool("sensors");
 const sent = await remote.appendView({ counter: 9223372036854775807n }, ["sensor"]);
 const message = await remote.getView(sent.seq);
 console.log(message.data.counter); // bigint, with exact digits
 const detached = toLite3(message); // Mutable copy, without sequence/timestamp.
-for await (const item of remote.tailViews({ sinceSeq: sent.seq, maxMessages: 1 })) {
+for await (const item of remote.followViews({ start: FollowStart.sequence(sent.seq), maxMessages: 1 })) {
   console.log(item.data.counter);
 }
 ```
@@ -384,8 +384,8 @@ change the submitted payload. HTTP transfers and owner acquisition still copy
 bytes. Native local calls and HTTP calls use different backends; neither exposes
 mutable storage through a view. Retaining a child retains the whole snapshot.
 
-Binary HTTP reads require current-server identity headers. `tailViews` rejects
-`errorOnGap: true`, like `tailLite3`: binary frames cannot carry terminal errors.
+Binary HTTP reads require current-server identity headers. `followViews` rejects
+`errorOnGap: true`, like `followLite3`: binary frames cannot carry terminal errors.
 EOF does not certify complete delivery after a failure once streaming starts.
 Use the JSON `tail` if you require its fail-closed retention-gap reporting.
 An `AbortSignal` cancels an HTTP read; breaking a tail closes its response.
@@ -404,14 +404,14 @@ An `AbortSignal` cancels an HTTP read; breaking a tail closes its response.
 | `RemotePool` | `.append(data, tags?, durability?)` | Append a message (data is any JSON-serializable value) |
 | | `.get(seq)` | Get a message by sequence number |
 | | `.getView(seq)` / `.appendView(data, tags?)` | Read or produce immutable encoded messages |
-| | `.tailViews(opts?)` | Pull immutable messages over binary HTTP |
-| | `.tail(opts?)` | Live-tail typed messages (`AsyncGenerator<Message>`) |
+| | `.followViews(opts?)` | Pull immutable messages over binary HTTP |
+| | `.follow(opts?)` | Live-tail typed messages (`AsyncGenerator<Message>`) |
 
-### Tail options
+### Follow options
 
 ```js
 const options = {
-  sinceSeq: 1n,        // start at this sequence number (inclusive)
+  start: FollowStart.sequence(1n),        // start at this sequence number (inclusive)
   maxMessages: 100,    // stop after N messages
   timeoutMs: 5000,     // stream timeout; see local/remote distinction below
   tags: ["signup"],    // filter by exact tag match (AND across tags)
@@ -515,3 +515,13 @@ console.log(receipt.seq, receipt.timestampNs); // exact bigint values
 only the committed sequence and Unix nanoseconds, without echoing or decoding
 the data. Existing `append` returns a full Message. Use the native library from
 the matching SDK. Validation, durability and commit ordering stay the same.
+
+## Follow defaults and history
+
+Local and HTTP `follow()` and `followViews()` wait for new messages by default.
+Lazy iterators open on first iteration. Select history with
+`start: FollowStart.all()`, `.last(count)`, `.since(unixNs)` or `.sequence(seq)`.
+Use `finite: true` to stop at the opening history boundary; finite mode alone
+reads all retained history. Last-N selection counts records before tag filters.
+Low-level `openFollow` and `openLite3Follow` open immediately and accept the same
+start choice, with finite as their last argument. UDP also uses `finite`.

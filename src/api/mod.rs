@@ -24,11 +24,14 @@ pub use crate::core::pool::{
 };
 pub use crate::core::ring_layout::{FrameSpan, RingLayout};
 pub use client::{LocalClient, PoolRef};
-pub use message::{GapPolicy, Lite3Tail, Message, Meta, PoolApiExt, Tail, TailOptions, ViewTail};
+pub use message::{
+    Follow, FollowOptions, GapPolicy, Lite3Follow, Message, Meta, PoolApiExt, ViewFollow,
+};
 pub(crate) use message::{
     TailOutcome, TailState, format_ts, message_from_udp_payload, message_json_from_frame, now_ns,
 };
-pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Tail, RemotePool, RemoteTail};
+pub use remote::{RemoteClient, RemoteFollow, RemoteLite3Follow, RemoteLite3Frame, RemotePool};
+pub use udp::UdpStart as FollowStart;
 pub use udp::{
     UdpClient, UdpEvent, UdpFollow, UdpFollowOptions, UdpFrame, UdpPool, UdpSkipReason, UdpStart,
     UdpStreamEvent, UdpViewEvent, UdpViewFollow,

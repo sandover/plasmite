@@ -20,7 +20,7 @@ from . import (
     plsm_error_t,
     plsm_pool_t,
     plsm_stream_t,
-    plsm_stream_options_t,
+    plsm_follow_options_t,
     _stream_options,
     _optional_non_negative_int,
     _ensure_bytes,
@@ -198,15 +198,15 @@ def _configure_stream():
     global _stream_configured
     with _stream_configure_lock:
         if not _stream_configured:
-            _LIB.plsm_view_stream_open.argtypes = [
+            _LIB.plsm_pool_follow_views.argtypes = [
                 ctypes.POINTER(plsm_pool_t),
-                ctypes.POINTER(plsm_stream_options_t),
+                ctypes.POINTER(plsm_follow_options_t),
                 ctypes.POINTER(_Text),
                 ctypes.c_size_t,
                 ctypes.POINTER(ctypes.POINTER(plsm_stream_t)),
                 ctypes.POINTER(ctypes.POINTER(plsm_error_t)),
             ]
-            _LIB.plsm_view_stream_open.restype = ctypes.c_int
+            _LIB.plsm_pool_follow_views.restype = ctypes.c_int
             _stream_configured = True
 
 
@@ -274,20 +274,20 @@ class ViewStream:
         self.close()
 
 
-def tail_views(
+def follow_views(
     pool,
     *,
-    since_seq=None,
+    start=None,
+    finite=False,
     max_messages=None,
     tags=(),
     timeout_ms=None,
     cancel=None,
     error_on_gap=False,
 ):
-    since_seq = _optional_non_negative_int(since_seq, "since_seq")
     max_messages = _optional_non_negative_int(max_messages, "max_messages")
     timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
-    options = _stream_options(since_seq, max_messages, timeout_ms, bool(error_on_gap))
+    options = _stream_options(start, max_messages, timeout_ms, bool(error_on_gap), finite)
     encoded_tags = [
         _ensure_bytes(tag.encode("utf-8"), "tag")
         for tag in (() if tags is None else tags)
@@ -297,7 +297,7 @@ def tail_views(
     output = ctypes.POINTER(plsm_stream_t)()
     error = ctypes.POINTER(plsm_error_t)()
     _require_open(pool._ptr, "pool")
-    if _LIB.plsm_view_stream_open(
+    if _LIB.plsm_pool_follow_views(
         pool._ptr,
         ctypes.byref(options),
         spans,

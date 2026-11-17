@@ -1,3 +1,4 @@
+const { FollowStart } = require("../follow");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { RemoteClient, RemotePool, RemoteError } = require("../remote");
@@ -33,7 +34,7 @@ test("binary HTTP tail preserves complete frames across arbitrary transport boun
   await stub(responseChunks(chunks), async (getCall) => {
     const pool = new RemotePool(new RemoteClient("https://example.com", { token: "secret" }), "a/b");
     const received = [];
-    for await (const value of pool.tailLite3({ sinceSeq: seq, maxMessages: 2, tags: ["x", "y"] })) received.push(value);
+    for await (const value of pool.followLite3({ start: FollowStart.sequence(seq), maxMessages: 2, tags: ["x", "y"] })) received.push(value);
     assert.equal(received.length, 2);
     assert.equal(received[0].seq, seq);
     assert.equal(received[0].timestampNs, ns);
@@ -47,8 +48,8 @@ test("binary HTTP tail preserves complete frames across arbitrary transport boun
     assert.deepEqual(received[0].payload, payload);
     assert.deepEqual(received[1].payload, payload);
     const call = getCall();
-    assert.match(call.url, /a%2Fb\/tail_lite3/);
-    assert.equal(new URL(call.url).searchParams.get("since_seq"), String(seq));
+    assert.match(call.url, /a%2Fb\/follow_lite3/);
+    assert.equal(new URL(call.url).searchParams.get("start_value"), String(seq));
     assert.deepEqual(new URL(call.url).searchParams.getAll("tag"), ["x", "y"]);
     assert.equal(call.options.headers.Accept, "application/x-plasmite-lite3-stream");
     assert.equal(call.options.headers.Authorization, "Bearer secret");
@@ -60,7 +61,7 @@ test("binary HTTP tails reject truncation and oversized frames before payload al
   for (const bytes of [Buffer.alloc(3), frame(1n, 1n, Buffer.from("ab")).subarray(0, 21)]) {
     await stub(responseChunks([bytes]), async () => {
       const pool = new RemotePool(new RemoteClient("http://localhost"), "p");
-      await assert.rejects(async () => { for await (const _ of pool.tailLite3()) {} }, /truncated/);
+      await assert.rejects(async () => { for await (const _ of pool.followLite3()) {} }, /truncated/);
     });
   }
   const header = Buffer.alloc(20);
@@ -74,7 +75,7 @@ test("binary HTTP tails reject truncation and oversized frames before payload al
   try {
     await stub(response, async () => {
       const pool = new RemotePool(new RemoteClient("http://localhost"), "p");
-      await assert.rejects(async () => { for await (const _ of pool.tailLite3()) {} }, /maximum/);
+      await assert.rejects(async () => { for await (const _ of pool.followLite3()) {} }, /maximum/);
     });
   } finally { Buffer.allocUnsafe = original; }
 });
@@ -87,7 +88,7 @@ test("ending a binary tail cancels transport while retained payloads stay usable
   }));
   await stub(response, async (getCall) => {
     const pool = new RemotePool(new RemoteClient("http://localhost"), "p");
-    const iterator = pool.tailLite3();
+    const iterator = pool.followLite3();
     const first = await iterator.next();
     await iterator.return();
     assert.equal(cancelled, true);
@@ -138,6 +139,6 @@ test("binary requests keep structured HTTP errors and reject unsupported gap pol
       assert.equal(error.kind, 3);
       return true;
     });
-    await assert.rejects(async () => { for await (const _ of pool.tailLite3({ errorOnGap: true })) {} }, /retention gaps/);
+    await assert.rejects(async () => { for await (const _ of pool.followLite3({start: FollowStart.all(),  errorOnGap: true })) {} }, /retention gaps/);
   });
 });

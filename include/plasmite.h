@@ -103,6 +103,30 @@ typedef struct plsm_stream_options {
     uint32_t reserved;
 } plsm_stream_options_t;
 
+/* Follow starts at new messages by default. start_kind: 0 new, 1 last N,
+ * 2 since Unix nanoseconds, 3 inclusive sequence (0 = all retained).
+ * Zero-initialize, set struct_size; finite=1 stops at the opening upper bound.
+ * max_messages counts accepted messages after filtering. Legacy stream-open
+ * symbols retain their original history-first behavior for ABI compatibility.
+ */
+typedef enum plsm_follow_start_kind {
+    PLSM_FOLLOW_NEW = 0,
+    PLSM_FOLLOW_LAST = 1,
+    PLSM_FOLLOW_SINCE = 2,
+    PLSM_FOLLOW_SEQUENCE = 3
+} plsm_follow_start_kind_t;
+typedef struct plsm_follow_options {
+    uint32_t struct_size;
+    uint32_t gap_policy;
+    uint64_t start_value;
+    uint64_t max_messages;
+    uint64_t timeout_ms;
+    uint32_t start_kind;
+    uint32_t has_max;
+    uint32_t has_timeout;
+    uint32_t finite;
+} plsm_follow_options_t;
+
 typedef struct plsm_buf {
     uint8_t *data;
     size_t len;
@@ -178,6 +202,8 @@ void plsm_client_free(plsm_client_t *client);
 /* pool_ref names resolve in the client's directory. Native path separators
  * select a file path; use ./bare.plasmite (or .\bare.plasmite on Windows)
  * for an explicit bare file. Windows drive-relative forms are unsupported. */
+int plsm_pool_follow(plsm_pool_t *, const plsm_follow_options_t *, plsm_stream_t **, plsm_error_t **);
+int plsm_pool_follow_lite3(plsm_pool_t *, const plsm_follow_options_t *, plsm_lite3_stream_t **, plsm_error_t **);
 int plsm_pool_create(plsm_client_t *client, const char *pool_ref, uint64_t size_bytes, plsm_pool_t **out_pool, plsm_error_t **out_err);
 int plsm_pool_open(plsm_client_t *client, const char *pool_ref, plsm_pool_t **out_pool, plsm_error_t **out_err);
 void plsm_pool_free(plsm_pool_t *pool);
@@ -501,6 +527,7 @@ typedef struct { const uint8_t *data; size_t len; } plsm_text_t;
  * UINT64_MAX timeout waits under the open-time deadline; zero polls.
  * Status: 0=wait expired, 1=items, 2=finished, 3=cancelled, -1=error.
  * out has max_count slots; count always reports initialized owners. */
+int plsm_pool_follow_views(plsm_pool_t *, const plsm_follow_options_t *, const plsm_text_t *, size_t, plsm_stream_t **, plsm_error_t **);
 int plsm_view_stream_open(plsm_pool_t *pool, const plsm_stream_options_t *options,
     const plsm_text_t *tags, size_t tag_count, plsm_stream_t **out, plsm_error_t **err);
 int plsm_view_stream_next(plsm_stream_t *stream, uint64_t timeout_ms,

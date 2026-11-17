@@ -17,7 +17,7 @@ does not acknowledge work or retain it until a consumer finishes.
 
 ```rust
 use plasmite::api::{
-    Durability, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions,
+    Durability, LocalClient, PoolApiExt, PoolOptions, PoolRef, FollowOptions,
 };
 use serde_json::json;
 
@@ -42,11 +42,11 @@ let fetched = pool.get_message(1)?;
 assert_eq!(fetched.data["user"], "alice");
 
 // Read back this message through the streaming API
-let mut tail = pool.tail(TailOptions {
-    since_seq: Some(msg.seq),
+let mut tail = pool.follow(FollowOptions {
+    start: plasmite::api::FollowStart::Sequence(msg.seq),
     max_messages: Some(1),
     tags: vec!["user-event".into()],
-    ..TailOptions::default()
+    ..FollowOptions::default()
 });
 while let Some(message) = tail.next_message()? {
     println!("{}: {}", message.seq, message.data);
@@ -106,7 +106,7 @@ Use the additive owned-view API to keep Lite3 as the data of record. Existing
 JSON/message methods remain available.
 
 ```rust
-use plasmite::api::{Durability, PoolApiExt, TailOptions};
+use plasmite::api::{Durability, PoolApiExt, FollowOptions};
 use serde_json::json;
 
 let sent = pool.append_value_now(&json!({"power": 42}), &["sensor"], Durability::Fast)?;
@@ -115,7 +115,7 @@ let power = message.data().get("power")?.unwrap().decode::<i64>()?;
 let retained = message.data().into_owned(); // Share the snapshot, without copying.
 let forwarded = destination.append_view_now(&message, Durability::Fast)?;
 
-for message in pool.tail_views(TailOptions::new()) {
+for message in pool.follow_views(FollowOptions::new()) {
     let message = message?;
     println!("{}", String::from_utf8(message.data().to_json()?)?);
     break;
@@ -131,7 +131,7 @@ allocates text. A retained child keeps its entire snapshot alive.
 
 `UdpPool::follow_views` returns `UdpViewEvent::Frame(MessageView)` alongside
 existing gap/progress events, sharing arrival-order and cancellation rules with
-ordinary follows. Configure local cancellation through `TailOptions::cancel`;
+ordinary follows. Configure local cancellation through `FollowOptions::cancel`;
 stop and drop a tail when finished. See the
 [migration guide](docs/record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
 for ownership, forwarding and transport limits.
@@ -173,18 +173,18 @@ let msg = pool.get_message(42)?;
 println!("{}: {} {:?}", msg.seq, msg.data, msg.meta.tags);
 ```
 
-### Tailing (streaming)
+### Following messages
 
 ```rust
-use plasmite::api::{PoolApiExt, TailOptions};
+use plasmite::api::{PoolApiExt, FollowOptions};
 use std::time::Duration;
 
-let mut tail = pool.tail(TailOptions {
-    since_seq: Some(100),                  // start at seq 100 (inclusive)
+let mut tail = pool.follow(FollowOptions {
+    start: plasmite::api::FollowStart::Sequence(100),                  // start at seq 100 (inclusive)
     max_messages: Some(50),                // stop after 50
     timeout: Some(Duration::from_secs(5)), // stop after 5s from the start
     tags: vec!["important".into()],        // filter by tag
-    ..TailOptions::default()
+    ..FollowOptions::default()
 });
 
 while let Some(msg) = tail.next_message()? {
@@ -216,8 +216,8 @@ let msg = pool.append_json_now(
     Durability::Fast,
 )?;
 
-// Tail remote messages
-let mut tail = pool.tail(Default::default())?;
+// Follow remote messages
+let mut tail = pool.follow(Default::default())?;
 while let Some(msg) = tail.next_message()? {
     println!("{}", msg.data);
 }
@@ -252,7 +252,7 @@ match pool.get_message(9999) {
 Error kinds: `Internal`, `Usage`, `NotFound`, `AlreadyExists`, `Busy`,
 `Permission`, `Corrupt`, `Io`, `RetentionGap`.
 
-Set `TailOptions::gap_policy` to `GapPolicy::Error` to stop a tail before
+Set `FollowOptions::gap_policy` to `GapPolicy::Error` to stop a tail before
 delivering a message after lost history. Its `RetentionGap` error identifies the first missing sequence.
 Persist the next sequence to read and choose how to recover before restarting.
 
@@ -283,3 +283,13 @@ cookbook, and language bindings ([Node](https://www.npmjs.com/package/plasmite),
 ## License
 
 MIT
+
+### Follow defaults and explicit history
+
+`FollowOptions::default()` waits for new messages. Set `start` to
+`FollowStart::all()`, `Last(n)`, `Since(unix_ns)` or `Sequence(seq)` to read
+history. Sequence selection is inclusive. `live: false` stops at the opening
+history boundary; alone it selects all retained history. Local and remote
+ordinary, Lite3 and view readers use this model. Last N selects retained records
+before filters. Retention may remove unread history; choose the gap policy that
+fits the application. All selection values and identities retain exact integers.

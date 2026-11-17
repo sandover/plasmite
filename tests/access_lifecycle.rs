@@ -1,6 +1,6 @@
 //! Access revocation stops existing streams and survives a server restart.
 
-use plasmite::api::{Durability, PoolOptions, PoolRef, RemoteClient, TailOptions};
+use plasmite::api::{Durability, FollowOptions, PoolOptions, PoolRef, RemoteClient};
 use serde_json::{Value, json};
 use std::fs;
 use std::sync::mpsc;
@@ -69,7 +69,7 @@ fn key_by_id<'a>(keys: &'a Value, id: &str) -> &'a Value {
 }
 
 fn wait_for_stream_end(
-    mut tail: plasmite::api::RemoteTail,
+    mut tail: plasmite::api::RemoteFollow,
     last_admitted_seq: u64,
 ) -> mpsc::Receiver<bool> {
     let (done_tx, done_rx) = mpsc::channel();
@@ -258,19 +258,19 @@ fn revoke_stops_streams_denies_new_requests_and_survives_restart() -> TestResult
     let initial = first_pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
 
     // One stream has already delivered data; the other waits at the current end.
-    let mut active = first_pool.tail(TailOptions {
-        since_seq: Some(initial.seq),
+    let mut active = first_pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(initial.seq),
         timeout: Some(Duration::from_secs(20)),
-        ..TailOptions::default()
+        ..Default::default()
     })?;
     assert_eq!(
         active.next_message()?.expect("initial stream message").seq,
         initial.seq
     );
-    let idle = first_pool.tail(TailOptions {
-        since_seq: Some(initial.seq + 2),
+    let idle = first_pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(initial.seq + 2),
         timeout: Some(Duration::from_secs(20)),
-        ..TailOptions::default()
+        ..Default::default()
     })?;
 
     // This write is admitted while the invitation remains active.

@@ -2,7 +2,7 @@
 //! Build this standalone file against the release library; it changes no crate targets.
 
 use plasmite::api::{
-    Durability, LocalClient, PoolOptions, PoolRef, RemoteClient, TailOptions, UdpClient, UdpEvent,
+    Durability, LocalClient, PoolOptions, PoolRef, RemoteClient, FollowOptions, UdpClient, UdpEvent,
     UdpFollowOptions, lite3,
 };
 use std::error::Error;
@@ -228,11 +228,11 @@ fn run(
         let client = RemoteClient::new(&server.http)?;
         let pool = client.open_pool(&pool_ref)?;
         for _ in 0..fans {
-            let mut opts = TailOptions::new();
-            opts.since_seq = Some(1);
+            let mut opts = FollowOptions::new();
+            opts.start = plasmite::api::FollowStart::Sequence(1);
             opts.max_messages = Some(COUNT);
             opts.timeout = Some(Duration::from_secs(4));
-            let mut tail = pool.tail_lite3(opts)?;
+            let mut tail = pool.follow_lite3(opts)?;
             let tx = ready_tx.clone();
             let messages = messages.clone();
             handles.push(thread::spawn(move || {

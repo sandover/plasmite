@@ -1,3 +1,4 @@
+const { FollowStart } = require("../follow");
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -62,9 +63,9 @@ test('HTTP views preserve exact values, forwarding, transport limits and retaine
   assert.equal(fetched.timestampNs, first.timestampNs);
   assert.deepEqual(toNative(fetched.data), toNative(first.data));
   const observed = [];
-  for await (const message of pool.tailViews({ sinceSeq: first.seq, maxMessages: 3, timeoutMs: 1000 })) observed.push(message);
+  for await (const message of pool.followViews({ start: FollowStart.sequence(first.seq), maxMessages: 3, timeoutMs: 1000 })) observed.push(message);
   assert.deepEqual(observed.map(value => value.seq), [first.seq, forwarded.seq, retagged.seq]);
-  await assert.rejects(async () => { for await (const _ of pool.tailViews({ errorOnGap: true })) {} }, /terminal retention gaps/);
+  await assert.rejects(async () => { for await (const _ of pool.followViews({start: FollowStart.all(),  errorOnGap: true })) {} }, /terminal retention gaps/);
 
   // An older server ignores the new response type. Use its one JSON receipt;
   // never retry an append or round away its nanosecond identity.

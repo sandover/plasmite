@@ -1,3 +1,4 @@
+from plasmite import FollowStart
 """Finish Python callbacks before borrowing a native handle."""
 
 import ctypes
@@ -87,7 +88,7 @@ class HandleCallbacks(unittest.TestCase):
                     ),
                 )
 
-    def test_get_sequence_and_open_stream_options(self):
+    def test_get_sequence_and_open_follow_options(self):
         for method, symbol in [
             ("get_json", "plsm_pool_get_json"),
             ("get_lite3", "plsm_pool_get_lite3"),
@@ -98,23 +99,23 @@ class HandleCallbacks(unittest.TestCase):
                     symbol, lambda: getattr(pool, method)(closing_int(pool.close))
                 )
         for method, symbol in [
-            ("open_stream", "plsm_stream_open"),
-            ("open_lite3_stream", "plsm_lite3_stream_open"),
+            ("open_follow", "plsm_pool_follow"),
+            ("open_lite3_follow", "plsm_pool_follow_lite3"),
         ]:
             for gap in [False, True]:
                 with self.subTest(method=method, gap=gap):
                     pool = self.fresh_pool()
                     self.assert_closed_before_native(
-                        symbol + ("_ex" if gap else ""),
+                        symbol,
                         lambda: getattr(pool, method)(
-                            since_seq=closing_int(pool.close), error_on_gap=gap
+                            start=FollowStart(3, closing_int(pool.close)), error_on_gap=gap
                         ),
                     )
 
     def test_stream_timeout(self):
         for method, symbol in [
-            ("open_stream", "plsm_stream_next_wait"),
-            ("open_lite3_stream", "plsm_lite3_stream_next_wait"),
+            ("open_follow", "plsm_stream_next_wait"),
+            ("open_lite3_follow", "plsm_lite3_stream_next_wait"),
         ]:
             with self.subTest(method=method):
                 with getattr(self.pool, method)() as stream:
@@ -195,7 +196,7 @@ class HandleCallbacks(unittest.TestCase):
                     call = lambda: handle.send_json({}, tags=closing_tags(handle.close))
                 elif args == "live":
                     call = lambda: handle.follow(
-                        plasmite.UdpFollowOptions(live=closing_int(handle.close))
+                        plasmite.UdpFollowOptions(finite=closing_int(handle.close))
                     )
                 else:
                     call = lambda: handle.next_event(closing_int(handle.close))

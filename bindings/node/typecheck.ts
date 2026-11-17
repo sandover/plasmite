@@ -1,3 +1,4 @@
+import { FollowStart } from ".";
 /*
 Purpose: Lightweight type smoke test for public Node binding declarations.
 Key Exports: None.
@@ -45,8 +46,8 @@ async function smokeRemote() {
   const remote = new RemoteClient("http://127.0.0.1:9700");
   const opened = await remote.openPool("docs");
   const msg = await opened.append({ kind: "note" }, ["note"], Durability.Fast);
-  for await (const next of opened.tail({
-    sinceSeq: msg.seq,
+  for await (const next of opened.follow({
+    start: FollowStart.sequence(msg.seq),
     maxMessages: 1,
     tags: ["note"],
     errorOnGap: true,
@@ -58,7 +59,7 @@ async function smokeRemote() {
 }
 
 async function smokeLocalStreams() {
-  for await (const message of pool.tail({
+  for await (const message of pool.follow({
     maxMessages: 1,
     timeoutMs: 10,
     tags: ["tag"],
@@ -67,9 +68,9 @@ async function smokeLocalStreams() {
     void message;
     break;
   }
-  const stream = pool.openStream(1n, 1n, 10n, true);
+  const stream = pool.openFollow(FollowStart.sequence(1n), 1n, 10n, true);
   stream.close();
-  const lite3Stream = pool.openLite3Stream(1n, 1n, 10n, true);
+  const lite3Stream = pool.openLite3Follow(FollowStart.sequence(1n), 1n, 10n, true);
   lite3Stream.close();
 }
 

@@ -421,7 +421,7 @@ fn unknown_skip_reason_is_reserved_in_both_receive_phases() {
             .unwrap()
             .open_pool(&PoolRef::name("events"))
             .unwrap();
-        let result = pool.follow(UdpFollowOptions::new());
+        let result = pool.follow(UdpFollowOptions::default());
         let error = if opening {
             result.err().expect("unknown startup skip reason")
         } else {
@@ -657,7 +657,7 @@ fn view_follow_rejects_malformed_data_before_exposure() {
         .open_pool(&PoolRef::name("sensors"))
         .unwrap();
     assert!(
-        matches!(pool.follow_views(UdpFollowOptions::new()),Err(error) if error.kind()==ErrorKind::Corrupt)
+        matches!(pool.follow_views(UdpFollowOptions::default()),Err(error) if error.kind()==ErrorKind::Corrupt)
     );
     server.join().unwrap();
 }

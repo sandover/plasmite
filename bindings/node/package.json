@@ -18,6 +18,7 @@
     "input.js",
     "mappings.js",
     "types.d.ts",
+    "follow.js",
     "remote.js",
     "bin/plasmite.js",
     "native/linux-x64/**",

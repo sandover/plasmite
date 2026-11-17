@@ -98,13 +98,13 @@ def worker(args):
             if pool is None:
                 sys.stdout.buffer.flush()
         else:
-            incoming = pool.open_lite3_stream(
-                since_seq=1, max_messages=args.messages, timeout_ms=120_000, error_on_gap=True,
+            incoming = pool.open_lite3_follow(
+                start=plasmite.FollowStart.sequence(1), max_messages=args.messages, timeout_ms=120_000, error_on_gap=True,
             ) if args.binary else (
                 (json.loads(line) for line in sys.stdin.buffer)
                 if pool is None else
-                (message.data for message in pool.tail(
-                    since_seq=1, max_messages=args.messages,
+                (message.data for message in pool.follow(
+                    start=plasmite.FollowStart.sequence(1), max_messages=args.messages,
                     timeout_ms=120_000, error_on_gap=True,
                 ))
             )

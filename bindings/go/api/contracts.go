@@ -1,6 +1,6 @@
 /*
 Purpose: Backend-agnostic Go contracts and shared model types for Plasmite.
-Key Exports: Client, Pool, Message, MessageMeta, Stream, TailOptions, Error.
+Key Exports: Client, Pool, Message, MessageMeta, Stream, FollowOptions, Error.
 Role: Stable pure-Go surface consumed by local/fake/future transport backends.
 Invariants: No cgo imports; error kinds are stable; stream APIs remain cancel-safe.
 Invariants: Pool ordering and bounded buffering semantics are preserved by implementations.
@@ -180,8 +180,9 @@ func (f *Lite3Frame) Time() time.Time {
 	return time.Unix(0, int64(f.TimestampNs)).UTC()
 }
 
-type TailOptions struct {
-	SinceSeq    *uint64
+type FollowOptions struct {
+	Start       FollowStart
+	Finite      bool
 	MaxMessages *uint64
 	Tags        []string
 	Timeout     time.Duration
@@ -248,10 +249,10 @@ type Pool interface {
 	GetJSON(seq uint64) ([]byte, error)
 	Get(seq uint64) (*Message, error)
 	GetLite3(seq uint64) (*Lite3Frame, error)
-	OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (Stream, error)
-	OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (Lite3Stream, error)
-	Tail(ctx context.Context, opts TailOptions) (<-chan *Message, <-chan error)
-	TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Frame, <-chan error)
+	OpenFollow(start UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (Stream, error)
+	OpenLite3Follow(start UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (Lite3Stream, error)
+	Follow(ctx context.Context, opts FollowOptions) (<-chan *Message, <-chan error)
+	FollowLite3(ctx context.Context, opts FollowOptions) (<-chan *Lite3Frame, <-chan error)
 }
 
 type Stream interface {
@@ -275,10 +276,12 @@ const (
 
 // UdpStart chooses the history position for a UDP follow. Since is Unix time
 // in nanoseconds; Sequence starts at the named sequence.
-type UDPStart struct {
+type FollowStart struct {
 	Kind  UDPStartKind
 	Value uint64
 }
+
+type UDPStart = FollowStart
 
 func UDPStartNewPosition() UDPStart { return UDPStart{Kind: UDPStartNew} }
 func UDPStartLastCount(count uint64) UDPStart {
@@ -292,12 +295,12 @@ func UDPStartAtSequence(seq uint64) UDPStart {
 }
 
 type UDPFollowOptions struct {
-	Start UDPStart
-	Live  bool
+	Start  FollowStart
+	Finite bool
 }
 
 func NewUDPFollowOptions() UDPFollowOptions {
-	return UDPFollowOptions{Start: UDPStartNewPosition(), Live: true}
+	return UDPFollowOptions{Start: UDPStartNewPosition()}
 }
 
 type UDPEvent interface {

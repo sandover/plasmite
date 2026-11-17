@@ -1,6 +1,6 @@
 /*
 Purpose: Go bindings for the libplasmite C ABI (v0).
-Key Exports: Client, Pool, Stream, TailOptions, Durability, Error.
+Key Exports: Client, Pool, Stream, FollowOptions, Durability, Error.
 Role: Minimal, ergonomic wrapper around include/plasmite.h for Go users.
 Invariants: Caller must Close resources; JSON bytes in/out; errors returned as Go error.
 Notes: Uses cgo and links to -lplasmite; caller configures library search path.
@@ -99,7 +99,7 @@ func PoolRefURI(uri string) PoolRef { return api.PoolRefURI(uri) }
 
 type Lite3Frame = api.Lite3Frame
 
-type TailOptions = api.TailOptions
+type FollowOptions = api.FollowOptions
 
 type AppendOption = api.AppendOption
 
@@ -450,15 +450,15 @@ func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
 	return copyAndFreeLite3Frame(&cFrame), nil
 }
 
-func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Stream, error) {
-	stream, err := p.openStream(sinceSeq, maxMessages, timeoutMs, false)
+func (p *Pool) OpenFollow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (api.Stream, error) {
+	stream, err := p.openFollow(start, maxMessages, timeoutMs, false, finite...)
 	if err != nil {
 		return nil, err
 	}
 	return stream, nil
 }
 
-func (p *Pool) openStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (*Stream, error) {
+func (p *Pool) openFollow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool, finite ...bool) (*Stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -467,68 +467,25 @@ func (p *Pool) openStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
-	var sinceVal C.uint64_t
-	var hasSince C.uint32_t
-	if sinceSeq != nil {
-		sinceVal = C.uint64_t(*sinceSeq)
-		hasSince = 1
-	}
-	var maxVal C.uint64_t
-	var hasMax C.uint32_t
-	if maxMessages != nil {
-		maxVal = C.uint64_t(*maxMessages)
-		hasMax = 1
-	}
-	var timeoutVal C.uint64_t
-	var hasTimeout C.uint32_t
-	if timeoutMs != nil {
-		timeoutVal = C.uint64_t(*timeoutMs)
-		hasTimeout = 1
-	}
-
+	options := followOptions(start, maxMessages, timeoutMs, errorOnGap, len(finite) > 0 && finite[0])
 	var cStream *C.plsm_stream_t
 	var cErr *C.plsm_error_t
-	var rc C.int
-	if errorOnGap {
-		options := C.plsm_stream_options_t{
-			struct_size:  C.uint32_t(C.sizeof_plsm_stream_options_t),
-			gap_policy:   C.uint32_t(C.PLSM_GAP_ERROR),
-			since_seq:    sinceVal,
-			max_messages: maxVal,
-			timeout_ms:   timeoutVal,
-			has_since:    hasSince,
-			has_max:      hasMax,
-			has_timeout:  hasTimeout,
-		}
-		rc = C.plsm_stream_open_ex(p.ptr, &options, &cStream, &cErr)
-	} else {
-		rc = C.plsm_stream_open(
-			p.ptr,
-			sinceVal,
-			hasSince,
-			maxVal,
-			hasMax,
-			timeoutVal,
-			hasTimeout,
-			&cStream,
-			&cErr,
-		)
-	}
+	rc := C.plsm_pool_follow(p.ptr, &options, &cStream, &cErr)
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
 	return &Stream{ptr: cStream}, nil
 }
 
-func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Lite3Stream, error) {
-	stream, err := p.openLite3Stream(sinceSeq, maxMessages, timeoutMs, false)
+func (p *Pool) OpenLite3Follow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, finite ...bool) (api.Lite3Stream, error) {
+	stream, err := p.openLite3Follow(start, maxMessages, timeoutMs, false, finite...)
 	if err != nil {
 		return nil, err
 	}
 	return stream, nil
 }
 
-func (p *Pool) openLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (*Lite3Stream, error) {
+func (p *Pool) openLite3Follow(start api.UDPStart, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool, finite ...bool) (*Lite3Stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -537,53 +494,10 @@ func (p *Pool) openLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs 
 	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
-	var sinceVal C.uint64_t
-	var hasSince C.uint32_t
-	if sinceSeq != nil {
-		sinceVal = C.uint64_t(*sinceSeq)
-		hasSince = 1
-	}
-	var maxVal C.uint64_t
-	var hasMax C.uint32_t
-	if maxMessages != nil {
-		maxVal = C.uint64_t(*maxMessages)
-		hasMax = 1
-	}
-	var timeoutVal C.uint64_t
-	var hasTimeout C.uint32_t
-	if timeoutMs != nil {
-		timeoutVal = C.uint64_t(*timeoutMs)
-		hasTimeout = 1
-	}
-
+	options := followOptions(start, maxMessages, timeoutMs, errorOnGap, len(finite) > 0 && finite[0])
 	var cStream *C.plsm_lite3_stream_t
 	var cErr *C.plsm_error_t
-	var rc C.int
-	if errorOnGap {
-		options := C.plsm_stream_options_t{
-			struct_size:  C.uint32_t(C.sizeof_plsm_stream_options_t),
-			gap_policy:   C.uint32_t(C.PLSM_GAP_ERROR),
-			since_seq:    sinceVal,
-			max_messages: maxVal,
-			timeout_ms:   timeoutVal,
-			has_since:    hasSince,
-			has_max:      hasMax,
-			has_timeout:  hasTimeout,
-		}
-		rc = C.plsm_lite3_stream_open_ex(p.ptr, &options, &cStream, &cErr)
-	} else {
-		rc = C.plsm_lite3_stream_open(
-			p.ptr,
-			sinceVal,
-			hasSince,
-			maxVal,
-			hasMax,
-			timeoutVal,
-			hasTimeout,
-			&cStream,
-			&cErr,
-		)
-	}
+	rc := C.plsm_pool_follow_lite3(p.ptr, &options, &cStream, &cErr)
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
@@ -678,27 +592,29 @@ func (p *Pool) tailPoolOpen() bool {
 	return p.ptr != nil
 }
 
-// Tail streams matching JSON messages through one native reader. Bounded waits
+// Follow streams matching JSON messages through one native reader. Bounded waits
 // check context cancellation at least every 50 ms while the pool is idle.
-func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan *api.Message, <-chan error) {
+func (p *Pool) Follow(ctx context.Context, opts FollowOptions) (<-chan *api.Message, <-chan error) {
 	out := make(chan *api.Message, bufferSize(opts.Buffer))
 	errs := make(chan error, 1)
+	limit := opts.MaxMessages
+	if len(opts.Tags) > 0 {
+		limit = nil
+	}
+	stream, err := p.openFollow(opts.Start, limit, nil, opts.ErrorOnGap, opts.Finite)
 	go func() {
 		defer close(out)
 		defer close(errs)
+		if stream != nil {
+			defer stream.Close()
+		}
 		if opts.MaxMessages != nil && *opts.MaxMessages == 0 {
 			return
 		}
-		limit := opts.MaxMessages
-		if len(opts.Tags) > 0 {
-			limit = nil
-		}
-		stream, err := p.openStream(opts.SinceSeq, limit, nil, opts.ErrorOnGap)
 		if err != nil {
 			errs <- err
 			return
 		}
-		defer stream.Close()
 		var delivered uint64
 		wait := min(streamTimeoutMillis(opts.Timeout), uint64(50))
 		for {
@@ -743,23 +659,25 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan *api.Message,
 	return out, errs
 }
 
-// TailLite3 streams raw frames through one native reader. Bounded waits retain
+// FollowLite3 streams raw frames through one native reader. Bounded waits retain
 // its checkpoint while checking context cancellation and Pool.Close.
-func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Frame, <-chan error) {
+func (p *Pool) FollowLite3(ctx context.Context, opts FollowOptions) (<-chan *Lite3Frame, <-chan error) {
 	out := make(chan *Lite3Frame, bufferSize(opts.Buffer))
 	errs := make(chan error, 1)
+	stream, err := p.openLite3Follow(opts.Start, opts.MaxMessages, nil, opts.ErrorOnGap, opts.Finite)
 	go func() {
 		defer close(out)
 		defer close(errs)
+		if stream != nil {
+			defer stream.Close()
+		}
 		if opts.MaxMessages != nil && *opts.MaxMessages == 0 {
 			return
 		}
-		stream, err := p.openLite3Stream(opts.SinceSeq, opts.MaxMessages, nil, opts.ErrorOnGap)
 		if err != nil {
 			errs <- err
 			return
 		}
-		defer stream.Close()
 		wait := min(streamTimeoutMillis(opts.Timeout), uint64(50))
 		for {
 			if ctx.Err() != nil {
@@ -939,4 +857,31 @@ func closedError(target string) error {
 
 func invalidArgumentError(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidArgument, message)
+}
+
+// Start selects history explicitly. Its zero value means new messages.
+type Start = api.UDPStart
+
+func NewPosition() Start        { return api.UDPStartNewPosition() }
+func All() Start                { return api.UDPStartAtSequence(0) }
+func Last(n uint64) Start       { return api.UDPStartLastCount(n) }
+func Since(ns uint64) Start     { return api.UDPStartSinceNs(ns) }
+func Sequence(seq uint64) Start { return api.UDPStartAtSequence(seq) }
+func followOptions(start Start, max *uint64, timeout *uint64, gap bool, finite bool) C.plsm_follow_options_t {
+	options := C.plsm_follow_options_t{struct_size: C.uint32_t(C.sizeof_plsm_follow_options_t), start_kind: C.uint32_t(start.Kind), start_value: C.uint64_t(start.Value)}
+	if max != nil {
+		options.has_max = 1
+		options.max_messages = C.uint64_t(*max)
+	}
+	if timeout != nil {
+		options.has_timeout = 1
+		options.timeout_ms = C.uint64_t(*timeout)
+	}
+	if gap {
+		options.gap_policy = C.PLSM_GAP_ERROR
+	}
+	if finite {
+		options.finite = 1
+	}
+	return options
 }

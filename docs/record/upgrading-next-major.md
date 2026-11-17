@@ -14,10 +14,10 @@ Install matching bindings and native libraries before using the new symbols.
 
 | Language | Produce / read | Local stream | Explicit native copy |
 |---|---|---|---|
-| [Rust](../../README-crate.md#immutable-snapshots-and-typed-values) | `append_value_now` / `get_view` | `tail_views` | `value.decode::<T>()` when `T` owns its fields |
-| [Python](../../bindings/python/README.md#immutable-message-views) | `append_view` / `get_view` | `tail_views` | `to_native(value)` |
-| [JavaScript](../../bindings/node/README.md#owned-views-additive-source-api) | `appendView` / `await getView` | `tailViews` | `toNative(value)` |
-| [Go](../../bindings/go/README.md#managed-owned-views) | `AppendView` / `GetView` | `OpenViewStream` or `TailViews` | `Decode(&target)` |
+| [Rust](../../README-crate.md#immutable-snapshots-and-typed-values) | `append_value_now` / `get_view` | `follow_views` | `value.decode::<T>()` when `T` owns its fields |
+| [Python](../../bindings/python/README.md#immutable-message-views) | `append_view` / `get_view` | `follow_views` | `to_native(value)` |
+| [JavaScript](../../bindings/node/README.md#owned-views-additive-source-api) | `appendView` / `await getView` | `followViews` | `toNative(value)` |
+| [Go](../../bindings/go/README.md#managed-owned-views) | `AppendView` / `GetView` | `OpenViewFollow` or `FollowViews` | `Decode(&target)` |
 | [C](../../include/plasmite.h) | native builder or `plsm_pool_append_view_json` / `plsm_pool_get_view` | `plsm_view_stream_open` | caller-selected scalar/span copies |
 
 Field access reads the snapshot. It may allocate language scalars or small
@@ -79,7 +79,7 @@ stream when abandoning a blocked read, and close its resource handle. Node
 async iterators close on `break`; Python context managers and Go `defer Close()`
 provide the corresponding cleanup. Cancellation interrupts message waits;
 it cannot interrupt a file lock already in progress. Node local tails use
-`timeoutMs` for each wait. Go tail polling waits use `TailOptions.Timeout`;
+`timeoutMs` for each wait. Go tail polling waits use `FollowOptions.Timeout`;
 use the context for a deadline.
 
 Owned UDP follows preserve arrival order, duplicates and late packets. Explicit
@@ -87,7 +87,7 @@ server skips produce gaps; sequence jumps alone do not establish packet loss.
 A finite follow can end with DATA still in flight. Views do not add delivery
 acknowledgments or repair to UDP.
 
-Node's HTTP `RemotePool` provides `getView`, `tailViews` and `appendView` through
+Node's HTTP `RemotePool` provides `getView`, `followViews` and `appendView` through
 the bundled WebAssembly backend, without a native addon. Binary HTTP reads need
 current-server identity headers. Binary tails reject `errorOnGap: true`: their
 frame protocol cannot report a terminal error after streaming begins. EOF does
@@ -169,14 +169,14 @@ mechanism when playback needs a deadline.
 Rust applications can pace owned messages between reads:
 
 ```rust
-use plasmite::api::{Error, GapPolicy, Pool, PoolApiExt, TailOptions};
+use plasmite::api::{Error, GapPolicy, Pool, PoolApiExt, FollowOptions};
 use std::time::Duration;
 
 fn playback(pool: &Pool) -> Result<(), Error> {
-    let mut tail = pool.tail(TailOptions {
-        since_seq: Some(1), max_messages: Some(2),
+    let mut tail = pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(1), max_messages: Some(2),
         timeout: Some(Duration::from_secs(1)), gap_policy: GapPolicy::Error,
-        ..TailOptions::default()
+        ..FollowOptions::default()
     });
     let mut previous = None::<u64>;
     while let Some(message) = tail.next_message()? {
@@ -197,7 +197,7 @@ Python applications can pause between generator reads without holding a pool loc
 import time
 
 previous = None
-for message in pool.tail(since_seq=1, max_messages=2, timeout_ms=1000, error_on_gap=True):
+for message in pool.follow(start=FollowStart.sequence(1), max_messages=2, timeout_ms=1000, error_on_gap=True):
     if previous is not None:
         time.sleep(max(0, (message.time - previous).total_seconds() / 10))
     print(message.data)
@@ -211,8 +211,8 @@ running during reads and delays:
 const { setTimeout: sleep } = require("node:timers/promises");
 
 let previous = null;
-for await (const message of pool.tail({
-  sinceSeq: 1n, maxMessages: 2, timeoutMs: 1000, errorOnGap: true,
+for await (const message of pool.follow({
+  start: FollowStart.sequence(1n), maxMessages: 2, timeoutMs: 1000, errorOnGap: true,
 })) {
   const timestamp = message.time.getTime();
   if (previous !== null) await sleep(Math.max(0, (timestamp - previous) / 10));
@@ -226,8 +226,8 @@ Go applications can use a context to stop playback delays as well as reads:
 ```go
 func playback(ctx context.Context, pool api.Pool) error {
     start, count := uint64(1), uint64(2)
-    messages, errs := pool.Tail(ctx, api.TailOptions{
-        SinceSeq: &start, MaxMessages: &count, Timeout: time.Second, ErrorOnGap: true,
+    messages, errs := pool.Follow(ctx, api.FollowOptions{
+        Start: local.Sequence(start), MaxMessages: &count, Timeout: time.Second, ErrorOnGap: true,
     })
     var previous time.Time
     for message := range messages {
@@ -322,3 +322,78 @@ Python keeps existing methods available with older libraries and raises
 `NotImplementedError` before commit if an identity method's symbol is missing.
 Go backends that implement only the existing Pool interface still compile;
 identity helpers return an unsupported-operation error before they append.
+
+## Follow replaces tail in the forthcoming 1.x release
+
+The maintainer explicitly authorizes this breaking transition in 1.x. Replace
+public tail methods and option types with follow. This change also changes the
+default: a reader now skips stored messages and waits for new ones.
+
+| Binding | Ordinary reader | View reader | Explicit history selection |
+| --- | --- | --- | --- |
+| Rust | `pool.follow(FollowOptions)` | `pool.follow_views(FollowOptions)` | `FollowStart::all()`, `Last(n)`, `Since(unix_ns)`, `Sequence(seq)` |
+| Python | `pool.follow(...)` | `pool.follow_views(...)` | `FollowStart.all()`, `.last(n)`, `.since_ns(unix_ns)`, `.sequence(seq)` |
+| JavaScript | `pool.follow(options)` | `pool.followViews(options)` | `FollowStart.all()`, `.last(n)`, `.since(unixNs)`, `.sequence(seq)` |
+| Go | `pool.Follow(ctx, options)` | `pool.FollowViews(ctx, options)` | `local.All()`, `Last(n)`, `Since(unixNs)`, `Sequence(seq)` |
+
+Pass the selection as Rust/Go `Start` (`start` in Rust), or Python/JavaScript
+`start`. Go's zero-value options mean new messages. Python and JavaScript lazy
+iterators open at the first iteration; creating an iterator alone does not start
+listening. Rust local readers choose their position at construction. Go opens
+its native reader before returning channels; HTTP opens before returning headers.
+
+For example, explicitly read all retained Python messages and exit:
+
+```python
+from plasmite import FollowStart
+
+for message in pool.follow(start=FollowStart.all(), finite=True):
+    process(message)
+```
+
+In JavaScript, read the last ten retained messages and then keep listening:
+
+```javascript
+const { FollowStart } = require("plasmite");
+
+for await (const message of pool.follow({ start: FollowStart.last(10) })) {
+  process(message);
+}
+```
+
+Use `finite=True` in Python, `finite: true` in JavaScript, `Finite: true` in Go,
+or `live: false` in Rust for a finite history read. Finite mode alone selects all
+retained history, like CLI `--no-follow`; an explicit last-zero finite selection
+returns no messages. Finite reads stop at their opening upper sequence boundary,
+even while writers append. Last N selects retained records before filters.
+History remains subject to retention loss and the configured gap policy.
+
+To resume after successfully processing message 100, select sequence 101. Save
+application progress rather than the newest number in the pool. Timestamp
+selectors accept absolute Unix nanoseconds; CLI relative times remain CLI input.
+
+The corresponding low-level openings use follow names too: Python
+`open_follow`/`open_lite3_follow`, JavaScript `openFollow`/`openLite3Follow`, and
+Go `OpenFollow`/`OpenLite3Follow`/`OpenViewFollow`. Binary and bounded view
+readers use the same selection and finite-history rules.
+
+C callers zero-initialize `plsm_follow_options_t`, set `struct_size`, and call
+`plsm_pool_follow`, `plsm_pool_follow_lite3` or `plsm_pool_follow_views`.
+`start_kind` is 0 for new, 1 for last N, 2 for Unix nanoseconds or 3 for inclusive
+sequence; `start_value` carries the selected value. Sequence zero requests all
+retained history. `finite=1` selects finite history. Legacy C stream-open symbols
+retain their published history-first behavior for existing binary callers.
+
+HTTP clients use `/follow` and `/follow_lite3` with `start`, `start_value` and
+`finite`. Old routes return not found. New clients require updated servers;
+there is no fallback that silently replays stored messages. Existing UI/MCP
+adapters may still send an explicit `since_seq`, but cannot mix it with `start`.
+
+UDP uses the same selection vocabulary and finite defaults in the bindings;
+its arrival-order, duplicate and delivery limits retain their existing meaning.
+Go/Python/JavaScript UDP options now use `Finite`/`finite` in place of `Live`/`live`.
+Rust retains `live: true` as its default for both local and UDP options.
+
+Timeout, cancellation, immutable ownership and loss-reporting policies retain
+their documented meanings. The [shared API contract](../../spec/api/v0/SPEC.md#follow-transition-authorized-1x-compatibility-exception)
+owns the exact selection rules.

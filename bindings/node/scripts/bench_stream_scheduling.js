@@ -1,3 +1,4 @@
+const { FollowStart } = require("../follow");
 #!/usr/bin/env node
 // One isolated case per process; the coordinator alternates frozen packages.
 const fs = require('node:fs');
@@ -57,12 +58,12 @@ async function main() {
   const poolNumber = i => shared ? 0 : i;
   async function open(i, limit, since) {
     if (!udp && owned) {
-      const iterator = poolAt(i).tailViews({ sinceSeq: since ?? undefined, maxMessages: limit ?? undefined, timeoutMs: 5000 });
+      const iterator = poolAt(i).followViews({ start: (since == null ? FollowStart.all() : FollowStart.sequence(since)), maxMessages: limit ?? undefined, timeoutMs: 5000 });
       let closed = false;
       return { async next() { const result = await iterator.next(); return { status: result.done ? (closed ? 3 : 2) : 1, message: result.value }; }, close() { closed = true; void iterator.return(); } };
     }
     if (!udp) {
-      const stream = poolAt(i).openStream(since,limit,null);
+      const stream = poolAt(i).openFollow((since == null ? FollowStart.all() : FollowStart.sequence(since)),limit,null);
       return {next: ms=>stream.nextJsonWait(ms), close:()=>stream.close()};
     }
     const follow = await udpPools[poolNumber(i)][owned ? 'followViews' : 'follow']({start:UdpStart.sequence(since ?? 1n),live:true});
@@ -174,7 +175,7 @@ async function main() {
   for (const file of ['index.js','native/darwin-arm64/index.node','native/darwin-arm64/libplasmite.dylib']) {
     hashes[file] = crypto.createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex');
   }
-  const report = {node:process.version, platform:process.platform, count, messages, rareOnly, harnessSha256:crypto.createHash('sha256').update(fs.readFileSync(__filename)).digest('hex'), mode:udp ? "udp" : "local", owned, sharedPool:shared, results, hashes, limits:['Consumer process CPU excludes the UDP server process. Legacy JSON stream result interfaces stay unchanged. Separate pools default; --shared-pool isolates shared fanout.', 'Owned mode uses tailViews/followViews and reads native snapshots; JSON mode retains the legacy result interface. Comparing those modes changes conversion work.', 'Optional thread probes run outside the idle CPU window; RSS remains an observation, and maxRSS is a process lifetime maximum.', 'Native wait slices cannot interrupt an operating-system file lock.', 'CPU includes this process and filesystem/DNS probes; memory samples are observations rather than allocation counts.', 'Paced timestamps start before append and end on read completion, before JSON verification; scheduling and JSON formatting remain in the path.']};
+  const report = {node:process.version, platform:process.platform, count, messages, rareOnly, harnessSha256:crypto.createHash('sha256').update(fs.readFileSync(__filename)).digest('hex'), mode:udp ? "udp" : "local", owned, sharedPool:shared, results, hashes, limits:['Consumer process CPU excludes the UDP server process. Legacy JSON stream result interfaces stay unchanged. Separate pools default; --shared-pool isolates shared fanout.', 'Owned mode uses followViews/followViews and reads native snapshots; JSON mode retains the legacy result interface. Comparing those modes changes conversion work.', 'Optional thread probes run outside the idle CPU window; RSS remains an observation, and maxRSS is a process lifetime maximum.', 'Native wait slices cannot interrupt an operating-system file lock.', 'CPU includes this process and filesystem/DNS probes; memory samples are observations rather than allocation counts.', 'Paced timestamps start before append and end on read completion, before JSON verification; scheduling and JSON formatting remain in the path.']};
   const json = JSON.stringify(report,null,2)+'\n';
   const output = process.argv.find(v => v.startsWith('--output='));
   if (output) fs.writeFileSync(output.slice(9),json); else process.stdout.write(json);

@@ -61,10 +61,10 @@ Set `CI_RUN_ID` to the same unique value in both jobs. `--one` exits when a matc
 **Python — wait for green**
 
 ```python
-from plasmite import Client
+from plasmite import FollowStart, Client
 
 with Client() as c, c.open_pool("ci") as pool:
-    for msg in pool.tail(timeout_ms=30000):
+    for msg in pool.follow(timeout_ms=30000):
         if msg.data.get("status") == "green":
             print(f"commit {msg.data['commit']} passed — deploying")
             break
@@ -73,7 +73,7 @@ with Client() as c, c.open_pool("ci") as pool:
 **Python — signal green**
 
 ```python
-from plasmite import Client
+from plasmite import FollowStart, Client
 
 with Client() as c, c.pool("ci") as pool:
     pool.append({"status": "green", "commit": "a1b2c3d", "suite": "unit"})
@@ -82,13 +82,13 @@ with Client() as c, c.pool("ci") as pool:
 **Node — wait for green**
 
 ```js
-const { Client } = require("plasmite");
+const { FollowStart, Client } = require("plasmite");
 (async () => {
   const c = new Client();
   let pool;
   try {
     pool = c.openPool("ci");
-    for await (const msg of pool.tail()) {
+    for await (const msg of pool.follow()) {
       if (msg.data.status === "green") {
         console.log(`commit ${msg.data.commit} passed — deploying`);
         break;
@@ -108,7 +108,7 @@ c, _ := plasmite.NewDefaultClient()
 p, _ := c.OpenPool(plasmite.PoolRefName("ci"))
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
-out, errs := p.Tail(ctx, plasmite.TailOptions{Timeout: 30 * time.Second})
+out, errs := p.Tail(ctx, plasmite.FollowOptions{Timeout: 30 * time.Second})
 for msg := range out {
     var d map[string]any
     json.Unmarshal(msg.Data, &d)
@@ -406,7 +406,7 @@ pls follow build --since 12h --no-follow
 **Python — produce tagged events**
 
 ```python
-from plasmite import Client, Durability
+from plasmite import FollowStart, Client, Durability
 
 with Client() as c, c.pool("telemetry") as pool:
     pool.append({"sensor": "temp", "value": 42100}, ["sensor"], Durability.FAST)
@@ -417,17 +417,17 @@ with Client() as c, c.pool("telemetry") as pool:
 **Python — filter by tag**
 
 ```python
-from plasmite import Client
+from plasmite import FollowStart, Client
 
 with Client() as c, c.open_pool("telemetry") as pool:
-    for msg in pool.tail(timeout_ms=5000, tags=["alert"]):
+    for msg in pool.follow(timeout_ms=5000, tags=["alert"]):
         print(msg.seq, msg.tags, msg.data)
 ```
 
 **Node — produce tagged events**
 
 ```js
-const { Client } = require("plasmite");
+const { FollowStart, Client } = require("plasmite");
 const c = new Client();
 let pool;
 try {
@@ -457,7 +457,7 @@ p.Close(); c.Close()
 ```go
 c, _ := plasmite.NewDefaultClient()
 p, _ := c.OpenPool(plasmite.PoolRefName("telemetry"))
-out, errs := p.Tail(ctx, plasmite.TailOptions{Tags: []string{"alert"}, Timeout: 5 * time.Second})
+out, errs := p.Tail(ctx, plasmite.FollowOptions{Tags: []string{"alert"}, Timeout: 5 * time.Second})
 for msg := range out { fmt.Println(msg.Seq, msg.Tags(), string(msg.Data)) }
 if err := <-errs; err != nil { log.Fatal(err) }
 p.Close(); c.Close()
@@ -775,8 +775,8 @@ Consumers that require a complete sequence can opt into a fail-closed check:
 from plasmite import RetentionGapError
 
 try:
-    for message in pool.tail(
-        since_seq=checkpoint,
+    for message in pool.follow(
+        start=FollowStart.sequence(checkpoint),
         error_on_gap=True,
         timeout_ms=30_000,
     ):

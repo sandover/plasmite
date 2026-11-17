@@ -6,8 +6,8 @@
 //! Invariants: Server processes are cleaned up on drop.
 
 use plasmite::api::{
-    AppendOptions, Durability, ErrorKind, GapPolicy, Pool, PoolOptions, PoolRef, RemoteClient,
-    TailOptions, access,
+    AppendOptions, Durability, ErrorKind, FollowOptions, GapPolicy, Pool, PoolOptions, PoolRef,
+    RemoteClient, access,
 };
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
@@ -119,7 +119,7 @@ fn remote_delete_sends_no_body_and_reuses_connection() -> TestResult<()> {
 }
 
 #[test]
-fn remote_append_get_tail_lite3() -> TestResult<()> {
+fn remote_append_get_follow_lite3() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
@@ -148,20 +148,20 @@ fn remote_append_get_tail_lite3() -> TestResult<()> {
     assert_eq!(frame.payload, payload);
     assert_eq!(frame.timestamp_ns, pool.get_message(seq)?.timestamp_ns()?);
 
-    let options = TailOptions {
-        since_seq: Some(seq),
+    let options = FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(seq),
         max_messages: Some(1),
         timeout: Some(Duration::from_millis(500)),
-        ..TailOptions::default()
+        ..Default::default()
     };
-    let mut tail = match pool.tail_lite3(options) {
+    let mut tail = match pool.follow_lite3(options) {
         Ok(tail) => tail,
-        Err(err) => return Err(format!("tail_lite3 failed: {err}").into()),
+        Err(err) => return Err(format!("follow_lite3 failed: {err}").into()),
     };
     let frame = match tail.next_frame() {
         Ok(Some(frame)) => frame,
-        Ok(None) => return Err("tail_lite3 returned no frame".into()),
-        Err(err) => return Err(format!("tail_lite3 next_frame failed: {err}").into()),
+        Ok(None) => return Err("follow_lite3 returned no frame".into()),
+        Err(err) => return Err(format!("follow_lite3 next_frame failed: {err}").into()),
     };
     assert_eq!(frame.seq, seq);
     assert_eq!(frame.payload, payload);
@@ -225,13 +225,13 @@ fn remote_lite3_invalid_payloads_error() -> TestResult<()> {
         .expect_err("invalid lite3 append");
     assert_eq!(err.kind(), ErrorKind::Corrupt);
 
-    let options = TailOptions {
-        since_seq: Some(1),
+    let options = FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(1),
         max_messages: Some(1),
         timeout: Some(Duration::from_millis(200)),
-        ..TailOptions::default()
+        ..Default::default()
     };
-    let err = match pool.tail_lite3(options) {
+    let err = match pool.follow_lite3(options) {
         Ok(_) => return Err("expected invalid lite3 tail".into()),
         Err(err) => err,
     };
@@ -251,13 +251,13 @@ fn remote_tail_streams_in_order() -> TestResult<()> {
     let first = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
     let second = pool.append_json_now(&json!({"n": 2}), &[], Durability::Fast)?;
 
-    let options = TailOptions {
-        since_seq: Some(first.seq),
+    let options = FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(first.seq),
         max_messages: Some(2),
         timeout: Some(Duration::from_millis(500)),
-        ..TailOptions::default()
+        ..Default::default()
     };
-    let mut tail = pool.tail(options)?;
+    let mut tail = pool.follow(options)?;
 
     let msg1 = tail.next_message()?.expect("first message");
     let msg2 = tail.next_message()?.expect("second message");
@@ -279,10 +279,11 @@ fn remote_tail_reconnects_with_stable_since_seq_without_duplicates() -> TestResu
     let first = pool.append_json_now(&json!({"seq": 1}), &[], Durability::Fast)?;
     let second = pool.append_json_now(&json!({"seq": 2}), &[], Durability::Fast)?;
 
-    let mut first_tail = pool.tail(TailOptions {
+    let mut first_tail = pool.follow(FollowOptions {
         max_messages: Some(2),
         timeout: Some(Duration::from_millis(150)),
-        ..TailOptions::default()
+        start: plasmite::api::FollowStart::all(),
+        ..Default::default()
     })?;
     let message_one = first_tail.next_message()?.expect("first replay message");
     let message_two = first_tail.next_message()?.expect("second replay message");
@@ -296,11 +297,11 @@ fn remote_tail_reconnects_with_stable_since_seq_without_duplicates() -> TestResu
     let third = pool.append_json_now(&json!({"seq": 3}), &[], Durability::Fast)?;
     let fourth = pool.append_json_now(&json!({"seq": 4}), &[], Durability::Fast)?;
 
-    let mut reconnect_tail = pool.tail(TailOptions {
-        since_seq: Some(message_two.seq + 1),
+    let mut reconnect_tail = pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(message_two.seq + 1),
         max_messages: Some(2),
         timeout: Some(Duration::from_millis(300)),
-        ..TailOptions::default()
+        ..Default::default()
     })?;
     let resume_three = reconnect_tail
         .next_message()?
@@ -362,9 +363,10 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
         // append would end it empty. The writer appends every 10 ms, so each read
         // returns soon and the loop checks for cancellation.
         let mut tail = tail_pool
-            .tail(TailOptions {
+            .follow(FollowOptions {
                 max_messages: Some(10_000),
-                ..TailOptions::default()
+                start: plasmite::api::FollowStart::all(),
+                ..Default::default()
             })
             .map_err(|err| err.to_string())?;
         tail_started_tx
@@ -567,30 +569,30 @@ fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
     let first = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
     let _second = pool.append_json_now(&json!({"n": 2}), &[], Durability::Fast)?;
 
-    let options = TailOptions {
-        since_seq: Some(first.seq),
+    let options = FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(first.seq),
         max_messages: Some(1),
         timeout: Some(Duration::from_millis(500)),
-        ..TailOptions::default()
+        ..Default::default()
     };
-    let mut tail = pool.tail(options)?;
+    let mut tail = pool.follow(options)?;
     let msg = tail.next_message()?.expect("first message");
     assert_eq!(msg.seq, first.seq);
     assert!(tail.next_message()?.is_none());
 
-    let mut tail = pool.tail(TailOptions {
-        since_seq: Some(9999),
+    let mut tail = pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(9999),
         timeout: Some(Duration::from_millis(100)),
-        ..TailOptions::default()
+        ..Default::default()
     })?;
     assert!(tail.next_message()?.is_none());
 
     let _third = pool.append_json_now(&json!({"n": 3}), &[], Durability::Fast)?;
-    let mut tail = pool.tail(TailOptions {
-        since_seq: Some(3),
+    let mut tail = pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(3),
         max_messages: Some(1),
         timeout: Some(Duration::from_millis(500)),
-        ..TailOptions::default()
+        ..Default::default()
     })?;
     let msg = tail.next_message()?.expect("resumed message");
     assert_eq!(msg.data, json!({"n": 3}));
@@ -623,23 +625,23 @@ fn remote_json_tail_can_fail_closed_on_retention_gaps() -> TestResult<()> {
         }
     }
 
-    let mut continuing = pool.tail(TailOptions {
-        since_seq: Some(first.seq),
+    let mut continuing = pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(first.seq),
         max_messages: Some(1),
         timeout: Some(Duration::from_millis(500)),
-        ..TailOptions::default()
+        ..Default::default()
     })?;
     let continued = continuing
         .next_message()?
         .ok_or("default remote tail did not continue")?;
     assert!(continued.seq > first.seq);
 
-    let mut failing = pool.tail(TailOptions {
-        since_seq: Some(first.seq),
+    let mut failing = pool.follow(FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(first.seq),
         tags: vec!["never".to_string()],
         timeout: Some(Duration::from_millis(500)),
         gap_policy: GapPolicy::Error,
-        ..TailOptions::default()
+        ..Default::default()
     })?;
     let err = failing
         .next_message()
@@ -659,16 +661,17 @@ fn remote_tail_rejects_invalid_or_unsupported_gap_policies() -> TestResult<()> {
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
     let pool = client.open_pool(&pool_ref)?;
 
-    let err = match pool.tail_lite3(TailOptions {
+    let err = match pool.follow_lite3(FollowOptions {
         gap_policy: GapPolicy::Error,
-        ..TailOptions::default()
+        start: plasmite::api::FollowStart::all(),
+        ..Default::default()
     }) {
         Ok(_) => return Err("expected remote Lite3 gap-policy rejection".into()),
         Err(err) => err,
     };
     assert_eq!(err.kind(), ErrorKind::Usage);
 
-    for path in ["tail?gap_policy=unknown", "tail_lite3?gap_policy=error"] {
+    for path in ["follow?gap_policy=unknown", "follow_lite3?gap_policy=error"] {
         let url = format!(
             "{}/v0/pools/tail-gap-policy/{path}",
             server.local_url.trim_end_matches('/')
@@ -701,14 +704,14 @@ fn remote_tail_filters_by_tags() -> TestResult<()> {
         Durability::Fast,
     )?;
 
-    let options = TailOptions {
-        since_seq: Some(first.seq),
+    let options = FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(first.seq),
         max_messages: Some(1),
         tags: vec!["keep".to_string()],
         timeout: Some(Duration::from_millis(500)),
-        ..TailOptions::default()
+        ..Default::default()
     };
-    let mut tail = pool.tail(options)?;
+    let mut tail = pool.follow(options)?;
     let msg = tail.next_message()?.expect("filtered message");
     assert_eq!(msg.seq, second.seq);
     assert_eq!(msg.data, json!({"kind": "keep"}));
@@ -735,14 +738,14 @@ fn remote_tail_filters_by_tags_with_commas() -> TestResult<()> {
         Durability::Fast,
     )?;
 
-    let options = TailOptions {
-        since_seq: Some(first.seq),
+    let options = FollowOptions {
+        start: plasmite::api::FollowStart::Sequence(first.seq),
         max_messages: Some(1),
         tags: vec!["keep,prod".to_string()],
         timeout: Some(Duration::from_millis(500)),
-        ..TailOptions::default()
+        ..Default::default()
     };
-    let mut tail = pool.tail(options)?;
+    let mut tail = pool.follow(options)?;
     let msg = tail.next_message()?.expect("filtered message");
     assert_eq!(msg.seq, second.seq);
     assert_eq!(msg.data, json!({"kind": "keep"}));
@@ -1331,7 +1334,7 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
     );
     let client = server.client()?;
     client.create_pool(&PoolRef::name("bounded"), PoolOptions::new(1024 * 1024))?;
-    for route in ["tail", "tail_lite3", "events"] {
+    for route in ["follow", "follow_lite3", "events"] {
         let prefix = if route == "events" {
             "v0/ui/pools"
         } else {
@@ -1383,5 +1386,43 @@ fn ordinary_http_rejects_untrusted_origin_before_body_extraction() -> TestResult
         .set("Content-Type", "application/json")
         .send_string("{");
     assert!(matches!(response, Err(ureq::Error::Status(403, _))));
+    Ok(())
+}
+
+#[test]
+fn remote_follow_opens_before_response_and_history_is_explicit() -> TestResult<()> {
+    use plasmite::api::FollowStart;
+    let directory = tempfile::tempdir()?;
+    let server = TestServer::try_start(directory.path())?;
+    let client = server.client()?;
+    let reference = PoolRef::name("follow-start");
+    client.create_pool(&reference, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&reference)?;
+    pool.append_json_now(&json!({"n":1}), &[], Durability::Fast)?;
+    let mut live = pool.follow(FollowOptions {
+        max_messages: Some(1),
+        timeout: Some(Duration::from_secs(2)),
+        ..Default::default()
+    })?;
+    let appended = pool.append_json_now(&json!({"n":2}), &[], Durability::Fast)?;
+    assert_eq!(live.next_message()?.unwrap().seq, appended.seq);
+    let mut finite = pool.follow(FollowOptions {
+        start: FollowStart::Last(1),
+        live: false,
+        ..Default::default()
+    })?;
+    pool.append_json_now(&json!({"n":3}), &[], Durability::Fast)?;
+    assert_eq!(finite.next_message()?.unwrap().seq, 2);
+    assert!(finite.next_message()?.is_none());
+    let mut all = pool.follow_lite3(FollowOptions {
+        start: FollowStart::all(),
+        live: false,
+        ..Default::default()
+    })?;
+    let mut sequences = Vec::new();
+    while let Some(frame) = all.next_frame()? {
+        sequences.push(frame.seq);
+    }
+    assert_eq!(sequences, vec![1, 2, 3]);
     Ok(())
 }

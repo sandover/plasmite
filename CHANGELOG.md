@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking API change: follow
+
+- Use `follow`/`Follow` in every language binding. Readers now start with new
+  messages by default. Select retained history explicitly: all, last N, a time
+  or an inclusive sequence. Finite mode reads the opening history and exits.
+- Rename HTTP reader routes to `/follow` and `/follow_lite3`. New clients require
+  updated servers. Legacy C stream symbols keep their published behavior;
+  current bindings use the shared follow options and entry points.
+- The maintainer authorizes this breaking transition in 1.x. See the upgrade
+  guide for migration examples and history-selection rules.
+
+
 ### Immutable views and direct native input
 
 - Add owned Lite3 message views across Rust, C, Python, JavaScript and Go.

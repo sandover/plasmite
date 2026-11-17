@@ -22,6 +22,17 @@ pub extern "C" fn plsm_view_stream_open(
         Ok(options) => options,
         Err(code) => return code,
     };
+    open_view_follow(pool, options, tags, tag_count, out, error)
+}
+
+fn open_view_follow(
+    pool: *mut plsm_pool,
+    options: StreamOpenOptions,
+    tags: *const ViewStreamText,
+    tag_count: usize,
+    out: *mut *mut plsm_stream,
+    error: *mut *mut plsm_error,
+) -> i32 {
     let pool = match borrow_pool(pool, error) {
         Ok(pool) => pool,
         Err(code) => return code,
@@ -54,15 +65,16 @@ pub extern "C" fn plsm_view_stream_open(
         let cancel = Arc::new(AtomicBool::new(false));
         let state = TailState::new(
             &pool.pool,
-            TailOptions {
-                since_seq: options.since_seq,
+            FollowOptions {
+                start: options.start,
+                live: options.live,
                 max_messages: options.max_messages,
                 timeout: options.timeout,
                 gap_policy: options.gap_policy,
                 tags,
                 notify: true,
                 cancel: Some(cancel.clone()),
-                ..TailOptions::default()
+                ..FollowOptions::default()
             },
         );
         let info = pool.pool.info()?;
@@ -151,4 +163,20 @@ pub extern "C" fn plsm_view_stream_next(
         Ok(TailOutcome::Cancelled) => 3,
         Err(err) => fail(error, err),
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_follow_views(
+    pool: *mut plsm_pool,
+    options: *const plsm_follow_options,
+    tags: *const ViewStreamText,
+    tag_count: usize,
+    out: *mut *mut plsm_stream,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    let options = match parse_follow_options(options, error) {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
+    open_view_follow(pool, options, tags, tag_count, out, error)
 }

@@ -1,3 +1,4 @@
+from plasmite import FollowStart
 #!/usr/bin/env python3
 """Check reader fairness, independent retention and direct view forwarding."""
 
@@ -17,8 +18,8 @@ import plasmite
 
 def receive(directory, count, batch_count, ready, start, output):
     with plasmite.Client(directory) as client, client.open_pool("events") as pool:
-        with pool.tail_views(
-            since_seq=1, max_messages=count, error_on_gap=True
+        with pool.follow_views(
+            start=FollowStart.sequence(1), max_messages=count, error_on_gap=True
         ) as stream:
             ready.put(True)
             start.wait()
@@ -95,7 +96,7 @@ def retention():
                 pool.append_view({"index": i, "nested": [i], "padding": "x" * 128})
             gc.collect()
             tracemalloc.start()
-            with pool.tail_views(since_seq=1) as stream:
+            with pool.follow_views(start=FollowStart.sequence(1)) as stream:
                 messages = stream.next_batch(16, 4096, 0)
                 lengths = [len(memoryview(message)) for message in messages]
                 child = messages[0].data["nested"]

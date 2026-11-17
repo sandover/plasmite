@@ -98,9 +98,9 @@ export declare class Pool {
   appendLite3Identity(payload: Buffer, durability: Durability): AppendReceipt
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
-  openStream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean): Stream
-  openLite3Stream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean): Lite3Stream
-  openViewStream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, tags: Array<string>): Stream
+  openFollow(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, startKind: number, finite: boolean): Stream
+  openLite3Follow(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, startKind: number, finite: boolean): Lite3Stream
+  openViewFollow(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, tags: Array<string>, startKind: number, finite: boolean): Stream
   getView(seq: number | bigint): Promise<unknown>
   close(): void
 }

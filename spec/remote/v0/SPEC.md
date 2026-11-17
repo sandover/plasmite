@@ -111,11 +111,11 @@ It captures stable wire-level compatibility guarantees only.
 
 ### Streaming
 
-- `GET /v0/pools/{pool}/tail` -> JSONL stream (`application/jsonl`).
-- `GET /v0/pools/{pool}/tail_lite3` -> Lite3 stream (`application/x-plasmite-lite3-stream`).
+- `GET /v0/pools/{pool}/follow` -> JSONL stream (`application/jsonl`).
+- `GET /v0/pools/{pool}/follow_lite3` -> Lite3 stream (`application/x-plasmite-lite3-stream`).
 - Lite3 tail frame format: `[u64be seq][u64be timestamp_ns][u32be len][len bytes payload]` repeated.
 - Tail requests accept `gap_policy=continue|error`; omission means `continue`.
-- `/tail_lite3` rejects `gap_policy=error` with `Usage` because Lite3 streams
+- `/follow_lite3` rejects `gap_policy=error` with `Usage` because Lite3 streams
   have no terminal error frame.
 
 ## Data + Error Contract
@@ -164,10 +164,10 @@ It captures stable wire-level compatibility guarantees only.
 
 - Delivery ordering is ascending `seq`.
 - Cancellation is by client connection close.
-- Reconnect flows are at-least-once; clients should resume via `since_seq` and de-duplicate by `seq`.
-- On post-start failure, `/tail` may emit one terminal JSON error-envelope line before close.
-- On post-start failure, `/tail_lite3` closes the stream without a JSON body frame.
-- With `gap_policy=error`, `/tail` emits `RetentionGap` before any message after
+- Reconnect flows are at-least-once; clients should resume via an explicit inclusive sequence start and de-duplicate by `seq`.
+- On post-start failure, `/follow` may emit one terminal JSON error-envelope line before close.
+- On post-start failure, `/follow_lite3` closes the stream without a JSON body frame.
+- With `gap_policy=error`, `/follow` emits `RetentionGap` before any message after
   a missing sequence; the envelope's `seq` is the first missing sequence.
 
 ### Server Limits
@@ -197,3 +197,18 @@ and authorization contract is in `spec/mcp/2025-11-25/SPEC.md`.
 
 - CLI contract: `spec/v0/SPEC.md`
 - Public API contract: `spec/api/v0/SPEC.md`
+
+## Follow selection
+
+`/follow` and `/follow_lite3` start with new messages when selection is omitted.
+The query accepts `start=new|all|last|since|sequence` and `start_value` for the
+last count, Unix nanoseconds or inclusive sequence. Sequence zero means all
+retained history. `finite=true` stops at the opening history boundary; alone it
+selects all retained history, matching CLI `--no-follow`. Last-N selection counts
+records before tag filters. `since_seq` remains an explicit sequence spelling
+for existing UI/MCP adapters; mixing it with `start` or `start_value` fails.
+New clients require follow-capable servers. Old `/tail` and `/tail_lite3` routes
+return not found; they do not silently acquire the new default. Message framing,
+limits, authorization and delivery guarantees retain their existing contracts.
+The maintainer authorizes this compatibility exception in the forthcoming 1.x
+release. See the [shared API contract](../../api/v0/SPEC.md).

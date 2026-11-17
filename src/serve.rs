@@ -60,8 +60,8 @@ use browser_session::{BrowserSessions, COOKIE_NAME, LIFETIME};
 mod oauth;
 use oauth::OauthService;
 use plasmite::api::{
-    Durability, Error, ErrorKind, GapPolicy, LocalClient, Pool, PoolApiExt, PoolInfo, PoolOptions,
-    PoolRef, TailOptions, lite3,
+    Durability, Error, ErrorKind, FollowOptions, GapPolicy, LocalClient, Pool, PoolApiExt,
+    PoolInfo, PoolOptions, PoolRef, lite3,
 };
 use plasmite::mcp::{
     DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION, McpDispatcher,
@@ -482,8 +482,8 @@ async fn prepare_server_with_access(
         .route("/v0/pools/:pool/append_lite3", post(append_lite3))
         .route("/v0/pools/:pool/messages/:seq", get(get_message))
         .route("/v0/pools/:pool/messages/:seq/lite3", get(get_lite3))
-        .route("/v0/pools/:pool/tail", get(tail_messages))
-        .route("/v0/pools/:pool/tail_lite3", get(tail_lite3))
+        .route("/v0/pools/:pool/follow", get(tail_messages))
+        .route("/v0/pools/:pool/follow_lite3", get(follow_lite3))
         .route("/v0/ui/pools", get(ui_list_pools))
         .route("/v0/ui/pools/stream", get(ui_pool_stream))
         .route("/v0/ui/pools/:pool/info", get(ui_pool_info))
@@ -1242,6 +1242,9 @@ struct AppendRequest {
 
 #[derive(Debug, Deserialize)]
 struct TailQuery {
+    start: Option<String>,
+    start_value: Option<u64>,
+    finite: Option<bool>,
     since_seq: Option<u64>,
     max: Option<u64>,
     timeout_ms: Option<u64>,
@@ -1257,7 +1260,7 @@ enum TailStreamEncoding {
 
 struct TailRuntime {
     permit: OwnedSemaphorePermit,
-    options: TailOptions,
+    options: FollowOptions,
     deadline: Instant,
 }
 
@@ -2244,10 +2247,10 @@ async fn tail_messages(
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Jsonl, grant)
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Jsonl, grant).await
 }
 
-async fn tail_lite3(
+async fn follow_lite3(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
@@ -2267,10 +2270,19 @@ async fn tail_lite3(
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
-    if let Err(err) = precheck_lite3_since_seq(&state, &pool_ref, query.since_seq).await {
+    if let Err(err) = precheck_lite3_since_seq(
+        &state,
+        &pool_ref,
+        match runtime.options.start {
+            plasmite::api::FollowStart::Sequence(seq) if seq != 0 => Some(seq),
+            _ => None,
+        },
+    )
+    .await
+    {
         return error_response(err);
     }
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Lite3, grant)
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Lite3, grant).await
 }
 
 async fn ui_events(
@@ -2293,7 +2305,7 @@ async fn ui_events(
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Sse, grant)
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Sse, grant).await
 }
 
 fn tail_pool_ref_from_request(
@@ -2361,13 +2373,14 @@ fn prepare_tail_runtime(
     let deadline = Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("tail timeout is out of range"))?;
-    let options = TailOptions {
-        since_seq: query.since_seq,
+    let options = FollowOptions {
+        start: follow_query_start(query)?,
+        live: !query.finite.unwrap_or(false),
         max_messages: query.max.map(|value| value as usize),
         tags: parse_tags_from_query(raw_query),
         timeout: Some(timeout),
         gap_policy,
-        ..TailOptions::default()
+        ..FollowOptions::default()
     };
     Ok(TailRuntime {
         permit,
@@ -2390,7 +2403,7 @@ fn tail_busy_error() -> Error {
         .with_hint("Try again later or reduce tail concurrency.")
 }
 
-fn spawn_tail_stream_response(
+async fn spawn_tail_stream_response(
     state: &Arc<AppState>,
     pool_ref: PoolRef,
     runtime: TailRuntime,
@@ -2406,6 +2419,7 @@ fn spawn_tail_stream_response(
     options.cancel = grant.as_ref().map(AccessGrant::cancellation_flag);
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     let producer_grant = grant.clone();
+    let (ready, opening) = tokio::sync::oneshot::channel();
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         if Instant::now() >= deadline
@@ -2421,6 +2435,7 @@ fn spawn_tail_stream_response(
                 &tx,
                 producer_grant.as_ref(),
                 deadline,
+                ready,
             )
         });
         if let Err(err) = result
@@ -2430,6 +2445,8 @@ fn spawn_tail_stream_response(
         }
     });
 
+    // A successful response must not precede the reader choosing its start.
+    let _ = tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), opening).await;
     let stream = ReceiverStream::new(rx)
         .take_while(move |_| !grant.as_ref().is_some_and(AccessGrant::is_revoked))
         .map(move |result| match result {
@@ -2449,11 +2466,12 @@ fn spawn_tail_stream_response(
 
 fn stream_tail_bytes(
     pool: &plasmite::api::Pool,
-    mut options: TailOptions,
+    mut options: FollowOptions,
     encoding: TailStreamEncoding,
     tx: &mpsc::Sender<Result<Bytes, Error>>,
     grant: Option<&AccessGrant>,
     deadline: Instant,
+    ready: tokio::sync::oneshot::Sender<()>,
 ) -> Result<(), Error> {
     if encoding == TailStreamEncoding::Sse {
         // Private UI streams identify the actual file opened for this reader.
@@ -2467,7 +2485,8 @@ fn stream_tail_bytes(
     options.timeout = Some(deadline.saturating_duration_since(Instant::now()));
     match encoding {
         TailStreamEncoding::Jsonl | TailStreamEncoding::Sse => {
-            let mut tail = pool.tail(options);
+            let mut tail = pool.follow(options);
+            let _ = ready.send(());
             while let Some(message) = tail.next_message()? {
                 if grant.is_some_and(AccessGrant::is_revoked) {
                     break;
@@ -2483,7 +2502,8 @@ fn stream_tail_bytes(
             }
         }
         TailStreamEncoding::Lite3 => {
-            let mut tail = pool.tail_lite3(options);
+            let mut tail = pool.follow_lite3(options);
+            let _ = ready.send(());
             while let Some(frame) = tail.next_frame()? {
                 if grant.is_some_and(AccessGrant::is_revoked) {
                     break;
@@ -2947,7 +2967,7 @@ mod tests {
     #[test]
     fn activity_ignores_map_reads_and_identifies_mcp_pool_use() {
         assert!(super::observes_pool_route("/v0/ui/pools/:pool/events"));
-        assert!(super::observes_pool_route("/v0/pools/:pool/tail"));
+        assert!(super::observes_pool_route("/v0/pools/:pool/follow"));
         for route in [
             "/v0/ui/activity",
             "/v0/ui/pools",
@@ -3605,5 +3625,25 @@ mod tests {
             parse_tags_from_query(Some("tag=keep%2Cprod")),
             vec!["keep,prod"]
         );
+    }
+}
+
+fn follow_query_start(query: &TailQuery) -> Result<plasmite::api::FollowStart, Error> {
+    use plasmite::api::FollowStart;
+    if query.since_seq.is_some() && (query.start.is_some() || query.start_value.is_some()) {
+        return Err(Error::new(ErrorKind::Usage).with_message("choose one follow start"));
+    }
+    if let Some(seq) = query.since_seq {
+        return Ok(FollowStart::Sequence(seq));
+    }
+    let value = query.start_value.unwrap_or(0);
+    match query.start.as_deref().unwrap_or("new") {
+        "new" if value == 0 => Ok(FollowStart::New),
+        "all" if value == 0 => Ok(FollowStart::all()),
+        "last" if query.start_value.is_some() => Ok(FollowStart::Last(value)),
+        "since" if query.start_value.is_some() => Ok(FollowStart::Since(value)),
+        "sequence" if query.start_value.is_some() => Ok(FollowStart::Sequence(value)),
+        _ => Err(Error::new(ErrorKind::Usage)
+            .with_message("invalid follow start or missing start_value")),
     }
 }

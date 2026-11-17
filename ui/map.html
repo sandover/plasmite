@@ -783,7 +783,7 @@ Invariants: Message data enters the DOM as text.
               row.className = "activity-row";
               const kind = entry.kind === "mcp" ? "MCP" : entry.kind === "browser" ? "Browser" : "HTTP";
               const operation = entry.operation || "";
-              const action = operation.includes("/events") || operation.includes("/tail") || operation === "plasmite_wait" ? "Following"
+              const action = operation.includes("/events") || operation.includes("/follow") || operation === "plasmite_wait" ? "Following"
                 : operation.includes("feed") || operation.startsWith("POST ") ? "Writing"
                 : operation.includes("delete") || operation.startsWith("DELETE ") ? "Deleting" : "Reading";
               row.append(entry.kind === "open_file" ? entry.command || "Process" : kind + " · " + action);

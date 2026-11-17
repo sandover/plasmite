@@ -133,7 +133,7 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from tempfile import TemporaryDirectory
-from plasmite import Client, to_json, to_native, view_from_lite3
+from plasmite import FollowStart, Client, to_json, to_native, view_from_lite3
 from plasmite._views import VIEW_BACKEND
 
 assert VIEW_BACKEND == os.environ["EXPECTED_VIEW_BACKEND"], VIEW_BACKEND
@@ -157,7 +157,7 @@ with TemporaryDirectory() as directory, Client(directory) as client:
         assert list(forwarded.tags) == list(produced.tags)
         sliced = pool.append_view({"array": child[::-1], "bytes": produced.data["bytes"][::2]})
         assert to_native(sliced.data) == {"array": [3, 2, 1], "bytes": b"cp"}
-        with pool.tail_views(since_seq=sent.seq, max_messages=2) as stream:
+        with pool.follow_views(start=FollowStart.sequence(sent.seq), max_messages=2) as stream:
             first = next(stream)
             batch = stream.next_batch(4, 1024 * 1024)
             assert first.seq == sent.seq and [item.seq for item in batch] == [produced.seq]

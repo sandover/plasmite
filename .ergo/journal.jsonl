@@ -989,3 +989,45 @@
 {"version":1,"task_id":"Q63O3Y","kind":"result","at":"2026-11-16T20:30:01.392915Z","agent":"codex-debian-check","text":"Measured bounded history: a 64 KiB pool retained the latest 74 of 1,000 readings.","file":{"path":"docs/record/debian-vm-validation.md","sha256":"40c18c36f6453b23b0c4e0118903970f8519c46ab9f3ca843a48d11304a9d0de","mtime":"2026-11-16T20:29:22.845060936Z","git_commit":"69cafd7c28e3300dae1dda296ada22108a1dac83"}}
 {"version":1,"task_id":"Q63O3Y","kind":"done","at":"2026-11-16T20:30:01.432778Z","agent":"codex-debian-check","text":"User authorized VM tests and closure of applicable tickets. Size pools from representative readings and sampling rate; cookbook records the measured example."}
 {"version":1,"task_id":"VIKZVO","kind":"result","at":"2026-11-16T20:30:01.468214Z","text":"Corrected ARM preview support premise; physical Pi/OS installation choice remains open.","file":{"path":"docs/record/debian-vm-validation.md","sha256":"40c18c36f6453b23b0c4e0118903970f8519c46ab9f3ca843a48d11304a9d0de","mtime":"2026-11-16T20:29:22.845060936Z","git_commit":"69cafd7c28e3300dae1dda296ada22108a1dac83"}}
+{"version":1,"task_id":"CFOZUW","kind":"created","at":"2026-11-17T00:20:22.659486Z"}
+{"version":1,"task_id":"ILCEHR","kind":"created","at":"2026-11-17T00:20:22.659502Z"}
+{"version":1,"task_id":"O5YM7X","kind":"created","at":"2026-11-17T00:20:22.659505Z"}
+{"version":1,"task_id":"ZVPEFS","kind":"created","at":"2026-11-17T00:20:22.659508Z"}
+{"version":1,"task_id":"VUX7X4","kind":"created","at":"2026-11-17T00:20:22.65951Z"}
+{"version":1,"task_id":"H4RTLR","kind":"created","at":"2026-11-17T00:20:22.659512Z"}
+{"version":1,"task_id":"VEFFOZ","kind":"created","at":"2026-11-17T00:20:22.659514Z"}
+{"version":1,"task_id":"L3DJKZ","kind":"created","at":"2026-11-17T00:20:22.659517Z"}
+{"version":1,"task_id":"YY4ABT","kind":"created","at":"2026-11-17T00:20:22.697874Z"}
+{"version":1,"task_id":"ILCEHR","kind":"open","at":"2026-11-17T00:21:13.46822Z"}
+{"version":1,"task_id":"O5YM7X","kind":"open","at":"2026-11-17T00:21:29.165355Z"}
+{"version":1,"task_id":"ZVPEFS","kind":"open","at":"2026-11-17T00:21:29.211849Z"}
+{"version":1,"task_id":"VUX7X4","kind":"open","at":"2026-11-17T00:21:29.250525Z"}
+{"version":1,"task_id":"H4RTLR","kind":"open","at":"2026-11-17T00:21:29.287796Z"}
+{"version":1,"task_id":"VEFFOZ","kind":"open","at":"2026-11-17T00:21:29.325129Z"}
+{"version":1,"task_id":"L3DJKZ","kind":"open","at":"2026-11-17T00:21:29.361713Z"}
+{"version":1,"task_id":"YY4ABT","kind":"open","at":"2026-11-17T00:21:29.399894Z"}
+{"version":1,"task_id":"YY4ABT","kind":"claim","at":"2026-11-17T00:22:58.825218Z","agent":"codex"}
+{"version":1,"task_id":"YY4ABT","kind":"done","at":"2026-11-17T00:25:44.564642Z","agent":"codex","text":"Completed consistency audit and recorded prioritized recommendations in the task body."}
+{"version":1,"task_id":"ILCEHR","kind":"claim","at":"2026-11-17T00:25:44.602088Z","agent":"codex"}
+{"version":1,"task_id":"YY4ABT","kind":"result","at":"2026-11-17T00:26:18.153563Z","text":"Completed API consistency matrix and verified Node create result mismatch; see task body."}
+{"version":1,"task_id":"ILCEHR","kind":"result","at":"2026-11-17T00:57:38.429569Z","agent":"codex","text":"Specified shared follow names, opening boundaries, explicit selection, finite reads and the 1.x exception."}
+{"version":1,"task_id":"ILCEHR","kind":"done","at":"2026-11-17T00:57:38.461715Z","agent":"codex","text":"Specified shared follow names, opening boundaries, explicit selection, finite reads and the 1.x exception."}
+{"version":1,"task_id":"O5YM7X","kind":"claim","at":"2026-11-17T00:57:38.584626Z","agent":"codex"}
+{"version":1,"task_id":"O5YM7X","kind":"result","at":"2026-11-17T00:57:38.623815Z","agent":"codex","text":"Shared Rust/C follow implementation passes Rust and C integration checks; legacy C openings remain compatible."}
+{"version":1,"task_id":"O5YM7X","kind":"done","at":"2026-11-17T00:57:38.657994Z","agent":"codex","text":"Shared Rust/C follow implementation passes Rust and C integration checks; legacy C openings remain compatible."}
+{"version":1,"task_id":"ZVPEFS","kind":"claim","at":"2026-11-17T00:57:38.723382Z","agent":"codex"}
+{"version":1,"task_id":"ZVPEFS","kind":"result","at":"2026-11-17T00:57:38.763362Z","agent":"codex","text":"HTTP follows use shared selection; startup precedes headers and remote regression tests pass."}
+{"version":1,"task_id":"ZVPEFS","kind":"done","at":"2026-11-17T00:57:38.843127Z","agent":"codex","text":"HTTP follows use shared selection; startup precedes headers and remote regression tests pass."}
+{"version":1,"task_id":"VUX7X4","kind":"claim","at":"2026-11-17T00:57:38.912024Z","agent":"codex"}
+{"version":1,"task_id":"VUX7X4","kind":"result","at":"2026-11-17T00:57:38.949792Z","agent":"codex","text":"Python follow methods, views, selections and finite reads pass binding tests and integration."}
+{"version":1,"task_id":"VUX7X4","kind":"done","at":"2026-11-17T00:57:38.980847Z","agent":"codex","text":"Python follow methods, views, selections and finite reads pass binding tests and integration."}
+{"version":1,"task_id":"H4RTLR","kind":"claim","at":"2026-11-17T00:57:39.064195Z","agent":"codex"}
+{"version":1,"task_id":"H4RTLR","kind":"result","at":"2026-11-17T00:57:39.100872Z","agent":"codex","text":"JavaScript local/HTTP/UDP follow APIs, types, packaging and native/portable tests pass integration."}
+{"version":1,"task_id":"H4RTLR","kind":"done","at":"2026-11-17T00:57:39.134873Z","agent":"codex","text":"JavaScript local/HTTP/UDP follow APIs, types, packaging and native/portable tests pass integration."}
+{"version":1,"task_id":"VEFFOZ","kind":"claim","at":"2026-11-17T00:57:39.204089Z","agent":"codex"}
+{"version":1,"task_id":"VEFFOZ","kind":"result","at":"2026-11-17T00:57:39.241268Z","agent":"codex","text":"Go follow APIs and zero-value defaults pass integration; readers open before channels return."}
+{"version":1,"task_id":"VEFFOZ","kind":"done","at":"2026-11-17T00:57:39.275152Z","agent":"codex","text":"Go follow APIs and zero-value defaults pass integration; readers open before channels return."}
+{"version":1,"task_id":"L3DJKZ","kind":"claim","at":"2026-11-17T00:57:39.311705Z","agent":"codex"}
+{"version":1,"task_id":"VUX7X4","kind":"result","at":"2026-11-17T01:01:18.786095Z","text":"Final callback guard check: 7 tests pass; current follow symbols reject callback-closed handles before native calls."}
+{"version":1,"task_id":"L3DJKZ","kind":"result","at":"2026-11-17T01:01:18.820625Z","agent":"codex","text":"Passed just release-gate: strict lint, Rust, integration, C, Node packages and Python wheel runtime checks."}
+{"version":1,"task_id":"L3DJKZ","kind":"done","at":"2026-11-17T01:01:18.863871Z","agent":"codex","text":"Implemented and verified the follow migration across Rust, C, Python, JavaScript, Go and HTTP. The release gate and focused Python callback tests pass. No release published."}

@@ -18,7 +18,7 @@ func TestViewStreamsFilterMatchingLimitsAndKeepOwners(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stream, err := pool.OpenViewStream(TailOptions{SinceSeq: uint64Ptr(1), MaxMessages: uint64Ptr(2), Tags: []string{"α\x00β"}})
+	stream, err := pool.OpenViewFollow(FollowOptions{Start: Sequence(1), MaxMessages: uint64Ptr(2), Tags: []string{"α\x00β"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := pool.OpenViewStream(TailOptions{SinceSeq: &seq, MaxMessages: uint64Ptr(1)})
+	stream, err := pool.OpenViewFollow(FollowOptions{Start: Sequence(seq), MaxMessages: uint64Ptr(1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
 
 func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "idle-views").(*Pool)
-	stream, err := pool.OpenViewStream(TailOptions{})
+	stream, err := pool.OpenViewFollow(FollowOptions{Start: All()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 		t.Fatal("close blocked")
 	}
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	out, errs := pool.TailViews(ctx2, TailOptions{Buffer: 0})
+	out, errs := pool.FollowViews(ctx2, FollowOptions{Start: All(), Buffer: 0})
 	cancel2()
 	for range out {
 	}
@@ -134,7 +134,7 @@ func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	strict, err := pool.OpenViewStream(TailOptions{SinceSeq: uint64Ptr(1), ErrorOnGap: true})
+	strict, err := pool.OpenViewFollow(FollowOptions{Start: Sequence(1), ErrorOnGap: true})
 	if err != nil {
 		t.Fatal(err)
 	}

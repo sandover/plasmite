@@ -1,8 +1,8 @@
 //! Purpose: Define public message types and append/get/tail helpers for the API.
-//! Exports: `Message`, `Meta` (including validated `Meta::from_lite3`), `TailOptions`, `Tail`, `Lite3Tail`.
+//! Exports: `Message`, `Meta` (including validated `Meta::from_lite3`), `FollowOptions`, `Follow`, `Lite3Follow`.
 //! Role: Stable message envelope aligned with the CLI contract.
 //! Invariants: Message fields mirror CLI JSON; time is RFC3339 UTC.
-//! Invariants: Tail streams preserve ordering and avoid unbounded buffering.
+//! Invariants: Follow streams preserve ordering and avoid unbounded buffering.
 #![allow(clippy::result_large_err)]
 
 use crate::api::notify::{NotifyHandle, open_for_pool};
@@ -75,8 +75,11 @@ pub(super) fn parse_timestamp_ns(time: &str) -> Result<u64, Error> {
 }
 
 #[derive(Clone, Debug)]
-pub struct TailOptions {
-    pub since_seq: Option<u64>,
+pub struct FollowOptions {
+    /// New messages by default; select retained history explicitly.
+    pub start: super::FollowStart,
+    /// Continue after history. False stops at the opening upper bound; alone it selects all history.
+    pub live: bool,
     pub max_messages: Option<usize>,
     pub tags: Vec<String>,
     pub poll_interval: Duration,
@@ -94,10 +97,11 @@ pub enum GapPolicy {
     Error,
 }
 
-impl TailOptions {
+impl FollowOptions {
     pub fn new() -> Self {
         Self {
-            since_seq: None,
+            start: super::FollowStart::New,
+            live: true,
             max_messages: None,
             tags: Vec::new(),
             poll_interval: Duration::from_millis(50),
@@ -109,27 +113,27 @@ impl TailOptions {
     }
 }
 
-impl Default for TailOptions {
+impl Default for FollowOptions {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub struct Tail<'a>(TailReader<'a>);
+pub struct Follow<'a>(TailReader<'a>);
 
 /// A pull-based stream of independent immutable Lite3 snapshots.
 ///
 /// Retaining a message keeps only that message alive after this tail or pool closes.
-pub struct ViewTail<'a>(TailReader<'a>);
+pub struct ViewFollow<'a>(TailReader<'a>);
 
 impl Pool {
-    /// Tail validated owned views without constructing JSON or native data trees.
-    pub fn tail_views(&self, options: TailOptions) -> ViewTail<'_> {
-        ViewTail(TailReader::new(self, options))
+    /// Follow validated owned views without constructing JSON or native data trees.
+    pub fn follow_views(&self, options: FollowOptions) -> ViewFollow<'_> {
+        ViewFollow(TailReader::new(self, options))
     }
 }
 
-pub struct Lite3Tail<'a>(TailReader<'a>);
+pub struct Lite3Follow<'a>(TailReader<'a>);
 
 struct TailReader<'a> {
     pool: &'a Pool,
@@ -139,12 +143,15 @@ struct TailReader<'a> {
 // Shared policy, independent of whether the adapter borrows or owns its Pool.
 pub(crate) struct TailState {
     cursor: Cursor,
-    options: TailOptions,
+    options: FollowOptions,
     seen: usize,
     deadline: Option<Instant>,
     notify: Option<NotifyHandle>,
     expected_seq: Option<u64>,
     terminated: bool,
+    upper: Option<u64>,
+    since_ns: Option<u64>,
+    startup_error: Option<Error>,
 }
 
 pub(crate) enum TailOutcome<T> {
@@ -155,7 +162,7 @@ pub(crate) enum TailOutcome<T> {
 }
 
 impl<'a> TailReader<'a> {
-    fn new(pool: &'a Pool, options: TailOptions) -> Self {
+    fn new(pool: &'a Pool, options: FollowOptions) -> Self {
         Self {
             pool,
             state: TailState::new(pool, options),
@@ -171,22 +178,63 @@ impl<'a> TailReader<'a> {
 }
 
 impl TailState {
-    pub(crate) fn new(pool: &Pool, options: TailOptions) -> Self {
+    pub(crate) fn new(pool: &Pool, options: FollowOptions) -> Self {
         let deadline = options.timeout.map(|duration| Instant::now() + duration);
-        let expected_seq = options.since_seq;
+        let mut cursor = Cursor::new();
+        let mut expected_seq = None;
+        let mut upper = None;
+        let mut since_ns = None;
+        let mut terminated = false;
+        let mut startup_error = None;
+        match pool.header_from_mmap() {
+            Ok(header) => {
+                let oldest = header.oldest_seq.max(1);
+                let newest = header.newest_seq;
+                use super::FollowStart;
+                expected_seq = Some(match options.start {
+                    FollowStart::New if !options.live => oldest,
+                    FollowStart::New => {
+                        cursor.seek_to(header.head_off as usize);
+                        terminated = newest == u64::MAX;
+                        newest.saturating_add(1).max(1)
+                    }
+                    FollowStart::Last(count) => {
+                        if count == 0 {
+                            newest.saturating_add(1).max(1)
+                        } else {
+                            newest.saturating_sub(count - 1).max(oldest)
+                        }
+                    }
+                    FollowStart::Since(time) => {
+                        since_ns = Some(time);
+                        oldest
+                    }
+                    FollowStart::Sequence(0) => oldest,
+                    FollowStart::Sequence(seq) => seq,
+                });
+                if !options.live {
+                    upper = Some(newest);
+                    terminated |= newest == 0 || expected_seq.is_some_and(|seq| seq > newest);
+                }
+            }
+            Err(error) => startup_error = Some(error),
+        }
         let notify = if options.notify {
             open_for_pool(pool)
         } else {
             None
         };
         Self {
-            cursor: Cursor::new(),
+            cursor,
             options,
             seen: 0,
             deadline,
             notify,
             expected_seq,
-            terminated: false,
+            terminated,
+            upper,
+            since_ns,
+            startup_error,
         }
     }
 
@@ -216,6 +264,10 @@ impl TailState {
         mut acquire: impl FnMut(&mut Cursor) -> Result<CursorResult, Error>,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
     ) -> Result<TailOutcome<T>, Error> {
+        if let Some(error) = self.startup_error.take() {
+            self.terminated = true;
+            return Err(error);
+        }
         // A poll scans available records but never sleeps. Filters and a
         // requested starting sequence must not conceal an already-ready item.
         let poll_only = wait == Some(Duration::ZERO);
@@ -261,6 +313,10 @@ impl TailState {
 
             match acquire(&mut self.cursor)? {
                 CursorResult::Message(frame) => {
+                    if self.upper.is_some_and(|upper| frame.seq > upper) {
+                        self.terminated = true;
+                        return Ok(TailOutcome::Finished);
+                    }
                     let should_process = match observe_sequence(
                         &mut self.expected_seq,
                         frame.seq,
@@ -276,7 +332,16 @@ impl TailState {
                         continue;
                     }
                     // Sequence space cannot advance after the last u64 value.
-                    self.terminated = frame.seq == u64::MAX;
+                    self.terminated = frame.seq == u64::MAX || self.upper == Some(frame.seq);
+                    if self
+                        .since_ns
+                        .is_some_and(|since| frame.timestamp_ns < since)
+                    {
+                        if self.terminated {
+                            return Ok(TailOutcome::Finished);
+                        }
+                        continue;
+                    }
                     if let Some(item) = select(frame, &self.options.tags)? {
                         self.seen += 1;
                         return Ok(TailOutcome::Item(item));
@@ -286,6 +351,10 @@ impl TailState {
                     }
                 }
                 CursorResult::WouldBlock => {
+                    if self.upper.is_some() {
+                        self.terminated = true;
+                        return Ok(TailOutcome::Finished);
+                    }
                     if wait_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         return Ok(TailOutcome::WaitExpired);
                     }
@@ -457,7 +526,7 @@ impl TailState {
     }
 }
 
-impl Tail<'_> {
+impl Follow<'_> {
     pub fn next_message(&mut self) -> Result<Option<Message>, Error> {
         self.0.next(|frame, tags| {
             let message = message_from_frame(&frame)?;
@@ -466,7 +535,7 @@ impl Tail<'_> {
     }
 }
 
-impl ViewTail<'_> {
+impl ViewFollow<'_> {
     pub fn next_view(&mut self) -> Result<Option<crate::view::MessageView>, Error> {
         self.0.next(|frame, required| {
             let view = crate::view::MessageView::from_owned(
@@ -495,7 +564,7 @@ impl ViewTail<'_> {
     }
 }
 
-impl Iterator for ViewTail<'_> {
+impl Iterator for ViewFollow<'_> {
     type Item = Result<crate::view::MessageView, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -503,7 +572,7 @@ impl Iterator for ViewTail<'_> {
     }
 }
 
-impl Lite3Tail<'_> {
+impl Lite3Follow<'_> {
     pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
         self.0.next(|frame, tags| {
             if tags.is_empty() {
@@ -719,10 +788,10 @@ pub trait PoolApiExt {
     /// Fetch the raw Lite3 payload for a sequence number.
     fn get_lite3(&self, seq: u64) -> Result<FrameRef, Error>;
 
-    fn tail(&self, options: TailOptions) -> Tail<'_>;
+    fn follow(&self, options: FollowOptions) -> Follow<'_>;
 
-    /// Tail frames without JSON decoding.
-    fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_>;
+    /// Follow frames without JSON decoding.
+    fn follow_lite3(&self, options: FollowOptions) -> Lite3Follow<'_>;
 }
 
 impl PoolApiExt for Pool {
@@ -795,12 +864,12 @@ impl PoolApiExt for Pool {
         self.get(seq)
     }
 
-    fn tail(&self, options: TailOptions) -> Tail<'_> {
-        Tail(TailReader::new(self, options))
+    fn follow(&self, options: FollowOptions) -> Follow<'_> {
+        Follow(TailReader::new(self, options))
     }
 
-    fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_> {
-        Lite3Tail(TailReader::new(self, options))
+    fn follow_lite3(&self, options: FollowOptions) -> Lite3Follow<'_> {
+        Lite3Follow(TailReader::new(self, options))
     }
 }
 
@@ -944,7 +1013,7 @@ pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        GapPolicy, PoolApiExt, TailOptions, TailOutcome, TailState, decode_payload,
+        FollowOptions, GapPolicy, PoolApiExt, TailOutcome, TailState, decode_payload,
         message_from_frame,
     };
     use crate::core::error::ErrorKind;
@@ -966,16 +1035,65 @@ mod tests {
     }
 
     #[test]
+    fn follow_selection_uses_one_opening_boundary() {
+        use crate::api::FollowStart;
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("follow.plasmite");
+        let pool = batch_pool(&path);
+        let mut writer = Pool::open(&path).unwrap();
+        let mut live = pool.follow(FollowOptions::default());
+        writer
+            .append_json_now(&json!({"value": 5}), &[], Durability::Fast)
+            .unwrap();
+        assert_eq!(live.next_message().unwrap().unwrap().seq, 5);
+        let mut finite = pool.follow(FollowOptions {
+            start: FollowStart::Last(2),
+            live: false,
+            ..Default::default()
+        });
+        writer
+            .append_json_now(&json!({"value": 6}), &[], Durability::Fast)
+            .unwrap();
+        assert_eq!(
+            std::iter::from_fn(|| finite.next_message().transpose())
+                .map(|m| m.unwrap().seq)
+                .collect::<Vec<_>>(),
+            vec![4, 5]
+        );
+        let all = pool.follow_views(FollowOptions {
+            start: FollowStart::all(),
+            live: false,
+            ..Default::default()
+        });
+        assert_eq!(
+            all.map(|m| m.unwrap().seq).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6]
+        );
+        let mut empty = pool.follow(FollowOptions {
+            start: FollowStart::Last(0),
+            live: false,
+            ..Default::default()
+        });
+        assert!(empty.next_message().unwrap().is_none());
+        let mut since = pool.follow(FollowOptions {
+            start: FollowStart::Since(u64::MAX),
+            live: false,
+            ..Default::default()
+        });
+        assert!(since.next_message().unwrap().is_none());
+    }
+
+    #[test]
     fn batch_wait_respects_bytes_and_checkpoints() {
         let directory = tempdir().unwrap();
         let pool = batch_pool(&directory.path().join("batch.plasmite"));
         let size = pool.get_lite3(1).unwrap().payload.len();
         let mut state = TailState::new(
             &pool,
-            TailOptions {
-                since_seq: Some(1),
+            FollowOptions {
+                start: crate::api::FollowStart::Sequence(1),
                 max_messages: Some(4),
-                ..TailOptions::default()
+                ..Default::default()
             },
         );
         let select = |frame: crate::api::FrameRef, _: &[String]| Ok(Some(frame.seq));
@@ -1018,9 +1136,9 @@ mod tests {
         let pool = batch_pool(&directory.path().join("batch.plasmite"));
         let mut state = TailState::new(
             &pool,
-            TailOptions {
-                since_seq: Some(1),
-                ..TailOptions::default()
+            FollowOptions {
+                start: crate::api::FollowStart::Sequence(1),
+                ..Default::default()
             },
         );
         let select = |frame: crate::api::FrameRef, _: &[String]| {
@@ -1066,9 +1184,9 @@ mod tests {
             .unwrap();
         let mut state = TailState::new(
             &pool,
-            TailOptions {
-                since_seq: Some(1),
-                ..TailOptions::default()
+            FollowOptions {
+                start: crate::api::FollowStart::Sequence(1),
+                ..Default::default()
             },
         );
         let TailOutcome::Item(items) = state
@@ -1092,10 +1210,10 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut state = TailState::new(
             &pool,
-            TailOptions {
-                since_seq: Some(1),
+            FollowOptions {
+                start: crate::api::FollowStart::Sequence(1),
                 cancel: Some(cancel.clone()),
-                ..TailOptions::default()
+                ..Default::default()
             },
         );
         let TailOutcome::Item(items) = state
@@ -1240,12 +1358,13 @@ mod tests {
             encode_message(&["keep".into()], &json!({"nested": [{"text": "original"}]})).unwrap();
         pool.append_with_timestamp(payload.as_slice(), 123).unwrap();
         super::DATA_TREE_DECODES.with(|count| count.set(0));
-        let options = TailOptions {
+        let options = FollowOptions {
             tags: vec!["keep".into()],
             max_messages: Some(1),
-            ..TailOptions::default()
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
         };
-        let frame = pool.tail_lite3(options).next_frame().unwrap().unwrap();
+        let frame = pool.follow_lite3(options).next_frame().unwrap().unwrap();
         assert_eq!(frame.seq, 1);
         assert_eq!(frame.timestamp_ns, 123);
         assert_eq!(frame.payload, payload.as_slice());
@@ -1260,20 +1379,20 @@ mod tests {
         let mut bytes = payload.as_slice().to_vec();
         bytes[text + 1..text + 5].copy_from_slice(&0u32.to_le_bytes());
         let seq = pool.append(&bytes).unwrap(); // Simulate damaged bytes after publication.
-        let options = TailOptions {
-            since_seq: Some(seq),
+        let options = FollowOptions {
+            start: crate::api::FollowStart::Sequence(seq),
             tags: vec!["never".into()],
-            ..TailOptions::default()
+            ..Default::default()
         };
         assert_eq!(
-            pool.tail_lite3(options.clone())
+            pool.follow_lite3(options.clone())
                 .next_frame()
                 .unwrap_err()
                 .kind(),
             ErrorKind::Corrupt
         );
         assert_eq!(
-            pool.tail(options).next_message().unwrap_err().kind(),
+            pool.follow(options).next_message().unwrap_err().kind(),
             ErrorKind::Corrupt
         );
     }
@@ -1292,14 +1411,14 @@ mod tests {
             file.seek(SeekFrom::Start(offset)).unwrap();
             file.write_all(&u64::MAX.to_le_bytes()).unwrap();
         }
-        let options = TailOptions {
-            since_seq: Some(u64::MAX),
-            ..TailOptions::default()
+        let options = FollowOptions {
+            start: crate::api::FollowStart::Sequence(u64::MAX),
+            ..Default::default()
         };
-        let mut raw = pool.tail_lite3(options.clone());
+        let mut raw = pool.follow_lite3(options.clone());
         assert_eq!(raw.next_frame().unwrap().unwrap().seq, u64::MAX);
         assert!(raw.next_frame().unwrap().is_none());
-        let mut decoded = pool.tail(options);
+        let mut decoded = pool.follow(options);
         assert_eq!(decoded.next_message().unwrap().unwrap().seq, u64::MAX);
         assert!(decoded.next_message().unwrap().is_none());
     }
@@ -1387,7 +1506,7 @@ mod tests {
     }
 
     #[test]
-    fn append_get_tail_lite3() {
+    fn append_get_follow_lite3() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
         let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
@@ -1404,10 +1523,13 @@ mod tests {
         assert_eq!(frame.seq, seq);
         assert_eq!(frame.payload, payload.as_slice());
 
-        let mut options = TailOptions::new();
-        options.since_seq = Some(seq);
+        let mut options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
+        options.start = crate::api::FollowStart::Sequence(seq);
         options.max_messages = Some(1);
-        let mut tail = pool.tail_lite3(options);
+        let mut tail = pool.follow_lite3(options);
         let frame = tail.next_frame().expect("tail").expect("frame");
         assert_eq!(frame.seq, seq);
         assert_eq!(frame.payload, payload.as_slice());
@@ -1420,13 +1542,13 @@ mod tests {
         let mut writer = Pool::create(&path, PoolOptions::new(65536)).unwrap();
         let first = Pool::open(&path).unwrap();
         let second = Pool::open(&path).unwrap();
-        let options = TailOptions {
-            since_seq: Some(1),
+        let options = FollowOptions {
+            start: crate::api::FollowStart::Sequence(1),
             timeout: Some(Duration::from_secs(1)),
-            ..TailOptions::new()
+            ..Default::default()
         };
-        let mut first_tail = first.tail(options.clone());
-        let mut second_tail = second.tail(options);
+        let mut first_tail = first.follow(options.clone());
+        let mut second_tail = second.follow(options);
         let ready = std::sync::Barrier::new(3);
         std::thread::scope(|scope| {
             let one = scope.spawn(|| {
@@ -1453,11 +1575,14 @@ mod tests {
         let mut writer = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
         let reader = Pool::open(&path).expect("open reader");
 
-        let mut options = TailOptions::new();
+        let mut options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
         options.notify = false;
         options.timeout = Some(Duration::from_secs(2));
-        let mut json = reader.tail(options.clone());
-        let mut lite3 = reader.tail_lite3(options);
+        let mut json = reader.follow(options.clone());
+        let mut lite3 = reader.follow_lite3(options);
         std::thread::scope(|scope| {
             scope.spawn(|| {
                 writer
@@ -1492,12 +1617,15 @@ mod tests {
         pool.append_json_now(&json!({"n": 3}), &["keep".into()], Durability::Fast)
             .expect("append another matching message");
 
-        let mut options = TailOptions::new();
-        options.since_seq = Some(first.seq);
+        let mut options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
+        options.start = crate::api::FollowStart::Sequence(first.seq);
         options.max_messages = Some(1);
         options.tags = vec!["keep".to_string()];
-        let mut raw = pool.tail_lite3(options.clone());
-        let mut tail = pool.tail(options);
+        let mut raw = pool.follow_lite3(options.clone());
+        let mut tail = pool.follow(options);
         let message = tail.next_message().expect("tail").expect("message");
         assert_eq!(message.seq, second.seq);
         assert_eq!(message.data, json!({"n": 2}));
@@ -1523,20 +1651,31 @@ mod tests {
             .unwrap();
 
         let cancel = Arc::new(AtomicBool::new(false));
-        let mut options = TailOptions::new();
+        let mut options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
         options.cancel = Some(cancel.clone());
-        let mut json = pool.tail(options.clone());
-        let mut lite3 = pool.tail_lite3(options);
+        let mut json = pool.follow(options.clone());
+        let mut lite3 = pool.follow_lite3(options);
         assert_eq!(json.next_message().unwrap().unwrap().seq, 1);
         assert_eq!(lite3.next_frame().unwrap().unwrap().seq, 1);
         cancel.store(true, Ordering::Release);
         assert!(json.next_message().unwrap().is_none());
         assert!(lite3.next_frame().unwrap().is_none());
 
-        let mut expired = TailOptions::new();
+        let mut expired = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
         expired.timeout = Some(Duration::ZERO);
-        assert!(pool.tail(expired.clone()).next_message().unwrap().is_none());
-        assert!(pool.tail_lite3(expired).next_frame().unwrap().is_none());
+        assert!(
+            pool.follow(expired.clone())
+                .next_message()
+                .unwrap()
+                .is_none()
+        );
+        assert!(pool.follow_lite3(expired).next_frame().unwrap().is_none());
     }
 
     fn append_until_oldest_after(pool: &mut Pool, seq: u64) {
@@ -1572,11 +1711,14 @@ mod tests {
         let strict_reader = Pool::open(&path).expect("open strict reader");
         let continuing_reader = Pool::open(&path).expect("open continuing reader");
 
-        let mut strict_options = TailOptions::new();
-        strict_options.since_seq = Some(first.seq);
+        let mut strict_options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
+        strict_options.start = crate::api::FollowStart::Sequence(first.seq);
         strict_options.gap_policy = GapPolicy::Error;
-        let mut strict_lite3 = strict_reader.tail_lite3(strict_options.clone());
-        let mut strict = strict_reader.tail(strict_options);
+        let mut strict_lite3 = strict_reader.follow_lite3(strict_options.clone());
+        let mut strict = strict_reader.follow(strict_options);
         assert_eq!(
             strict
                 .next_message()
@@ -1587,9 +1729,12 @@ mod tests {
         );
         assert_eq!(strict_lite3.next_frame().unwrap().unwrap().seq, first.seq);
 
-        let mut continuing_options = TailOptions::new();
-        continuing_options.since_seq = Some(first.seq);
-        let mut continuing = continuing_reader.tail(continuing_options);
+        let mut continuing_options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
+        continuing_options.start = crate::api::FollowStart::Sequence(first.seq);
+        let mut continuing = continuing_reader.follow(continuing_options);
         assert_eq!(
             continuing
                 .next_message()
@@ -1652,20 +1797,26 @@ mod tests {
             .expect("oldest");
 
         let strict_reader = Pool::open(&path).expect("open strict reader");
-        let mut strict_options = TailOptions::new();
-        strict_options.since_seq = Some(first.seq);
+        let mut strict_options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
+        strict_options.start = crate::api::FollowStart::Sequence(first.seq);
         strict_options.tags = vec!["never".to_string()];
         strict_options.gap_policy = GapPolicy::Error;
-        let mut strict = strict_reader.tail(strict_options);
+        let mut strict = strict_reader.follow(strict_options);
         let err = strict.next_message().expect_err("stale start must fail");
         assert_eq!(err.kind(), ErrorKind::RetentionGap);
         assert_eq!(err.seq(), Some(first.seq));
 
         let implicit_reader = Pool::open(&path).expect("open implicit reader");
-        let mut implicit_options = TailOptions::new();
+        let mut implicit_options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
         implicit_options.max_messages = Some(1);
         implicit_options.gap_policy = GapPolicy::Error;
-        let mut implicit = implicit_reader.tail(implicit_options);
+        let mut implicit = implicit_reader.follow(implicit_options);
         let message = implicit
             .next_message()
             .expect("implicit read")
@@ -1685,10 +1836,13 @@ mod tests {
         append_until_oldest_after(&mut writer, first.seq);
 
         let reader = Pool::open(&path).expect("open reader");
-        let mut options = TailOptions::new();
-        options.since_seq = Some(first.seq);
+        let mut options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
+        options.start = crate::api::FollowStart::Sequence(first.seq);
         options.gap_policy = GapPolicy::Error;
-        let mut tail = reader.tail_lite3(options);
+        let mut tail = reader.follow_lite3(options);
         let err = tail.next_frame().expect_err("stale Lite3 start must fail");
         assert_eq!(err.kind(), ErrorKind::RetentionGap);
         assert_eq!(err.seq(), Some(first.seq));
@@ -1733,12 +1887,15 @@ mod tests {
         let expected = frames.iter().map(|frame| frame.seq).collect::<Vec<_>>();
         let oldest = expected[0];
 
-        let mut options = TailOptions::new();
-        options.since_seq = Some(oldest);
+        let mut options = FollowOptions {
+            start: crate::api::FollowStart::all(),
+            ..Default::default()
+        };
+        options.start = crate::api::FollowStart::Sequence(oldest);
         options.max_messages = Some(expected.len());
         options.gap_policy = GapPolicy::Error;
         options.notify = false;
-        let mut tail = pool.tail(options);
+        let mut tail = pool.follow(options);
         let mut tailed = Vec::with_capacity(expected.len());
         for _ in 0..expected.len() {
             tailed.push(

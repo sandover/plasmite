@@ -10,7 +10,7 @@ test('packed remote-only package uses portable checked views without native arti
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const source = path.resolve(__dirname, '..');
   const root = path.join(directory, 'package'); fs.mkdirSync(root);
-  for (const name of ['index.js', 'remote.js', 'views.js', 'input.js', 'message.js', 'mappings.js', 'types.d.ts',
+  for (const name of ['index.js', 'follow.js', 'remote.js', 'views.js', 'input.js', 'message.js', 'mappings.js', 'types.d.ts',
     'portable.js', 'portable', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin']) {
     fs.cpSync(path.join(source, name), path.join(root, name), { recursive: true });
   }

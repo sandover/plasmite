@@ -206,7 +206,7 @@ func TestTailCancelAndResume(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out, errs := pool.Tail(ctx, TailOptions{Timeout: 50 * time.Millisecond, Buffer: 4})
+	out, errs := pool.Follow(ctx, FollowOptions{Start: All(), Timeout: 50 * time.Millisecond, Buffer: 4})
 
 	select {
 	case <-out:
@@ -232,7 +232,7 @@ func TestTailCancelAndResume(t *testing.T) {
 	}
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel2()
-	out2, errs2 := pool.Tail(ctx2, TailOptions{SinceSeq: uint64Ptr(2), MaxMessages: uint64Ptr(1), Timeout: 50 * time.Millisecond})
+	out2, errs2 := pool.Follow(ctx2, FollowOptions{Start: Sequence(2), MaxMessages: uint64Ptr(1), Timeout: 50 * time.Millisecond})
 	select {
 	case <-out2:
 	case err := <-errs2:
@@ -256,7 +256,7 @@ func TestTailFiltersByTags(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	out, errs := pool.Tail(ctx, TailOptions{
+	out, errs := pool.Follow(ctx, FollowOptions{Start: All(),
 		Tags:        []string{"keep"},
 		MaxMessages: uint64Ptr(1),
 		Timeout:     50 * time.Millisecond,
@@ -289,8 +289,8 @@ func TestTailRetentionGapPolicy(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, errs := pool.Tail(ctx, TailOptions{
-		SinceSeq:    uint64Ptr(first.Seq),
+	out, errs := pool.Follow(ctx, FollowOptions{
+		Start:       Sequence(first.Seq),
 		MaxMessages: uint64Ptr(1),
 		Timeout:     50 * time.Millisecond,
 	})
@@ -305,8 +305,8 @@ func TestTailRetentionGapPolicy(t *testing.T) {
 		t.Fatalf("default tail did not continue: %v", ctx.Err())
 	}
 
-	gapOut, gapErrs := pool.Tail(ctx, TailOptions{
-		SinceSeq:   uint64Ptr(first.Seq),
+	gapOut, gapErrs := pool.Follow(ctx, FollowOptions{
+		Start:      Sequence(first.Seq),
 		Tags:       []string{"never"},
 		Timeout:    50 * time.Millisecond,
 		ErrorOnGap: true,
@@ -324,7 +324,7 @@ func TestTailRetentionGapPolicy(t *testing.T) {
 	}
 }
 
-func TestTailLite3RetentionGapPolicy(t *testing.T) {
+func TestFollowLite3RetentionGapPolicy(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "lite3-gap")
 	first, err := pool.Append(map[string]any{"kind": "first"}, nil)
@@ -335,8 +335,8 @@ func TestTailLite3RetentionGapPolicy(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, errs := pool.TailLite3(ctx, TailOptions{
-		SinceSeq:   uint64Ptr(first.Seq),
+	out, errs := pool.FollowLite3(ctx, FollowOptions{
+		Start:      Sequence(first.Seq),
 		Timeout:    50 * time.Millisecond,
 		ErrorOnGap: true,
 	})
@@ -350,14 +350,14 @@ func TestTailLite3RetentionGapPolicy(t *testing.T) {
 	}
 }
 
-func TestOpenStreamReportsFirstMissingSequenceAfterOverwrite(t *testing.T) {
+func TestOpenFollowReportsFirstMissingSequenceAfterOverwrite(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "slow-reader")
 	seed, err := pool.Append(map[string]any{"kind": "seed"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := pool.(*Pool).openStream(&seed.Seq, nil, uint64Ptr(500), true)
+	stream, err := pool.(*Pool).openFollow(Sequence(seed.Seq), nil, uint64Ptr(500), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestOpenStreamReportsFirstMissingSequenceAfterOverwrite(t *testing.T) {
 	}
 }
 
-// Tail sends its terminal error before closing both channels. Drain output to
+// Follow sends its terminal error before closing both channels. Drain output to
 // closure before reading the error so a closed output cannot win the select.
 func tailErrorAfterNoMessages[T any](t *testing.T, ctx context.Context, out <-chan T, errs <-chan error) error {
 	t.Helper()
@@ -481,7 +481,7 @@ func TestLite3AppendGetTail(t *testing.T) {
 	}
 
 	timeout := uint64(50)
-	stream, err := pool.OpenLite3Stream(uint64Ptr(seq2), uint64Ptr(1), &timeout)
+	stream, err := pool.OpenLite3Follow(Sequence(seq2), uint64Ptr(1), &timeout)
 	if err != nil {
 		t.Fatalf("open lite3 stream: %v", err)
 	}
@@ -502,8 +502,8 @@ func TestLite3AppendGetTail(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, errs := pool.TailLite3(ctx, TailOptions{
-		SinceSeq:    uint64Ptr(seq2),
+	out, errs := pool.FollowLite3(ctx, FollowOptions{
+		Start:       Sequence(seq2),
 		MaxMessages: uint64Ptr(1),
 		Timeout:     50 * time.Millisecond,
 		Buffer:      2,
@@ -633,4 +633,63 @@ func TestNumericAppendReceipts(t *testing.T) {
 	if err != nil || fourth.Seq != 4 {
 		t.Fatalf("unsupported call appended: %+v / %v", fourth, err)
 	}
+}
+
+func TestFollowDefaultsToNewAndSelectsHistoryExplicitly(t *testing.T) {
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "follow-choices")
+	for n := 1; n <= 2; n++ {
+		if _, err := pool.Append(map[string]any{"n": n}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stream, err := pool.OpenFollow(NewPosition(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	concrete := stream.(*Stream)
+	_, status, err := concrete.nextWait(0)
+	if err != nil || status != 0 {
+		t.Fatalf("default replayed history: %d %v", status, err)
+	}
+	message, err := pool.Append(map[string]any{"n": 3}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, status, err := concrete.nextWait(100)
+	if err != nil || status != 1 {
+		t.Fatalf("live read: %d %v", status, err)
+	}
+	got, err := api.DecodeMessage(raw)
+	if err != nil || got.Seq != message.Seq {
+		t.Fatalf("live identity: %v %v", got, err)
+	}
+	out, errs := pool.Follow(context.Background(), FollowOptions{Start: Last(2), Finite: true})
+	var ids []uint64
+	for message := range out {
+		ids = append(ids, message.Seq)
+	}
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != 2 || ids[1] != 3 {
+		t.Fatalf("history: %v", ids)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	one := uint64(1)
+	fresh, failures := pool.Follow(ctx, FollowOptions{MaxMessages: &one})
+	appended, err := pool.Append(map[string]any{"n": 4}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := <-fresh
+	if next == nil || next.Seq != appended.Seq {
+		t.Fatalf("follow did not open before returning: %v", next)
+	}
+	if err := <-failures; err != nil {
+		t.Fatal(err)
+	}
+
 }

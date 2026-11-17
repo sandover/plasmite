@@ -1,3 +1,4 @@
+from plasmite import FollowStart
 """Compare UDP raw, selected and requested native output with verified delivery.
 
 The peer sends one DATA at a time using a test-only queue. This measures the
@@ -64,7 +65,7 @@ def run(lane, fixture, count):
             with plasmite.UdpClient(f"udp://127.0.0.1:{peer.getsockname()[1]}") as client:
                 with client.open_pool("source") as pool:
                     open_follow = pool.follow_views if lane.startswith("view") else pool.follow
-                    with open_follow(plasmite.UdpFollowOptions(start=plasmite.UdpStart.sequence(1))) as stream:
+                    with open_follow(plasmite.UdpFollowOptions(start=plasmite.FollowStart.sequence(1))) as stream:
                         warm = stream.next_event(timeout_ms=1000)
                         assert warm.seq == 1
                         cpu, thread_cpu, start = time.process_time_ns(), time.thread_time_ns(), time.perf_counter_ns()

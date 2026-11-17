@@ -1,7 +1,7 @@
 # Plasmite Go Bindings
 
 These bindings wrap the `libplasmite` C ABI via cgo and expose typed Go contracts.
-`Append`, `Get`, and `Tail` return `*Message` values, while Lite3 APIs
+`Append`, `Get`, and `Follow` return `*Message` values, while Lite3 APIs
 provide raw binary frames. Prefer the additive owned-view methods for selected
 reads, typed decoding and forwarding; existing message methods stay compatible.
 Owned views keep immutable encoded bytes in Go memory and need no per-message
@@ -121,8 +121,8 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
     one := uint64(1)
-    tail, errs := pool.Tail(ctx, plasmite.TailOptions{
-        SinceSeq:    &msg.Seq,
+    tail, errs := pool.Follow(ctx, plasmite.FollowOptions{
+        Start: plasmite.Sequence(msg.Seq),
         MaxMessages: &one,
         Tags:        []string{"note"},
         Timeout:     100 * time.Millisecond,
@@ -136,8 +136,8 @@ func main() {
 }
 ```
 
-`TailOptions.Tags` applies exact tag matching and composes with other filters
-via AND semantics. `SinceSeq` is inclusive; save the last handled sequence
+`FollowOptions.Tags` applies exact tag matching and composes with other filters
+via AND semantics. `Sequence(seq)` is inclusive; save the last handled sequence
 plus one to resume. Tails retain one native reader across quiet waits.
 `Timeout` bounds each wait; waits also check context cancellation at least every
 50 milliseconds while idle. It does not end the tail on its own. Use a context deadline
@@ -152,8 +152,8 @@ stop processing:
 ctx, cancel := context.WithCancel(context.Background())
 defer cancel()
 var handlerErr error
-tail, errs := pool.Tail(ctx, plasmite.TailOptions{
-    SinceSeq:   &checkpoint,
+tail, errs := pool.Follow(ctx, plasmite.FollowOptions{
+    Start: plasmite.Sequence(checkpoint),
     ErrorOnGap: true,
 })
 for message := range tail {
@@ -253,7 +253,7 @@ the server's explicit `--udp-follow` setting; it never switches to HTTP.
 ### Concurrent use
 
 Client, Pool, Stream, and Lite3Stream methods serialize access to each native
-handle, including Close. A Tail goroutine retains an independent stream while
+handle, including Close. A Follow goroutine retains an independent stream while
 foreground pool operations run; closing its Pool ends the high-level tail. Handles must not be copied. Close waits
 for an active native read; set a finite stream timeout for bounded shutdown.
 Independent handles may run concurrently, and message values are owned snapshots.
@@ -368,9 +368,9 @@ use the normal Go marshaler interface for explicit JSON conversion.
 
 ## Owned local and UDP streams
 
-`OpenViewStream` provides pull-based reads through `Next(ctx)` and `Close()`.
-`TailViews(ctx, options)` provides the same views on a bounded channel. Both use
-`TailOptions` for sequence, matching-message limits, tags and retention gaps.
+`OpenViewFollow` provides pull-based reads through `Next(ctx)` and `Close()`.
+`FollowViews(ctx, options)` provides the same views on a bounded channel. Both use
+`FollowOptions` for sequence, matching-message limits, tags and retention gaps.
 Tags support embedded NUL. `Timeout` keeps the existing tail polling-wait meaning;
 use the context for cancellation or a deadline. The pull stream can outlive its
 source pool. The channel adapter checks `Pool.Close` between native waits and
@@ -379,7 +379,7 @@ one additional message can await delivery. Cancel its context when stopping
 consumption.
 
 ```go
-stream, err := pool.OpenViewStream(local.TailOptions{SinceSeq: &first})
+stream, err := pool.OpenViewFollow(local.FollowOptions{Start: local.Sequence(first)})
 if err != nil { return err }
 defer stream.Close()
 message, err := stream.Next(ctx)
@@ -413,3 +413,13 @@ forwarded messages remain valid after source pool/follow/stream close.
 
 [Go stream benchmark coverage and fixed builds](../../docs/performance/language-boundary-results/owned-views/go/streams/README.md)
 separate receive/copy costs, explicit conversion, forwarding and packet pacing.
+
+## Follow defaults and history
+
+`FollowOptions{}` selects new messages. Follow opens before returning its
+channels. Set `Start` to `All()`, `Last(n)`, `Since(unixNs)` or `Sequence(seq)`
+for explicit history. Sequence selection is inclusive. `Finite: true` stops at
+the opening history boundary and alone selects all retained history. Last N
+counts retained messages before filtering. The same choices apply to
+`FollowLite3`, `FollowViews` and low-level follow openings. UDP options now use
+`Finite` too, so their zero value follows new messages.

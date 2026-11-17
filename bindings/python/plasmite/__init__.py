@@ -205,17 +205,17 @@ class plsm_error_t(Structure):
     ]
 
 
-class plsm_stream_options_t(Structure):
+class plsm_follow_options_t(Structure):
     _fields_ = [
         ("struct_size", c_uint32),
         ("gap_policy", c_uint32),
-        ("since_seq", c_uint64),
+        ("start_value", c_uint64),
         ("max_messages", c_uint64),
         ("timeout_ms", c_uint64),
-        ("has_since", c_uint32),
+        ("start_kind", c_uint32),
         ("has_max", c_uint32),
         ("has_timeout", c_uint32),
-        ("reserved", c_uint32),
+        ("finite", c_uint32),
     ]
 
 
@@ -366,45 +366,10 @@ _LIB.plsm_pool_get_lite3.argtypes = [
 ]
 _LIB.plsm_pool_get_lite3.restype = c_int
 
-_LIB.plsm_stream_open.argtypes = [
-    POINTER(plsm_pool_t),
-    c_uint64,
-    c_uint32,
-    c_uint64,
-    c_uint32,
-    c_uint64,
-    c_uint32,
-    POINTER(POINTER(plsm_stream_t)),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_stream_open.restype = c_int
-_LIB.plsm_stream_open_ex.argtypes = [
-    POINTER(plsm_pool_t),
-    POINTER(plsm_stream_options_t),
-    POINTER(POINTER(plsm_stream_t)),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_stream_open_ex.restype = c_int
-
-_LIB.plsm_lite3_stream_open.argtypes = [
-    POINTER(plsm_pool_t),
-    c_uint64,
-    c_uint32,
-    c_uint64,
-    c_uint32,
-    c_uint64,
-    c_uint32,
-    POINTER(POINTER(plsm_lite3_stream_t)),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_lite3_stream_open.restype = c_int
-_LIB.plsm_lite3_stream_open_ex.argtypes = [
-    POINTER(plsm_pool_t),
-    POINTER(plsm_stream_options_t),
-    POINTER(POINTER(plsm_lite3_stream_t)),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_lite3_stream_open_ex.restype = c_int
+for _name, _handle in (("plsm_pool_follow", plsm_stream_t), ("plsm_pool_follow_lite3", plsm_lite3_stream_t)):
+    _function = getattr(_LIB, _name)
+    _function.argtypes = [POINTER(plsm_pool_t), POINTER(plsm_follow_options_t), POINTER(POINTER(_handle)), POINTER(POINTER(plsm_error_t))]
+    _function.restype = c_int
 
 _LIB.plsm_stream_next.argtypes = [
     POINTER(plsm_stream_t),
@@ -628,21 +593,21 @@ def _optional_non_negative_int(value: Optional[int], name: str) -> Optional[int]
     return _ensure_non_negative_int(value, name)
 
 
-def _stream_options(
-    since_seq: Optional[int],
-    max_messages: Optional[int],
-    timeout_ms: Optional[int],
-    error_on_gap: bool,
-) -> plsm_stream_options_t:
-    options = plsm_stream_options_t()
-    options.struct_size = sizeof(plsm_stream_options_t)
-    options.gap_policy = 1 if error_on_gap else 0
-    options.since_seq = since_seq or 0
+def _stream_options(start, max_messages, timeout_ms, error_on_gap, finite=False):
+    start = FollowStart.new() if start is None else start
+    if not isinstance(start, FollowStart) or start.kind not in (0, 1, 2, 3):
+        raise ValueError("start must be a FollowStart")
+    value = _ensure_non_negative_int(start.value, "start.value")
+    options = plsm_follow_options_t()
+    options.struct_size = sizeof(plsm_follow_options_t)
+    options.gap_policy = int(bool(error_on_gap))
+    options.start_kind = start.kind
+    options.start_value = value
     options.max_messages = max_messages or 0
     options.timeout_ms = timeout_ms or 0
-    options.has_since = 1 if since_seq is not None else 0
-    options.has_max = 1 if max_messages is not None else 0
-    options.has_timeout = 1 if timeout_ms is not None else 0
+    options.has_max = int(max_messages is not None)
+    options.has_timeout = int(timeout_ms is not None)
+    options.finite = int(bool(finite))
     return options
 
 
@@ -932,123 +897,67 @@ class Pool:
         return _frame_to_py(frame)
 
     @_serialized_handle
-    def open_stream(
-        self,
-        since_seq: Optional[int] = None,
-        max_messages: Optional[int] = None,
-        timeout_ms: Optional[int] = None,
-        error_on_gap: bool = False,
-    ) -> Stream:
+    def open_follow(self, start=None, max_messages=None, timeout_ms=None, error_on_gap=False, *, finite=False) -> Stream:
         _require_open(self._ptr, "pool")
-        since_seq = _optional_non_negative_int(since_seq, "since_seq")
         max_messages = _optional_non_negative_int(max_messages, "max_messages")
         timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
+        options = _stream_options(start, max_messages, timeout_ms, error_on_gap, finite)
         out_stream = POINTER(plsm_stream_t)()
         out_err = POINTER(plsm_error_t)()
-        if error_on_gap:
-            options = _stream_options(since_seq, max_messages, timeout_ms, True)
-            _require_open(self._ptr, "pool")
-            rc = _LIB.plsm_stream_open_ex(
-                self._ptr,
-                byref(options),
-                byref(out_stream),
-                byref(out_err),
-            )
-        else:
-            native_since = c_uint64(since_seq or 0)
-            native_max = c_uint64(max_messages or 0)
-            native_timeout = c_uint64(timeout_ms or 0)
-            _require_open(self._ptr, "pool")
-            rc = _LIB.plsm_stream_open(
-                self._ptr,
-                native_since,
-                c_uint32(1 if since_seq is not None else 0),
-                native_max,
-                c_uint32(1 if max_messages is not None else 0),
-                native_timeout,
-                c_uint32(1 if timeout_ms is not None else 0),
-                byref(out_stream),
-                byref(out_err),
-            )
+        _require_open(self._ptr, "pool")
+        rc = _LIB.plsm_pool_follow(self._ptr, byref(options), byref(out_stream), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         return Stream(out_stream)
 
     @_serialized_handle
-    def open_lite3_stream(
-        self,
-        since_seq: Optional[int] = None,
-        max_messages: Optional[int] = None,
-        timeout_ms: Optional[int] = None,
-        error_on_gap: bool = False,
-    ) -> Lite3Stream:
+    def open_lite3_follow(self, start=None, max_messages=None, timeout_ms=None, error_on_gap=False, *, finite=False) -> Lite3Stream:
         _require_open(self._ptr, "pool")
-        since_seq = _optional_non_negative_int(since_seq, "since_seq")
         max_messages = _optional_non_negative_int(max_messages, "max_messages")
         timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
+        options = _stream_options(start, max_messages, timeout_ms, error_on_gap, finite)
         out_stream = POINTER(plsm_lite3_stream_t)()
         out_err = POINTER(plsm_error_t)()
-        if error_on_gap:
-            options = _stream_options(since_seq, max_messages, timeout_ms, True)
-            _require_open(self._ptr, "pool")
-            rc = _LIB.plsm_lite3_stream_open_ex(
-                self._ptr,
-                byref(options),
-                byref(out_stream),
-                byref(out_err),
-            )
-        else:
-            native_since = c_uint64(since_seq or 0)
-            native_max = c_uint64(max_messages or 0)
-            native_timeout = c_uint64(timeout_ms or 0)
-            _require_open(self._ptr, "pool")
-            rc = _LIB.plsm_lite3_stream_open(
-                self._ptr,
-                native_since,
-                c_uint32(1 if since_seq is not None else 0),
-                native_max,
-                c_uint32(1 if max_messages is not None else 0),
-                native_timeout,
-                c_uint32(1 if timeout_ms is not None else 0),
-                byref(out_stream),
-                byref(out_err),
-            )
+        _require_open(self._ptr, "pool")
+        rc = _LIB.plsm_pool_follow_lite3(self._ptr, byref(options), byref(out_stream), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         return Lite3Stream(out_stream)
 
     @_serialized_handle
-    def tail_views(
-        self, *, since_seq=None, max_messages=None, tags=None, timeout_ms=None,
+    def follow_views(
+        self, *, start=None, finite=False, max_messages=None, tags=None, timeout_ms=None,
         cancel=None, error_on_gap=False,
     ):
         """Return a stream of immutable message views with explicit bounded batches."""
         _require_open(self._ptr, "pool")
-        from ._views import tail_views
+        from ._views import follow_views
 
-        return tail_views(
-            self, since_seq=since_seq, max_messages=max_messages, tags=tags,
+        return follow_views(
+            self, start=start, finite=finite, max_messages=max_messages, tags=tags,
             timeout_ms=timeout_ms, cancel=cancel, error_on_gap=error_on_gap,
         )
 
-    def tail(
+    def follow(
         self,
-        since_seq: Optional[int] = None,
+        start: FollowStart | None = None,
+        finite: bool = False,
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
         tags: Optional[Iterable[str]] = None,
         error_on_gap: bool = False,
         cancel: Event | None = None,
     ) -> Generator[Message, None, None]:
-        """Tail JSON messages and optionally filter by exact tags."""
+        """Follow new messages by default; select retained history explicitly."""
         if max_messages == 0:
             return
         required_tags = list(tags or [])
         stream_max_messages = (
             None if (max_messages is not None and required_tags) else max_messages
         )
-        stream = self.open_stream(
-            since_seq=since_seq,
+        stream = self.open_follow(
+            start=start,
+            finite=finite,
             max_messages=stream_max_messages,
             timeout_ms=timeout_ms,
             error_on_gap=error_on_gap,
@@ -1230,33 +1139,37 @@ class Lite3Stream:
 
 
 @dataclass(frozen=True)
-class UdpStart:
+class FollowStart:
     """A UDP follow start position. Use the named constructors."""
 
     kind: int
     value: int = 0
 
     @classmethod
-    def new(cls) -> UdpStart:
+    def new(cls) -> FollowStart:
         return cls(0)
 
     @classmethod
-    def last(cls, count: int) -> UdpStart:
+    def last(cls, count: int) -> FollowStart:
         return cls(1, _ensure_non_negative_int(count, "count"))
 
     @classmethod
-    def since_ns(cls, timestamp_ns: int) -> UdpStart:
+    def since_ns(cls, timestamp_ns: int) -> FollowStart:
         return cls(2, _ensure_non_negative_int(timestamp_ns, "timestamp_ns"))
 
     @classmethod
-    def sequence(cls, seq: int) -> UdpStart:
+    def sequence(cls, seq: int) -> FollowStart:
         return cls(3, _ensure_non_negative_int(seq, "seq"))
+
+    @classmethod
+    def all(cls):
+        return cls.sequence(0)
 
 
 @dataclass(frozen=True)
 class UdpFollowOptions:
-    start: UdpStart = UdpStart(0)
-    live: bool = True
+    start: FollowStart = FollowStart(0)
+    finite: bool = False
 
 
 @dataclass(frozen=True)
@@ -1418,7 +1331,7 @@ class UdpPool:
         if not isinstance(options, UdpFollowOptions):
             raise TypeError("options must be UdpFollowOptions")
         start = options.start
-        if not isinstance(start, UdpStart):
+        if not isinstance(start, FollowStart):
             raise ValueError("invalid UDP follow start")
         start_kind = start.kind
         if start_kind not in (0, 1, 2, 3):
@@ -1428,7 +1341,7 @@ class UdpPool:
         out_err = POINTER(plsm_error_t)()
         native_kind = c_uint32(start_kind)
         native_value = c_uint64(start_value)
-        native_live = c_uint32(1 if options.live else 0)
+        native_live = c_uint32(1 if not options.finite else 0)
         _require_open(self._ptr, "UDP pool")
         open_follow = _LIB.plsm_udp_pool_follow
         if views:
@@ -1655,7 +1568,7 @@ __all__ = [
     "UdpClient",
     "UdpPool",
     "UdpFollow",
-    "UdpStart",
+    "FollowStart",
     "UdpFollowOptions",
     "UdpFrame",
     "UdpGap",

@@ -1,3 +1,4 @@
+const { FollowStart } = require("../follow");
 /*
 Purpose: Exercise the Node binding against native pools and remote servers.
 Key Exports: None (node:test suite).
@@ -207,7 +208,7 @@ test("default client creates pool dir in fresh HOME", () => {
 
 test("tail timeout returns no message and close is safe", () => {
   withPool("tail", ({ pool }) => {
-    const stream = pool.openStream(BigInt(9999), BigInt(1), BigInt(10));
+    const stream = pool.openFollow(FollowStart.sequence(BigInt(9999)), BigInt(1), BigInt(10));
     const next = stream.nextJson();
     assert.equal(next, null);
     stream.close();
@@ -221,7 +222,7 @@ test("stream and lite3 stream support for-of iteration", () => {
     pool.append({ kind: "two" }, ["iter"]);
     pool.append({ kind: "three" }, ["iter"]);
 
-    const stream = pool.openStream(first.seq, BigInt(3), BigInt(50));
+    const stream = pool.openFollow(FollowStart.sequence(first.seq), BigInt(3), BigInt(50));
     const seenKinds = [];
     for (const message of stream) {
       seenKinds.push(parseMessage(message).data.kind);
@@ -234,7 +235,7 @@ test("stream and lite3 stream support for-of iteration", () => {
     assert.ok(frameSeed.time instanceof Date);
     const liteSeq = pool.appendLite3(frameSeed.payload);
     pool.appendLite3(frameSeed.payload);
-    const lite3Stream = pool.openLite3Stream(liteSeq, BigInt(2), BigInt(50));
+    const lite3Stream = pool.openLite3Follow(FollowStart.sequence(liteSeq), BigInt(2), BigInt(50));
     const frameSeqs = [];
     for (const frame of lite3Stream) {
       frameSeqs.push(frame.seq);
@@ -253,7 +254,7 @@ test("tail filters by tags before limiting matching messages", async () => {
     pool.append({ kind: "keep", i: 4 }, ["keep"]);
 
     const tailed = [];
-    for await (const message of pool.tail({ tags: ["keep"], maxMessages: 2, timeoutMs: 10 })) {
+    for await (const message of pool.follow({start: FollowStart.all(),  tags: ["keep"], maxMessages: 2, timeoutMs: 10 })) {
       tailed.push(message.data.i);
     }
     assert.deepEqual(tailed, [2, 4]);
@@ -265,7 +266,7 @@ test("tail filters by tags before limiting matching messages", async () => {
 test("tail timeout with no messages returns done", async () => {
   await withPoolAsync("tail-empty", async ({ pool }) => {
     const iterator = pool
-      .tail({ sinceSeq: 9999, maxMessages: 1, timeoutMs: 10, tags: ["nope"] })
+      .follow({ start: FollowStart.sequence(9999), maxMessages: 1, timeoutMs: 10, tags: ["nope"] })
       [Symbol.asyncIterator]();
     const next = await iterator.next();
     assert.equal(next.done, true);
@@ -278,14 +279,14 @@ test("a quiet native tail leaves timers free to append and abort", async () => {
     let timer;
     try {
       timer = setTimeout(() => pool.append({ from: "timer" }), 10);
-      const result = await pool.tail({ maxMessages: 1, timeoutMs: 1000 }).next();
+      const result = await pool.follow({start: FollowStart.all(),  maxMessages: 1, timeoutMs: 1000 }).next();
       assert.equal(result.done, false);
       assert.equal(result.value.data.from, "timer");
     } finally {
       clearTimeout(timer);
     }
     const controller = new AbortController();
-    const tail = pool.tail({ sinceSeq: 2n, timeoutMs: 5000, signal: controller.signal });
+    const tail = pool.follow({ start: FollowStart.sequence(2n), timeoutMs: 5000, signal: controller.signal });
     const next = tail.next();
     const abortTimer = setTimeout(() => controller.abort(), 10);
     let deadline;
@@ -305,7 +306,7 @@ test("a quiet native tail leaves timers free to append and abort", async () => {
 
 test("worker waits preserve position and close keeps an active handle alive", async () => {
   await withPoolAsync("worker-waits", async ({ pool }) => {
-    const stream = pool.openStream(1n, 1n);
+    const stream = pool.openFollow(FollowStart.sequence(1n), 1n);
     try {
       assert.equal((await stream.nextJsonWait(0)).status, 0);
       const message = pool.append({ value: 7 });
@@ -313,7 +314,7 @@ test("worker waits preserve position and close keeps an active handle alive", as
       assert.equal(read.status, 1);
       assert.equal(parseMessage(read.message).seq, message.seq);
       assert.equal((await stream.nextJsonWait(0)).status, 2);
-      const raw = pool.openLite3Stream(1n, 1n);
+      const raw = pool.openLite3Follow(FollowStart.sequence(1n), 1n);
       try {
         const result = await raw.nextWait(0);
         assert.equal(result.status, 1);
@@ -323,8 +324,8 @@ test("worker waits preserve position and close keeps an active handle alive", as
       } finally { raw.close(); }
     } finally { stream.close(); }
     for (const [stream, wait] of [
-      [pool.openStream(2n), (s) => s.nextJsonWait(5000)],
-      [pool.openLite3Stream(2n), (s) => s.nextWait(5000)],
+      [pool.openFollow(FollowStart.sequence(2n)), (s) => s.nextJsonWait(5000)],
+      [pool.openLite3Follow(FollowStart.sequence(2n)), (s) => s.nextWait(5000)],
     ]) {
       const pending = wait(stream);
       await assert.rejects(wait(stream), /active reader/);
@@ -350,7 +351,7 @@ test("local tail finishes at u64 maximum without reopening from zero", async () 
       }
     } finally { fs.closeSync(file); }
     const messages = [];
-    for await (const message of pool.tail({ sinceSeq: last, timeoutMs: 100 })) messages.push(message.seq);
+    for await (const message of pool.follow({ start: FollowStart.sequence(last), timeoutMs: 100 })) messages.push(message.seq);
     assert.deepEqual(messages, [last]);
   });
 });
@@ -363,7 +364,7 @@ test("local tails can fail closed on retention gaps", async () => {
       fillPast(pool, first.seq);
 
       const continuedIterator = pool
-        .tail({ sinceSeq: first.seq, maxMessages: 1, timeoutMs: 50 })
+        .follow({ start: FollowStart.sequence(first.seq), maxMessages: 1, timeoutMs: 50 })
         [Symbol.asyncIterator]();
       const continued = await continuedIterator.next();
       assert.equal(continued.done, false);
@@ -373,8 +374,8 @@ test("local tails can fail closed on retention gaps", async () => {
       await assert.rejects(
         async () =>
           pool
-            .tail({
-              sinceSeq: first.seq,
+            .follow({
+              start: FollowStart.sequence(first.seq),
               tags: ["never"],
               timeoutMs: 50,
               errorOnGap: true,
@@ -396,7 +397,7 @@ test("local tails can fail closed on retention gaps", async () => {
 test("an open stream reports the first unread sequence after overwrite", () => {
   withPool("slow-reader", ({ pool }) => {
     const seed = pool.append({ kind: "seed" });
-    const stream = pool.openStream(seed.seq, null, 500n, true);
+    const stream = pool.openFollow(FollowStart.sequence(seed.seq), null, 500n, true);
     try {
       assert.equal(parseMessage(stream.nextJson()).seq, seed.seq);
       const lost = pool.append({ kind: "lost" });
@@ -419,7 +420,7 @@ test("lite3 streams can fail closed on retention gaps", () => {
       const first = pool.append({ kind: "first" });
       fillPast(pool, first.seq);
 
-      const stream = pool.openLite3Stream(first.seq, null, BigInt(50), true);
+      const stream = pool.openLite3Follow(FollowStart.sequence(first.seq), null, BigInt(50), true);
       assert.throws(
         () => stream.next(),
         (err) => {
@@ -563,7 +564,7 @@ test("lite3 append/get/tail round-trips bytes", () => {
     const lite3Frame2 = pool.getLite3(seq2);
     assert.deepEqual(lite3Frame2.payload, lite3Frame.payload);
 
-    const stream = pool.openLite3Stream(seq2, BigInt(1), BigInt(50));
+    const stream = pool.openLite3Follow(FollowStart.sequence(seq2), BigInt(1), BigInt(50));
     const next = stream.next();
     assert.ok(next);
     assert.equal(next.seq, seq2);
@@ -604,7 +605,7 @@ test("remote tail encodes tags as repeated tag query params", async () => {
   try {
     const client = new RemoteClient("http://127.0.0.1:9700");
     const pool = new RemotePool(client, "demo");
-    for await (const message of pool.tail({
+    for await (const message of pool.follow({start: FollowStart.all(),
       tags: ["keep", "prod"],
       maxMessages: 1,
       timeoutMs: 10,
@@ -617,7 +618,7 @@ test("remote tail encodes tags as repeated tag query params", async () => {
     }
 
     assert.ok(capturedUrl, "expected fetch URL to be captured");
-    assert.equal(capturedUrl.pathname, "/v0/pools/demo/tail");
+    assert.equal(capturedUrl.pathname, "/v0/pools/demo/follow");
     assert.deepEqual(capturedUrl.searchParams.getAll("tag"), ["keep", "prod"]);
     assert.equal(capturedUrl.searchParams.get("max"), "1");
     assert.equal(capturedUrl.searchParams.get("timeout_ms"), "10");
@@ -650,7 +651,7 @@ test("remote tail preserves terminal retention-gap errors", async () => {
     await assert.rejects(
       async () =>
         pool
-          .tail({ sinceSeq: 7, errorOnGap: true })
+          .follow({ start: FollowStart.sequence(7), errorOnGap: true })
           [Symbol.asyncIterator]()
           .next(),
       (err) => {
@@ -785,7 +786,7 @@ test("UDP follow handshake is async, bounded, and safe when its pool closes", as
         resolve();
       }, 25);
     });
-    const opening = pool.follow({ live: false }).then(
+    const opening = pool.follow({start: FollowStart.all(),  finite: true }).then(
       (follow) => {
         openingSettled = true;
         openedFollow = follow;
@@ -891,7 +892,7 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
 
     udpClient = new UdpClient(`udp://127.0.0.1:${port}`);
     udpPool = udpClient.openPool("udp-sdk");
-    follow = await udpPool.follow({ start: UdpStart.sequence(original.seq + 1n), live: true });
+    follow = await udpPool.follow({ start: UdpStart.sequence(original.seq + 1n), finite: false });
 
     assert.equal(udpPool.sendJson({ origin: "json", value: 8 }, ["sensor"]), undefined);
     const jsonEvent = await nextUdpFrame(follow);
@@ -911,7 +912,7 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
     assert.equal(localPool.get(lite3Event.seq).data.value, 7);
 
     const largeStart = (1n << 53n) + 1n;
-    const largeFollow = await udpPool.follow({ start: UdpStart.sequence(largeStart), live: false });
+    const largeFollow = await udpPool.follow({ start: UdpStart.sequence(largeStart), finite: true });
     const largeProgress = await largeFollow.nextEvent(1000);
     assert.equal(largeProgress.startSeq, largeStart);
     largeFollow.close();
@@ -926,7 +927,7 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
     assert.equal(await cancelFollow.nextEvent(0n), null);
     cancelFollow.close();
 
-    const ownedFollow = await udpPool.followViews({ start: UdpStart.sequence(original.seq), live: false });
+    const ownedFollow = await udpPool.followViews({ start: UdpStart.sequence(original.seq), finite: true });
     let ownedFrame;
     for await (const event of ownedFollow) { if (event.kind === "frame") { ownedFrame = event; break; } }
     ownedFollow.close();
@@ -1025,7 +1026,7 @@ test("UDP native frames retain arrival order, duplicates, and uint64 metadata", 
   });
   udpClient = new UdpClient(`udp://127.0.0.1:${peer.address().port}`);
   udpPool = udpClient.openPool("sensors");
-  follow = await udpPool.follow({ start: UdpStart.last(4), live: false });
+  follow = await udpPool.follow({ start: UdpStart.last(4), finite: true });
   const events = [];
   for (let i = 0; i < 7; i++) events.push(await follow.nextEvent(1000));
   assert.equal(await follow.nextEvent(0), null);
@@ -1062,5 +1063,26 @@ test("numeric append receipts match stored frames without echoing data", () => {
     assert.throws(() => pool.appendIdentity(Buffer.from("bad")), PlasmiteNativeError);
     assert.throws(() => pool.appendLite3Identity(Buffer.from("bad")), PlasmiteNativeError);
     assert.equal(pool.appendIdentity({}).seq, 3n);
+  });
+});
+
+test("follow defaults to new messages and history requires a selection", async () => {
+  await withPoolAsync("follow-default", async ({pool}) => {
+    pool.append({old:1}, ["skip"]);
+    pool.append({old:2}, ["keep"]);
+    const stream = pool.openFollow();
+    try {
+      assert.equal((await stream.nextJsonWait(0)).status, 0);
+      const appended = pool.append({new:1}, ["keep"]);
+      const item = await stream.nextJsonWait(100);
+      assert.equal(item.status, 1);
+      assert.equal(JSON.parse(item.message.toString()).seq, Number(appended.seq));
+    } finally { stream.close(); }
+    const seen=[];
+    for await (const message of pool.follow({start:FollowStart.last(2), finite:true})) seen.push(message.seq);
+    assert.deepEqual(seen,[2n,3n]);
+    const views=[];
+    for await (const message of pool.followViews({start:FollowStart.all(), finite:true})) views.push(message.seq);
+    assert.deepEqual(views,[1n,2n,3n]);
   });
 });

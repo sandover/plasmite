@@ -81,11 +81,11 @@ test("stream requests also enforce transport security and reject redirects", asy
     const controller = new AbortController();
     const remote = new RemoteClient("https://service.example:9700", { token: "secret" });
     await assert.rejects(
-      remote._requestStream(new URL("https://service.example:9700/v0/pools/p/tail"), controller),
+      remote._requestStream(new URL("https://service.example:9700/v0/pools/p/follow"), controller),
       /redirected the request \(HTTP 307\); redirects are not followed/,
     );
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "https://service.example:9700/v0/pools/p/tail");
+    assert.equal(calls[0].url, "https://service.example:9700/v0/pools/p/follow");
     assert.equal(calls[0].options.redirect, "manual");
     assert.equal(calls[0].options.headers.Authorization, "Bearer secret");
   });
@@ -93,7 +93,7 @@ test("stream requests also enforce transport security and reject redirects", asy
   await withFetchStub(() => assert.fail("fetch must not run for an unsafe stream URL"), async (calls) => {
     const remote = new RemoteClient("https://service.example:9700", { token: "secret" });
     await assert.rejects(
-      remote._requestStream(new URL("http://service.example/v0/pools/p/tail"), new AbortController()),
+      remote._requestStream(new URL("http://service.example/v0/pools/p/follow"), new AbortController()),
       /bearer tokens require HTTPS outside loopback/,
     );
     assert.equal(calls.length, 0);

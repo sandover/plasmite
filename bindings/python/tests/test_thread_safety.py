@@ -1,3 +1,4 @@
+from plasmite import FollowStart
 """Exercise shared Python handles and close during native operations."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -108,12 +109,12 @@ class ThreadSafetyTests(unittest.TestCase):
 
     def test_stream_close_waits_for_native_next(self):
         cases = (
-            (self.pool.open_stream, "next_json", "plsm_stream_next", "plsm_stream_free"),
-            (self.pool.open_lite3_stream, "next", "plsm_lite3_stream_next", "plsm_lite3_stream_free"),
+            (self.pool.open_follow, "next_json", "plsm_stream_next", "plsm_stream_free"),
+            (self.pool.open_lite3_follow, "next", "plsm_lite3_stream_next", "plsm_lite3_stream_free"),
         )
-        for open_stream, method, native_next, native_free in cases:
+        for open_follow, method, native_next, native_free in cases:
             with self.subTest(method=method):
-                stream = open_stream(timeout_ms=20)
+                stream = open_follow(timeout_ms=20)
                 self.addCleanup(stream.close)
                 result = self._assert_close_waits(
                     stream, getattr(stream, method), "plasmite._LIB." + native_next,
@@ -126,12 +127,12 @@ class ThreadSafetyTests(unittest.TestCase):
     def test_stream_close_waits_for_result_copy_and_free(self):
         message = self.pool.append({"copy": "before close"})
         cases = (
-            (self.pool.open_stream, "next_json", "_buf_to_bytes", "plsm_stream_free"),
-            (self.pool.open_lite3_stream, "next", "_frame_to_py", "plsm_lite3_stream_free"),
+            (self.pool.open_follow, "next_json", "_buf_to_bytes", "plsm_stream_free"),
+            (self.pool.open_lite3_follow, "next", "_frame_to_py", "plsm_lite3_stream_free"),
         )
-        for open_stream, method, converter, native_free in cases:
+        for open_follow, method, converter, native_free in cases:
             with self.subTest(method=method):
-                stream = open_stream(since_seq=message.seq, max_messages=1, timeout_ms=20)
+                stream = open_follow(start=FollowStart.sequence(message.seq), max_messages=1, timeout_ms=20)
                 self.addCleanup(stream.close)
                 result = self._assert_close_waits(
                     stream, getattr(stream, method), "plasmite." + converter,
@@ -145,7 +146,7 @@ class ThreadSafetyTests(unittest.TestCase):
 
     def test_tail_yield_does_not_hold_pool_lock(self):
         first = self.pool.append({"index": 1})
-        tail = self.pool.tail(since_seq=first.seq, max_messages=2, timeout_ms=50)
+        tail = self.pool.follow(start=FollowStart.sequence(first.seq), max_messages=2, timeout_ms=50)
         self.addCleanup(tail.close)
         self.assertEqual(next(tail).data, first.data)
         with ThreadPoolExecutor(max_workers=1) as threads:
@@ -169,9 +170,9 @@ class ThreadSafetyTests(unittest.TestCase):
         self.assertIsNone(client._ptr)
 
     def test_bounded_waits_keep_position_and_allow_concurrent_cancel(self):
-        for opener in (self.pool.open_stream, self.pool.open_lite3_stream):
+        for opener in (self.pool.open_follow, self.pool.open_lite3_follow):
             with self.subTest(opener=opener.__name__):
-                stream = opener(since_seq=1, max_messages=1)
+                stream = opener(start=FollowStart.sequence(1), max_messages=1)
                 self.addCleanup(stream.close)
                 status, value = stream.next_wait(0)
                 if status == 0:
@@ -182,7 +183,7 @@ class ThreadSafetyTests(unittest.TestCase):
                 self.assertEqual(message.seq, 1)
                 self.assertEqual(stream.next_wait(0)[0], 2)
 
-                quiet = opener(since_seq=999, timeout_ms=3000)
+                quiet = opener(start=FollowStart.sequence(999), timeout_ms=3000)
                 self.addCleanup(quiet.close)
                 with ThreadPoolExecutor(max_workers=1) as threads:
                     pending = threads.submit(quiet.next_wait, 3000)
@@ -193,10 +194,10 @@ class ThreadSafetyTests(unittest.TestCase):
     def test_tail_event_cancels_a_quiet_wait(self):
         cancel = Event()
         with ThreadPoolExecutor(max_workers=1) as threads:
-            pending = threads.submit(list, self.pool.tail(since_seq=999, cancel=cancel, timeout_ms=3000))
+            pending = threads.submit(list, self.pool.follow(start=FollowStart.sequence(999), cancel=cancel, timeout_ms=3000))
             cancel.set()
             self.assertEqual(pending.result(timeout=1), [])
-        self.assertEqual(list(self.pool.tail(max_messages=0)), [])
+        self.assertEqual(list(self.pool.follow(start=FollowStart.all(), max_messages=0)), [])
 
 
 if __name__ == "__main__":

@@ -266,15 +266,19 @@ read, so closing a JavaScript wrapper cancels without freeing a worker's handle.
 Native JSON and Lite3 streams enable the same best-effort notifications as Rust
 tails. They retain bounded polling when notification setup or waiting fails.
 
-The CLI's interactive `follow` loop and the public API's `Tail`
-share `Pool` and `Cursor`, but have different contracts. CLI follow selects
-retained `--tail` history before filtering, resets its timeout after output,
-and reports dropped messages. Finite CLI follow and replay stop at the initial
-sequence boundary and hold only one owned message at a time. Remote history
-uses the existing bounds and tail protocol. API tails use sequence checkpoints,
-an absolute timeout, and an optional retention-gap error. Keep those policies at their interface
-boundaries; sharing a loop would make either interface inherit the other's
-behavior. Extract a rule only when both interfaces require the same result. Timed playback
+The CLI and language APIs expose `follow` with the same starting model: new
+messages by default, explicit all/last-N/time/sequence history, and an optional
+finite read bounded by the opening sequence. Local APIs share `TailState` across
+Rust and C adapters; bindings pass selections through that boundary. HTTP opens
+its reader before returning response headers. Go opens before returning channels;
+Python and JavaScript lazy iterators open on first iteration. UDP retains its
+separate arrival-order delivery contract while using the same selection vocabulary.
+
+Interface policies still differ where the existing contracts require it. CLI
+follow resets its timeout after output and reports dropped messages; native
+readers retain their documented deadlines or polling waits and optional gap
+errors. Sharing selection does not silently change those policies.
+Timed playback
 belongs to CLI follow; SDK callers use ordinary streams and control their own
 scheduling. Duplex uses the same input parser for terminals and pipes. It starts
 sending after the receiver chooses its initial position; successful input EOF

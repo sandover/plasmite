@@ -26,7 +26,7 @@ async function usage() {
 void usage;
 
 async function streamTypes(pool: Pool, udp: import('../types').UdpPool) {
-  for await (const message of pool.tailViews<Reading>({ maxMessages: 1 })) {
+  for await (const message of pool.followViews<Reading>({ maxMessages: 1 })) {
     const power: number = message.data.metrics.power;
     // @ts-expect-error streamed snapshots stay immutable
     message.data.metrics.power = power;
