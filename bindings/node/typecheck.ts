@@ -21,21 +21,16 @@ const pool = client.createPool("docs", 1024 * 1024);
 const pooled = client.openPool("docs", { create: true });
 const appended = pool.feedJson(Buffer.from("{}"), { durability: Durability.Fast });
 const fed = pool.feed({ kind: "note" }, { tags: ["tag"], durability: Durability.Fast });
-const parsed = parseMessage(appended);
-const parsedFromEnvelope = parseMessage({
+const parsedFromEnvelope: Message = parseMessage({
   seq: 1,
   time: "2026-02-18T00:00:00Z",
   data: { ok: true },
   meta: { tags: ["tag"] },
 });
-const typedMessage: Message = parsed;
 const retentionGap: ErrorKind = ErrorKind.RetentionGap;
-void appended;
 void pooled;
 void fed;
-void parsed;
 void parsedFromEnvelope;
-void typedMessage;
 void retentionGap;
 
 async function smokeRemote() {
@@ -50,6 +45,8 @@ async function smokeRemote() {
 }
 
 async function smokeLocalStreams() {
+  const parsed: Message = parseMessage(await appended);
+  void parsed;
   for await (const message of await pool.follow({ tags: ["tag"] })) {
     void message;
     break;

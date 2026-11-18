@@ -52,10 +52,6 @@ def _configure_unlocked():
     err = c.POINTER(c.POINTER(plsm_error_t))
     owner = c.POINTER(c.c_void_p)
     signatures = {
-        "plsm_internal_pool_get_view": (
-            [c.POINTER(plsm_pool_t), c.c_uint64, owner, err],
-            c.c_int,
-        ),
         "plsm_view_from_lite3": (
             [c.c_char_p, c.c_size_t, c.c_uint64, c.c_uint64, owner, err],
             c.c_int,
@@ -73,7 +69,7 @@ def _configure_unlocked():
             c.c_int,
         ),
         "plsm_pool_feed_view": (
-            [c.POINTER(plsm_pool_t), c.c_void_p, c.c_uint32, owner, err],
+            [c.POINTER(plsm_pool_t), c.c_void_p, c.POINTER(plsm_feed_options_t), owner, err],
             c.c_int,
         ),
         "plsm_builder_copy_value": (
@@ -128,7 +124,7 @@ def _configure_unlocked():
                 c.c_int,
             ),
             "plsm_pool_feed_builder_view": (
-                [c.POINTER(plsm_pool_t), c.c_void_p, c.c_uint32, owner, err],
+                [c.POINTER(plsm_pool_t), c.c_void_p, c.POINTER(plsm_feed_options_t), owner, err],
                 c.c_int,
             ),
             "plsm_builder_free": ([c.c_void_p], None),
@@ -359,18 +355,6 @@ def _json(ref):
         lib.plsm_buf_free(c.byref(output))
 
 
-def get(address, seq):
-    _configure()
-    out = c.c_void_p()
-    _call(
-        lib.plsm_internal_pool_get_view,
-        c.cast(address, c.POINTER(plsm_pool_t)),
-        seq,
-        c.byref(out),
-    )
-    return MessageView(out)
-
-
 def from_bytes(payload, seq, timestamp_ns):
     _configure()
     out = c.c_void_p()
@@ -415,7 +399,7 @@ def append(address, data, tags, durability):
     pool = c.cast(address, c.POINTER(plsm_pool_t))
     out = c.c_void_p()
     if type(data) is MessageView and tags is None:
-        _call(lib.plsm_pool_feed_view, pool, data._ptr, durability, c.byref(out))
+        _call(lib.plsm_pool_feed_view, pool, data._ptr, c.byref(plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability)), c.byref(out))
         return MessageView(out)
     if type(data) is MessageView:
         data = data.data
@@ -462,7 +446,7 @@ def append(address, data, tags, durability):
             )
         else:
             _write_container(builder, root.value, data)
-        _call(lib.plsm_pool_feed_builder_view, pool, builder, durability, c.byref(out))
+        _call(lib.plsm_pool_feed_builder_view, pool, builder, c.byref(plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability)), c.byref(out))
         return MessageView(out)
     finally:
         lib.plsm_builder_free(builder)

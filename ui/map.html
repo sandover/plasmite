@@ -237,7 +237,7 @@ Invariants: Message data enters the DOM as text.
       (() => {
         "use strict";
         const $ = (id) => document.getElementById(id);
-        const { parseJSON, followEvents, sequence, cursor, tailStart } = PlasmiteUI;
+        const { parseJSON, followEvents, readJsonEvents, sequence, cursor, tailStart } = PlasmiteUI;
         const scroll = $("map-scroll");
         const messages = $("messages");
         const cards = new Map();
@@ -1034,17 +1034,16 @@ Invariants: Message data enters the DOM as text.
 
         // Streams.
 
-        function follow(url, onEvent, { onDrop, onEnd } = {}) {
+        function follow(url, onEvent, { onDrop, onEnd, onResponse, read } = {}) {
           const controller = new AbortController();
           followEvents({
-            url, signal: controller.signal, retryMs, onDrop,
+            url, signal: controller.signal, retryMs, onDrop, read,
             onResponse(response) {
               if (response.status === 401) { location.assign("/ui"); return false; }
-              return response.status !== 403 && response.status !== 404;
+              return response.status !== 403 && response.status !== 404 && onResponse?.(response) !== false;
             },
             onEvent(event) {
               if (controller.signal.aborted) return false;
-              if (event.name === "error") throw new Error(event.data.error?.message || "Stream error");
               return onEvent(event);
             },
           }).finally(onEnd);
@@ -1067,32 +1066,27 @@ Invariants: Message data enters the DOM as text.
           state.stopList = null;
         }
 
-        // The server skips messages that were overwritten; that is normal for a
-        // ring, so the card shows no notice for it.
+        // Resume after overwritten messages. The catalog updates the card when
+        // a different pool takes over the name.
         function startReader(name) {
           stopReader();
           const stop = follow(() => {
-            const query = new URLSearchParams({ gap_policy: "continue" });
-            if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
-            return "/v0/ui/pools/" + encodeURIComponent(name) + "/events?" + query;
+            const query = new URLSearchParams();
+            if (state.nextSeq != null) query.set("since", cursor(state.nextSeq));
+            return "/v2/pools/" + encodeURIComponent(name) + "/follow?" + query;
           }, (event) => {
-            if (event.name === "pool") {
-              const pool = currentPool();
-              if (!pool || pool.name !== name) return false;
-              if (pool.incarnation !== event.data.incarnation) {
-                Object.assign(pool, event.data, { ring: null });
-                state.spotSeq = null;
-                hover(null);
-                state.nextSeq = tailStart(event.data.bounds || {}, maxMessages);
-                messages.replaceChildren();
-                showPeekSummary();
-                updateCards();
-                showNotice("This pool was replaced. Showing its retained messages.");
-                throw new Error("Pool replaced");
-              }
+            if (event.name === "cutoff") state.nextSeq = event.data.next_seq;
+            if (event.name === "error") {
+              const error = event.data.error;
+              if (error?.kind === "RetentionGap") state.nextSeq = error.next_seq;
+              throw new Error(error?.message || "Stream error");
             }
             if (event.name === "message") addMessage(event.data);
           }, {
+            read: readJsonEvents,
+            onResponse(response) {
+              return !response.ok || response.headers.get("plasmite-incarnation") === currentPool()?.incarnation;
+            },
             onEnd: () => { if (state.stopReader === stop) state.stopReader = null; },
           });
           state.stopReader = stop;

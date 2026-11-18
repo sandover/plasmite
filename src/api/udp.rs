@@ -2,10 +2,6 @@
 //! Exports: `UdpClient`, `UdpPool`, `UdpFollow`, and UDP event types.
 //! Role: Keep the UDP transport separate from committed HTTP append semantics.
 //! Invariants: Resolve one server endpoint per client; deliver DATA in arrival order.
-#![expect(
-    clippy::result_large_err,
-    reason = "the public API uses the shared Error type like sibling API modules"
-)]
 
 use super::message::ReadStart;
 use super::{Message, PoolRef, Read, Since};
@@ -66,8 +62,8 @@ impl UdpFrame {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UdpEvent {
     Frame(UdpFrame),
-    /// Compatibility name for an explicit server SKIP, never inferred network loss.
-    Gap {
+    /// A range the server explicitly skipped.
+    Skip {
         first: u64,
         last: u64,
         reason: UdpSkipReason,
@@ -77,15 +73,14 @@ pub enum UdpEvent {
         next_seq: u64,
         end_seq: Option<u64>,
         terminal: bool,
-        retention_gap: bool,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UdpStreamEvent<F> {
     Frame(F),
-    /// Compatibility name for an explicit server SKIP, never inferred network loss.
-    Gap {
+    /// A range the server explicitly skipped.
+    Skip {
         first: u64,
         last: u64,
         reason: UdpSkipReason,
@@ -95,7 +90,6 @@ pub enum UdpStreamEvent<F> {
         next_seq: u64,
         end_seq: Option<u64>,
         terminal: bool,
-        retention_gap: bool,
     },
 }
 
@@ -106,11 +100,11 @@ impl From<UdpStreamEvent<UdpFrame>> for UdpEvent {
     fn from(event: UdpStreamEvent<UdpFrame>) -> Self {
         match event {
             UdpStreamEvent::Frame(frame) => Self::Frame(frame),
-            UdpStreamEvent::Gap {
+            UdpStreamEvent::Skip {
                 first,
                 last,
                 reason,
-            } => Self::Gap {
+            } => Self::Skip {
                 first,
                 last,
                 reason,
@@ -120,13 +114,11 @@ impl From<UdpStreamEvent<UdpFrame>> for UdpEvent {
                 next_seq,
                 end_seq,
                 terminal,
-                retention_gap,
             } => Self::Progress {
                 start_seq,
                 next_seq,
                 end_seq,
                 terminal,
-                retention_gap,
             },
         }
     }
@@ -231,7 +223,7 @@ impl UdpPool {
         // Lite3's native reader needs aligned storage. A caller can pass a slice
         // starting at any byte, so validate a copy before forwarding the exact bytes.
         let aligned = document.to_vec();
-        validate_bytes(&aligned)?;
+        crate::core::lite3::validate_feed_bytes(&aligned)?;
 
         let mut packet = Vec::with_capacity(self.name.len() + 1 + document.len());
         packet.extend_from_slice(self.name.as_bytes());
@@ -278,10 +270,6 @@ impl UdpPool {
         live: bool,
         admit: fn(u64, u64, &[u8]) -> Result<F, Error>,
     ) -> Result<FollowReader<F>, Error> {
-        if read.until.is_some() {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("UDP does not support HTTP continuation bounds"));
-        }
         let start = match read.start {
             ReadStart::Default => UdpStart::New,
             ReadStart::Since(Since::Oldest) => UdpStart::all(),
@@ -534,7 +522,11 @@ impl<F> FollowReader<F> {
                 }
                 self.accept_skip(decode_control(body, "UDP skip")?)?;
             }
-            wire::ERROR => return Err(decode_failure(body)?),
+            wire::ERROR => {
+                let error = decode_failure(body)?;
+                self.close();
+                return Err(error);
+            }
             _ => return Ok(()),
         }
         self.refresh_liveness();
@@ -609,16 +601,11 @@ impl<F> FollowReader<F> {
                 end_seq: progress.end_seq,
             });
         }
-        if progress.retention_gap {
-            return Err(Error::new(ErrorKind::RetentionGap)
-                .with_message("UDP server reported a retention gap"));
-        }
         self.pending.push_back(UdpStreamEvent::Progress {
             start_seq: progress.start_seq,
             next_seq: progress.next_seq,
             end_seq: progress.end_seq,
             terminal: progress.terminal,
-            retention_gap: progress.retention_gap,
         });
         if progress.terminal {
             self.terminal_seen = true;
@@ -649,16 +636,21 @@ impl<F> FollowReader<F> {
     }
 
     fn accept_skip(&mut self, skip: wire::Skip) -> Result<(), Error> {
-        if skip.first > skip.last || matches!(skip.reason, UdpSkipReason::Unknown) {
+        if skip.first == 0
+            || skip.first > skip.last
+            || skip.last == u64::MAX
+            || matches!(skip.reason, UdpSkipReason::Unknown)
+        {
             return Err(protocol_error("UDP skip range or reason is invalid"));
         }
         if skip.reason == UdpSkipReason::Retention {
+            self.close();
             return Err(Error::retention_gap(
                 skip.first,
                 skip.last.saturating_add(1),
             ));
         }
-        self.pending.push_back(UdpStreamEvent::Gap {
+        self.pending.push_back(UdpStreamEvent::Skip {
             first: skip.first,
             last: skip.last,
             reason: skip.reason,
@@ -965,9 +957,15 @@ fn decode_failure(body: &[u8]) -> Result<Error, Error> {
         "RetentionGap" => ErrorKind::RetentionGap,
         _ => return Err(protocol_error("UDP server sent an unknown error kind")),
     };
-    if let (ErrorKind::RetentionGap, Some(missing), Some(next)) =
-        (kind, failure.missing, failure.next_seq)
-    {
+    if kind == ErrorKind::RetentionGap {
+        let (Some(missing), Some(next)) = (failure.missing, failure.next_seq) else {
+            return Err(protocol_error("UDP retention error has no sequence range"));
+        };
+        if missing == 0 || next <= missing {
+            return Err(protocol_error(
+                "UDP retention error has an invalid sequence range",
+            ));
+        }
         return Ok(Error::retention_gap(missing, next).with_message(failure.message));
     }
     Ok(Error::new(kind).with_message(failure.message))

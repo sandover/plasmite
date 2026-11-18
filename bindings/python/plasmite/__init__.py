@@ -184,7 +184,6 @@ class plsm_udp_event_t(Structure):
         ("end_seq", c_uint64),
         ("has_end", c_uint8),
         ("terminal", c_uint8),
-        ("retention_gap", c_uint8),
         ("reserved", c_uint8),
         ("payload", plsm_buf_t),
     ]
@@ -242,17 +241,16 @@ class plsm_feed_options_t(Structure):
 
 def _load_lib() -> CDLL:
     if sys.platform == "win32":
-        versioned, cargo_name = "plasmite2.dll", "plasmite.dll"
+        versioned = "plasmite2.dll"
     elif sys.platform == "darwin":
-        versioned, cargo_name = "libplasmite.2.dylib", "libplasmite.dylib"
+        versioned = "libplasmite.2.dylib"
     else:
-        versioned, cargo_name = "libplasmite.so.2", "libplasmite.so"
+        versioned = "libplasmite.so.2"
     env_dir = os.environ.get("PLASMITE_LIB_DIR")
     if env_dir:
-        for name in (versioned, cargo_name):
-            candidate = Path(env_dir).resolve() / name
-            if candidate.is_file():
-                return _check_abi(CDLL(str(candidate)))
+        candidate = Path(env_dir).resolve() / versioned
+        if candidate.is_file():
+            return _check_abi(CDLL(str(candidate)))
         raise OSError(f"Plasmite 2 library not found in {env_dir}")
     candidate = Path(__file__).resolve().parent / "_native" / versioned
     if candidate.is_file():
@@ -276,7 +274,6 @@ def _check_abi(lib: CDLL) -> CDLL:
 _LIB = _load_lib()
 
 DEFAULT_POOL_SIZE_BYTES = 1024 * 1024
-DEFAULT_POOL_SIZE = DEFAULT_POOL_SIZE_BYTES
 _UINT64_MAX = (1 << 64) - 1
 
 
@@ -343,7 +340,7 @@ _LIB.plsm_pool_feed_json.argtypes = [
 _LIB.plsm_pool_feed_json.restype = c_int
 for _open_reader in (
     _LIB.plsm_pool_follow, _LIB.plsm_pool_fetch,
-    _LIB.plsm_pool_follow_view, _LIB.plsm_pool_fetch_view,
+    _LIB.plsm_pool_follow, _LIB.plsm_pool_fetch,
 ):
     _open_reader.argtypes = [
         POINTER(plsm_pool_t), POINTER(plsm_read_options_t),
@@ -373,21 +370,7 @@ for _name in ("plsm_pool_feed_json_receipt", "plsm_pool_feed_lite3_receipt"):
     ]
     _function.restype = c_int
 
-_LIB.plsm_internal_pool_get_json.argtypes = [
-    POINTER(plsm_pool_t),
-    c_uint64,
-    POINTER(plsm_buf_t),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_internal_pool_get_json.restype = c_int
 
-_LIB.plsm_internal_pool_get_lite3.argtypes = [
-    POINTER(plsm_pool_t),
-    c_uint64,
-    POINTER(plsm_lite3_frame_t),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_internal_pool_get_lite3.restype = c_int
 
 for _name in ("plsm_pool_follow_lite3", "plsm_pool_fetch_lite3"):
     _function = getattr(_LIB, _name)
@@ -398,12 +381,6 @@ for _name in ("plsm_pool_follow_lite3", "plsm_pool_fetch_lite3"):
     _function.restype = c_int
 
 
-_LIB.plsm_stream_next.argtypes = [
-    POINTER(plsm_stream_t),
-    POINTER(plsm_buf_t),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_stream_next.restype = c_int
 _LIB.plsm_stream_next_wait.argtypes = [POINTER(plsm_stream_t), c_uint64, POINTER(plsm_buf_t), POINTER(POINTER(plsm_error_t))]
 _LIB.plsm_stream_next_wait.restype = c_int
 _LIB.plsm_stream_cancel.argtypes = [POINTER(plsm_stream_t)]
@@ -414,12 +391,6 @@ _LIB.plsm_lite3_stream_cancel.argtypes = [POINTER(plsm_lite3_stream_t)]
 _LIB.plsm_lite3_stream_cancel.restype = None
 
 
-_LIB.plsm_lite3_stream_next.argtypes = [
-    POINTER(plsm_lite3_stream_t),
-    POINTER(plsm_lite3_frame_t),
-    POINTER(POINTER(plsm_error_t)),
-]
-_LIB.plsm_lite3_stream_next.restype = c_int
 
 _LIB.plsm_stream_free.argtypes = [POINTER(plsm_stream_t)]
 _LIB.plsm_stream_free.restype = None
@@ -457,6 +428,7 @@ _LIB.plsm_udp_pool_feed_lite3.argtypes = [
     POINTER(plsm_udp_pool_t),
     c_char_p,
     c_size_t,
+    POINTER(plsm_feed_options_t),
     POINTER(POINTER(plsm_error_t)),
 ]
 _LIB.plsm_udp_pool_feed_lite3.restype = c_int
@@ -583,7 +555,7 @@ def _tag_array(values: Iterable[str]):
 
 
 def _closed_error(target: str) -> PlasmiteError:
-    return PlasmiteError(ErrorKind.USAGE, f"plasmite: {target} is closed")
+    return UsageError(ErrorKind.USAGE, f"plasmite: {target} is closed")
 
 
 def _require_open(ptr: object, target: str) -> None:
@@ -642,6 +614,32 @@ _DURATION_UNITS = dict(ns=1, us=1000, ms=1000000, s=10**9, m=60*10**9,
 
 def _timedelta_ns(value: timedelta) -> int:
     return ((value.days * 86400 + value.seconds) * 10**6 + value.microseconds) * 1000
+
+
+def _wait_deadline(wait):
+    from math import isfinite
+    from time import monotonic_ns
+
+    if wait is None:
+        return None
+    if isinstance(wait, timedelta):
+        nanos = _timedelta_ns(wait)
+    elif type(wait) is int or type(wait) is float and isfinite(wait * 10**9):
+        nanos = int(wait * 10**9)
+    else:
+        raise UsageError(ErrorKind.USAGE, "wait must be a duration in seconds or a timedelta")
+    if nanos < 0:
+        raise UsageError(ErrorKind.USAGE, "wait must be non-negative")
+    return monotonic_ns() + nanos
+
+
+def _wait_ms(deadline, cancel):
+    from time import monotonic_ns
+
+    limit = 50 if cancel is not None else _UINT64_MAX
+    if deadline is None:
+        return limit
+    return min(limit, max(0, (deadline - monotonic_ns() + 999_999) // 1_000_000))
 
 
 def _parse_time_ns(text: str) -> int:
@@ -795,6 +793,11 @@ class Pool:
         durability: Durability = Durability.FAST,
     ) -> Message:
         """Store an object or forward a message with a new sequence and time."""
+        from ._views import MessageView
+        if isinstance(value, MessageView):
+            if tags is not None:
+                raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
+            return self.feed_lite3(memoryview(value), durability)
         if isinstance(value, Message):
             if tags is not None:
                 raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
@@ -831,6 +834,11 @@ class Pool:
         self, value, tags: Iterable[str] | None = None,
         durability: Durability = Durability.FAST,
     ) -> FeedReceipt:
+        from ._views import MessageView
+        if isinstance(value, MessageView):
+            if tags is not None:
+                raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
+            return self.feed_lite3_receipt(memoryview(value), durability)
         if isinstance(value, Message):
             if tags is not None:
                 raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
@@ -852,16 +860,11 @@ class Pool:
 
     @_serialized_handle
     def _get_json(self, seq: int) -> bytes:
-        _require_open(self._ptr, "pool")
-        seq = _ensure_non_negative_int(seq, "seq")
-        buf = plsm_buf_t()
-        out_err = POINTER(plsm_error_t)()
-        native_seq = c_uint64(seq)
-        _require_open(self._ptr, "pool")
-        rc = _LIB.plsm_internal_pool_get_json(self._ptr, native_seq, byref(buf), byref(out_err))
-        if rc != 0:
-            raise _take_error(out_err)
-        return _buf_to_bytes(buf)
+        stream = self._open_stream(_LIB.plsm_pool_fetch, seq, None, None)
+        try:
+            return _required_record(stream.next_json(), seq)
+        finally:
+            stream.close()
 
     @_serialized_handle
     def feed_view(self, value, tags=None, durability=Durability.FAST):
@@ -877,26 +880,13 @@ class Pool:
             raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
         return append_view(self, value, tags, durability)
 
-    @_serialized_handle
     def _get_view(self, seq: int):
-        """Return an immutable Lite3 snapshot with native container access."""
-        _require_open(self._ptr, "pool")
-        from ._views import get_view
+        with self.fetch_view(since=seq) as stream:
+            return _required_record(next(stream, None), seq)
 
-        return get_view(self, seq)
-
-    @_serialized_handle
     def _get_lite3(self, seq: int) -> Lite3Frame:
-        _require_open(self._ptr, "pool")
-        seq = _ensure_non_negative_int(seq, "seq")
-        frame = plsm_lite3_frame_t()
-        out_err = POINTER(plsm_error_t)()
-        native_seq = c_uint64(seq)
-        _require_open(self._ptr, "pool")
-        rc = _LIB.plsm_internal_pool_get_lite3(self._ptr, native_seq, byref(frame), byref(out_err))
-        if rc != 0:
-            raise _take_error(out_err)
-        return _frame_to_py(frame)
+        with self.fetch_lite3(since=seq) as reader:
+            return _required_record(reader.next(), seq)
 
     @_serialized_handle
     def _open_stream(self, open_native, since, last, tags, *, lite3=False):
@@ -925,11 +915,11 @@ class Pool:
 
     def fetch_view(self, *, since=None, last=None, tags=None, cancel=None):
         from ._views import ViewStream
-        return ViewStream(self._open_stream(_LIB.plsm_pool_fetch_view, since, last, tags), cancel)
+        return ViewStream(self._open_stream(_LIB.plsm_pool_fetch, since, last, tags), cancel)
 
     def follow_view(self, *, since=None, last=None, tags=None, cancel=None):
         from ._views import ViewStream
-        return ViewStream(self._open_stream(_LIB.plsm_pool_follow_view, since, last, tags), cancel)
+        return ViewStream(self._open_stream(_LIB.plsm_pool_follow, since, last, tags), cancel)
 
     def follow(self, *, since=None, last=None, tags=None, cancel=None) -> Reader:
         """Open a live reader now. With no selection, read new messages."""
@@ -953,6 +943,12 @@ class Pool:
         self.close()
 
 
+def _required_record(value, seq):
+    if value is None:
+        raise NotFoundError(ErrorKind.NOT_FOUND, "message not found", seq=seq)
+    return value
+
+
 class Stream:
     def __init__(self, ptr: POINTER(plsm_stream_t)) -> None:
         self._lock = RLock()
@@ -964,10 +960,10 @@ class Stream:
         _require_open(self._ptr, "stream")
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_stream_next(self._ptr, byref(buf), byref(out_err))
+        rc = _LIB.plsm_stream_next_wait(self._ptr, (1 << 64) - 1, byref(buf), byref(out_err))
         if rc == 1:
             return _buf_to_bytes(buf)
-        if rc == 0:
+        if rc in (2, 3):
             return None
         raise _take_error(out_err)
 
@@ -1027,7 +1023,6 @@ class Reader:
     def __init__(self, stream: Stream | Lite3Stream, cancel: Event | None) -> None:
         self._stream = stream
         self._cancel = cancel
-        self._read = stream.next_json if isinstance(stream, Stream) else stream.next
         self._decode = parse_message if isinstance(stream, Stream) else lambda frame: frame
         self._closed = False
 
@@ -1037,32 +1032,24 @@ class Reader:
     def __next__(self) -> Message | Lite3Frame:
         return self.next()
 
-    def next(self, wait: timedelta | None = None) -> Message | Lite3Frame | None:
-        """Return the next message, or None if the per-call wait expires."""
-        remaining = None if wait is None else _timedelta_ns(wait)
-        if remaining is not None and remaining < 0:
-            raise UsageError(ErrorKind.USAGE, "wait must be non-negative")
-        if self._closed:
-            raise StopIteration
-        if self._cancel is None and remaining is None:
-            payload = self._read()
-            if payload is not None:
-                return self._decode(payload)
-        else:
-            from time import monotonic_ns
+    def next(self, wait: timedelta | float | None = None) -> Message | Lite3Frame | None:
+        """Return a message, or None if the wait in seconds or timedelta expires."""
+        from time import monotonic_ns
 
-            deadline = None if remaining is None else monotonic_ns() + remaining
-            while self._cancel is None or not self._cancel.is_set():
-                wait_ms = 50
-                if deadline is not None:
-                    wait_ms = min(wait_ms, max(0, (deadline - monotonic_ns() + 999999) // 1000000))
-                status, payload = self._stream.next_wait(wait_ms)
-                if status == 1:
-                    return self._decode(payload)
-                if status in (2, 3):
-                    break
-                if deadline is not None and monotonic_ns() >= deadline:
-                    return None
+        deadline = _wait_deadline(wait)
+        while not self._closed and (self._cancel is None or not self._cancel.is_set()):
+            try:
+                status, payload = self._stream.next_wait(_wait_ms(deadline, self._cancel))
+            except UsageError:
+                if self._closed:
+                    raise StopIteration from None
+                raise
+            if status == 1:
+                return self._decode(payload)
+            if status in (2, 3):
+                break
+            if deadline is not None and monotonic_ns() >= deadline:
+                return None
         self.close()
         raise StopIteration
 
@@ -1088,10 +1075,10 @@ class Lite3Stream:
         _require_open(self._ptr, "stream")
         frame = plsm_lite3_frame_t()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_lite3_stream_next(self._ptr, byref(frame), byref(out_err))
+        rc = _LIB.plsm_lite3_stream_next_wait(self._ptr, (1 << 64) - 1, byref(frame), byref(out_err))
         if rc == 1:
             return _frame_to_py(frame)
-        if rc == 0:
+        if rc in (2, 3):
             return None
         raise _take_error(out_err)
 
@@ -1169,8 +1156,8 @@ class UdpFrame:
 
 
 @dataclass(frozen=True)
-class UdpGap:
-    """Compatibility name for an explicit server skip, never inferred packet loss."""
+class UdpSkip:
+    """A range the server explicitly skipped."""
 
     first: int
     last: int
@@ -1183,10 +1170,9 @@ class UdpProgress:
     next_seq: int
     end_seq: int | None
     terminal: bool
-    retention_gap: bool
 
 
-UdpEvent = UdpFrame | UdpGap | UdpProgress
+UdpEvent = UdpFrame | UdpSkip | UdpProgress
 
 
 class UdpClient:
@@ -1249,17 +1235,19 @@ class UdpPool:
         self._ptr = ptr
 
     @_serialized_handle
-    def feed_lite3(self, payload: bytes | bytearray | memoryview) -> None:
+    def feed_lite3(self, payload: bytes | bytearray | memoryview, durability=Durability.FAST) -> None:
         _require_open(self._ptr, "UDP pool")
         payload = _ensure_bytes(payload, "payload")
         if not payload:
             raise ValueError("payload is required")
         out_err = POINTER(plsm_error_t)()
         _require_open(self._ptr, "UDP pool")
+        options = plsm_feed_options_t(sizeof(plsm_feed_options_t), int(durability))
         rc = _LIB.plsm_udp_pool_feed_lite3(
             self._ptr,
             payload,
             c_size_t(len(payload)),
+            byref(options),
             byref(out_err),
         )
         if rc != 0:
@@ -1268,6 +1256,11 @@ class UdpPool:
     @_serialized_handle
     def feed(self, value, tags=None, durability=Durability.FAST) -> None:
         _require_open(self._ptr, "UDP pool")
+        from ._views import MessageView
+        if isinstance(value, MessageView):
+            if tags is not None:
+                raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
+            return self.feed_lite3(memoryview(value), durability)
         if isinstance(value, Message):
             if tags is not None:
                 raise UsageError(ErrorKind.USAGE, "cannot supply tags when forwarding a message")
@@ -1280,20 +1273,20 @@ class UdpPool:
         if _LIB.plsm_udp_pool_feed_json(self._ptr, payload, len(payload), byref(options), byref(error)) != 0:
             raise _take_error(error)
 
-    def follow(self, *, since=None, last=None, tags=None) -> UdpFollow:
-        return self._read(True, False, since, last, tags)
+    def follow(self, *, since=None, last=None, tags=None, cancel=None) -> UdpFollow:
+        return self._read(True, False, since, last, tags, cancel)
 
-    def fetch(self, *, since=None, last=None, tags=None) -> UdpFollow:
-        return self._read(False, False, since, last, tags)
+    def fetch(self, *, since=None, last=None, tags=None, cancel=None) -> UdpFollow:
+        return self._read(False, False, since, last, tags, cancel)
 
-    def follow_view(self, *, since=None, last=None, tags=None) -> UdpFollow:
-        return self._read(True, True, since, last, tags)
+    def follow_view(self, *, since=None, last=None, tags=None, cancel=None) -> UdpFollow:
+        return self._read(True, True, since, last, tags, cancel)
 
-    def fetch_view(self, *, since=None, last=None, tags=None) -> UdpFollow:
-        return self._read(False, True, since, last, tags)
+    def fetch_view(self, *, since=None, last=None, tags=None, cancel=None) -> UdpFollow:
+        return self._read(False, True, since, last, tags, cancel)
 
     @_serialized_handle
-    def _read(self, live, views, since, last, tags) -> UdpFollow:
+    def _read(self, live, views, since, last, tags, cancel) -> UdpFollow:
         _require_open(self._ptr, "UDP pool")
         kind, value = _read_start(since, last)
         encoded, values = _tag_array([] if tags is None else tags)
@@ -1303,7 +1296,7 @@ class UdpPool:
         _require_open(self._ptr, "UDP pool")
         if _LIB.plsm_udp_pool_read(self._ptr, byref(options), live, views, byref(native), byref(error)) != 0:
             raise _take_error(error)
-        return UdpFollow(native, views=views)
+        return UdpFollow(native, views=views, cancel=cancel)
 
     @_serialized_handle
     def close(self) -> None:
@@ -1326,32 +1319,35 @@ class UdpPool:
 class UdpFollow:
     """Best-effort UDP event stream. Close cancels a blocked wait."""
 
-    def __init__(self, ptr: POINTER(plsm_udp_follow_t), *, views=False) -> None:
+    def __init__(self, ptr: POINTER(plsm_udp_follow_t), *, views=False, cancel=None) -> None:
         self._state_lock = RLock()
         self._read_lock = Lock()
         self._ptr = ptr
         self._closing = False
         self._cancelled = False
         self._views = views
+        self._cancel = cancel
+        self._finished = False
 
-    def next_event(self, timeout_ms: int | None = None) -> UdpEvent | MessageView | None:
-        timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
-        if timeout_ms is not None:
-            timeout_ms = c_uint64(timeout_ms).value
+    def next_event(self, wait: timedelta | float | None = None) -> UdpEvent | MessageView | None:
+        from time import monotonic_ns
+
+        deadline = _wait_deadline(wait)
         if self._views:
             from ._views import backend
             adopt_owner = backend.adopt_owner
         with self._read_lock:
             with self._state_lock:
-                _require_open(self._ptr, "UDP follow")
-                if self._closing or self._cancelled:
+                if not self._ptr or self._closing or self._cancelled or self._finished:
                     return None
                 ptr = self._ptr
-            remaining = timeout_ms
             while True:
+                if self._cancel is not None and self._cancel.is_set():
+                    self.cancel()
+                    return None
                 event = plsm_udp_event_t()
                 out_err = POINTER(plsm_error_t)()
-                wait_ms = 1000 if remaining is None else remaining
+                wait_ms = _wait_ms(deadline, self._cancel)
                 owner = c_void_p()
                 if self._views:
                     rc = _LIB.plsm_udp_follow_next_view(
@@ -1370,16 +1366,18 @@ class UdpFollow:
                     return _udp_event_to_python(event)
                 if rc == 2 or rc == 3:
                     with self._state_lock:
-                        self._cancelled = rc == 3
+                        self._finished = True
                     return None
                 if rc < 0:
                     raise _take_error(out_err)
-                if remaining is not None:
-                    if remaining == 0:
-                        return None
-                    remaining -= wait_ms
-                    if remaining <= 0:
-                        return None
+                if deadline is not None and monotonic_ns() >= deadline:
+                    return None
+
+    def next(self, wait: timedelta | float | None = None) -> UdpEvent | MessageView | None:
+        event = self.next_event(wait)
+        if event is None and (self._finished or self._closing or self._cancelled or not self._ptr):
+            raise StopIteration
+        return event
 
     def events(self) -> Generator[UdpEvent | MessageView, None, None]:
         while True:
@@ -1392,10 +1390,7 @@ class UdpFollow:
         return self
 
     def __next__(self) -> UdpEvent | MessageView:
-        event = self.next_event()
-        if event is None:
-            raise StopIteration
-        return event
+        return self.next()
 
     def cancel(self) -> None:
         with self._state_lock:
@@ -1438,14 +1433,13 @@ def _udp_event_to_python(event: plsm_udp_event_t) -> UdpEvent:
             return UdpFrame(int(event.seq), int(event.time), payload)
         if event.kind == 2:
             reasons = {0: "unknown", 1: "oversized", 2: "retention", 3: "pressure"}
-            return UdpGap(int(event.first), int(event.last), reasons.get(int(event.reason), "unknown"))
+            return UdpSkip(int(event.first), int(event.last), reasons.get(int(event.reason), "unknown"))
         if event.kind == 3:
             return UdpProgress(
                 int(event.start_seq),
                 int(event.next_seq),
                 int(event.end_seq) if event.has_end else None,
                 bool(event.terminal),
-                bool(event.retention_gap),
             )
         raise PlasmiteError(ErrorKind.INTERNAL, f"plasmite: unknown UDP event kind {event.kind}")
     finally:
@@ -1516,7 +1510,7 @@ __all__ = [
     "UdpPool",
     "UdpFollow",
     "UdpFrame",
-    "UdpGap",
+    "UdpSkip",
     "UdpProgress",
     "Durability",
     "ErrorKind",
@@ -1531,7 +1525,6 @@ __all__ = [
     "InternalError",
     "RetentionGapError",
     "DEFAULT_POOL_DIR",
-    "DEFAULT_POOL_SIZE",
     "DEFAULT_POOL_SIZE_BYTES",
     "default_pool_dir",
     "parse_message",

@@ -164,7 +164,7 @@ fn run(
                                 seen.frames.push((seq - 1, at));
                             }
                         }
-                        Ok(Some(UdpEvent::Gap { first, last, .. })) => {
+                        Ok(Some(UdpEvent::Skip { first, last, .. })) => {
                             seen.gaps += (last - first + 1) as usize
                         }
                         Ok(_) => (),

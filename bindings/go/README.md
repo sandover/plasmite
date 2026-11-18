@@ -189,18 +189,14 @@ for {
 }
 ```
 
-`Next` returns a `*udp.Frame`, `*udp.Gap`, or `*udp.Progress` through the
+`Next` returns a `*udp.Frame`, `*udp.Skip`, or `*udp.Progress` through the
 `udp.Event` interface. Frames include the original Lite3 bytes and a decoded
 `*api.Message`. Cancel the context to stop a blocked wait. A UDP follow requires
 the server's explicit `--udp-follow` setting; it never switches to HTTP.
 
 ### Concurrent use
 
-Client, Pool, Stream, and Lite3Stream methods serialize access to each native
-handle, including Close. A Follow goroutine retains an independent stream while
-foreground pool operations run; closing its Pool ends the high-level tail. Handles must not be copied. Close waits
-for an active native read; set a finite stream timeout for bounded shutdown.
-Independent handles may run concurrently, and message values are owned snapshots.
+Client, pool and reader methods serialize access to each native handle. A reader owns a separate handle and can keep reading after its pool closes. Use a context with a deadline to bound each `Next(ctx)` call.
 
 For playback timing, use ordinary streams and an application scheduler; see the
 [2.0 upgrade guide](../../docs/record/upgrading-2.0.md#applications-control-playback-timing).
@@ -335,7 +331,7 @@ caller's source variable without changing the source snapshot already visited.
 
 `udp.Pool.FollowView` uses the `Follow.Next(ctx)`, `Cancel` and `Close`
 lifecycle. DATA arrives as `*udp.ViewFrame` with an ordinary
-`*local.MessageView` in `View`; Gap and Progress keep their existing types.
+`*local.MessageView` in `View`; Skip and Progress keep their existing types.
 `FollowLite3` returns the exact owned payload. `Follow` also decodes the message.
 All three retain arrival order, late and
 duplicate packets, server skip/progress records and finite completion. No
@@ -359,3 +355,16 @@ retained history. Pass `Since` or `Last` to select a starting point and use
 a duration, or an instant marked by `At`. Each `Next(ctx)` call uses its own
 context and leaves the reader open if the context expires. Call `Close` when
 you finish reading.
+
+### HTTPS pools
+
+Save a connection with `plasmite access connect https://pools.example.net:9743`, then pass the HTTPS pool reference to the same client.
+
+```go
+pool, err := client.OpenPool("https://pools.example.net:9743/events", plasmite.Create(true))
+if err != nil { return err }
+defer pool.Close()
+_, err = pool.Feed(map[string]any{"ready": true}, []string{"status"})
+```
+
+`CreatePool` accepts the same reference and an explicit size. Use `WithDurability` on any feed variant to request a flush.

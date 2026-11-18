@@ -19,7 +19,7 @@ class ViewABI:
         self.lib.plsm_view_from_lite3.argtypes = [c.c_char_p, c.c_size_t,
             c.c_uint64, c.c_uint64, owner, error]
         self.lib.plsm_view_from_lite3.restype = c.c_int
-        self.lib.plsm_pool_feed_view.argtypes = [pool, c.c_void_p, c.c_uint32, owner, error]
+        self.lib.plsm_pool_feed_view.argtypes = [pool, c.c_void_p, c.c_void_p, owner, error]
         self.lib.plsm_pool_feed_view.restype = c.c_int
         for name in ['plsm_view_seq', 'plsm_view_time']:
             function = getattr(self.lib, name)

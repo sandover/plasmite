@@ -18,6 +18,8 @@ func (p *Pool) FeedView(value any, tags []string, options ...FeedOption) (*Messa
 		return nil, closedError("pool")
 	}
 	switch message := value.(type) {
+	case MessageView:
+		return p.FeedView(&message, tags, options...)
 	case *MessageView:
 		if message == nil || len(message.encoded) == 0 {
 			return nil, invalidArgumentError("missing message view")
@@ -27,6 +29,11 @@ func (p *Pool) FeedView(value any, tags []string, options ...FeedOption) (*Messa
 		}
 		snapshot := *message // options may reassign the caller's view variable
 		return p.forwardView(&snapshot, api.ApplyFeedOptions(options...).Durability)
+	case api.Message:
+		if tags != nil {
+			return nil, invalidArgumentError("cannot supply tags when forwarding a message")
+		}
+		return p.FeedJSONView(message.Data, message.Tags(), options...)
 	case *api.Message:
 		if message == nil || tags != nil {
 			return nil, invalidArgumentError("forwarding requires a message and no tag override")
@@ -98,5 +105,5 @@ func adoptNativeInput(result C.plsm_go_input_result_t) *MessageView {
 	copy(encoded, unsafe.Slice((*byte)(unsafe.Pointer(result.bytes)), int(result.len)))
 	// A checked builder already proved the immutable encoding. Copying preserves
 	// its unique-key layout, offsets and proof; no second validation is needed.
-	return &MessageView{seq: uint64(result.seq), timestampNs: uint64(result.timestamp), valueSnapshot: valueSnapshot{encoded: encoded}, dataNode: result.data, metaNode: result.meta}
+	return &MessageView{seq: uint64(result.seq), timeNS: uint64(result.timestamp), valueSnapshot: valueSnapshot{encoded: encoded}, dataNode: result.data, metaNode: result.meta}
 }

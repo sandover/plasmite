@@ -140,6 +140,77 @@ fn cli_fetch_contract() {
 }
 
 #[test]
+fn cli_empty_oldest_and_single_sequence_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut pool =
+        Pool::create(dir.path().join("events.plasmite"), PoolOptions::new(16384)).unwrap();
+    let run = |args: &[&str]| {
+        cmd()
+            .arg("--dir")
+            .arg(dir.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let empty = run(&["fetch", "events", "--since", "oldest"]);
+    assert!(empty.status.success());
+    assert!(empty.stdout.is_empty());
+    let too_far = run(&["fetch", "events", "5"]);
+    let error = &parse_json_lines(&too_far.stderr)[0]["error"];
+    assert_eq!(error["kind"], "Usage");
+    assert!(error["message"].as_str().unwrap().starts_with("SEQ"));
+    let large = serde_json::json!({"padding":"x".repeat(2048)});
+    for _ in 0..32 {
+        pool.feed(&large, Feed::new()).unwrap();
+    }
+    let dropped = run(&["fetch", "events", "1"]);
+    let error = &parse_json_lines(&dropped.stderr)[0]["error"];
+    assert_eq!(error["kind"], "RetentionGap");
+    assert_eq!(error["missing"], 1);
+    assert_eq!(
+        error["next_seq"].as_u64(),
+        pool.info().unwrap().bounds.oldest_seq
+    );
+}
+
+#[test]
+fn cli_forwarding_accepts_offset_times_and_rejects_zero_sequence() {
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let pool = Pool::create(dir.path().join("events.plasmite"), PoolOptions::new(65536)).unwrap();
+    for (seq, time, valid) in [
+        (7, "2000-01-01T05:00:00+05:00", true),
+        (8, "2000-01-01T00:00:00Z", true),
+        (0, "2000-01-01T00:00:00Z", false),
+        (7, "yesterday", false),
+    ] {
+        let input = json!({"seq":seq,"time":time,"meta":{"tags":["source"]},"data":{"value":9}});
+        let output = cmd()
+            .arg("--dir")
+            .arg(dir.path())
+            .args(["feed", "events", &input.to_string()])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), valid, "{output:?}");
+    }
+    let records = pool
+        .fetch(Read::new())
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        records.iter().map(|m| m.seq).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert!(
+        records
+            .iter()
+            .all(|m| m.data == json!({"value":9}) && m.meta.tags == ["source"])
+    );
+}
+
+#[test]
 fn cli_follow_one_resumes_and_exits_on_first_matching_message() {
     use std::{process::Stdio, time::Duration};
     use support::cli::{KillOnDrop, read_line_with_timeout, wait_within};
@@ -302,7 +373,12 @@ fn rust_retention_does_not_hide_loss_on_a_filtered_reader() {
         .next()
         .expect("report lost snapshot")
         .expect_err("snapshot gap");
-    assert!(open.next().is_none());
+    let repeated = open
+        .next()
+        .expect("keep the failure visible")
+        .expect_err("snapshot gap");
+    assert_eq!(repeated.kind(), late_error.kind());
+    assert_eq!(repeated.next_seq(), late_error.next_seq());
     let start_error = match reader.follow(read.clone()) {
         Err(error) => error,
         Ok(_) => panic!("opening a stale cursor should report a gap"),
@@ -394,7 +470,7 @@ fn reads_pool_from_last_1x_release() {
     let dir = tempfile::tempdir().expect("conformance directory");
     let copy = dir.path().join("compat.plasmite");
     std::fs::copy(path, &copy).expect("copy 1.x pool");
-    let pool = LocalClient::new()
+    let mut pool = LocalClient::new()
         .open_pool(&PoolRef::Path(copy), false)
         .expect("open 1.x pool");
     let messages: Vec<_> = pool
@@ -409,4 +485,14 @@ fn reads_pool_from_last_1x_release() {
         assert_eq!(message.meta.tags, seed.tags);
         assert!(message.time > 0);
     }
+    let forwarded = pool.feed(&messages[0], Feed::new()).unwrap();
+    assert_eq!(forwarded.seq, messages.len() as u64 + 1);
+    assert_eq!(forwarded.data, messages[0].data);
+    assert_eq!(forwarded.meta.tags, messages[0].meta.tags);
+    let error = pool
+        .feed(&messages[0], Feed::new().tags(["override"]))
+        .unwrap_err();
+    assert_eq!(error.kind(), plasmite::api::ErrorKind::Usage);
+    let mut history = pool.fetch(Read::last(1)).unwrap();
+    assert_eq!(history.next_message().unwrap().unwrap(), forwarded);
 }

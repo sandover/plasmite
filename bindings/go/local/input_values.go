@@ -243,7 +243,7 @@ func (in *nativeInput) collect(value reflect.Value, parent uintptr, key string, 
 		for iterator.Next() {
 			name, err := inputMapKey(iterator.Key())
 			if err != nil {
-				return fmt.Errorf("json: encoding error for type %q: %q", value.Type().String(), err.Error())
+				return invalidArgumentError(fmt.Sprintf("JSON encoding error for type %q: %v", value.Type(), err))
 			}
 			entries = append(entries, entry{key: name, value: iterator.Value()})
 		}

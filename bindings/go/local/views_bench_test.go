@@ -90,7 +90,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 			if err = view.Decode(&warm); err != nil {
 				b.Fatal(err)
 			}
-			lanes := []string{"get_into", "get_into_exact", "get_c_copy", "cold_view_typed", "cold_json_typed", "cold_view_selected", "cold_json_selected", "warm_view_typed", "warm_json_typed", "warm_view_selected", "warm_native_selected", "full_view_native", "full_json_native"}
+			lanes := []string{"fetch_view", "get_c_copy", "cold_view_typed", "cold_json_typed", "cold_view_selected", "cold_json_selected", "warm_view_typed", "warm_json_typed", "warm_view_selected", "warm_native_selected", "full_view_native", "full_json_native"}
 			if reverse {
 				for i, j := 0, len(lanes)-1; i < j; i, j = i+1, j-1 {
 					lanes[i], lanes[j] = lanes[j], lanes[i]
@@ -103,18 +103,9 @@ func BenchmarkOwnedViews(b *testing.B) {
 					b.ResetTimer()
 					for i := 0; i < b.N; i++ {
 						switch lane {
-						case "get_into":
+						case "fetch_view":
 							v, e := pool.getView(receipt.Seq)
 							if e != nil {
-								b.Fatal(e)
-							}
-							benchmarkView = v
-						case "get_into_exact":
-							v, e := pool.copyViewCapacity(receipt.Seq, 0)
-							if e != nil {
-								b.Fatal(e)
-							}
-							if e = v.validate(); e != nil {
 								b.Fatal(e)
 							}
 							benchmarkView = v
@@ -123,7 +114,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 							if e != nil {
 								b.Fatal(e)
 							}
-							v := &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.Time}
+							v := &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timeNS: frame.Time}
 							if e = v.validate(); e != nil {
 								b.Fatal(e)
 							}
@@ -264,7 +255,7 @@ func TestOwnedViewRetentionDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, lane := range []string{"get_into", "get_into_exact", "get_c_copy"} {
+	for _, lane := range []string{"fetch_view", "get_c_copy"} {
 		retained := make([]*MessageView, 10000)
 		runtime.GC()
 		var before, after runtime.MemStats
@@ -272,18 +263,13 @@ func TestOwnedViewRetentionDiagnostics(t *testing.T) {
 		for i := range retained {
 			var v *MessageView
 			switch lane {
-			case "get_into":
+			case "fetch_view":
 				v, err = pool.getView(receipt.Seq)
-			case "get_into_exact":
-				v, err = pool.copyViewCapacity(receipt.Seq, 0)
-				if err == nil {
-					err = v.validate()
-				}
 			case "get_c_copy":
 				var frame *Lite3Frame
 				frame, err = pool.getLite3(receipt.Seq)
 				if err == nil {
-					v = &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.Time}
+					v = &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timeNS: frame.Time}
 					err = v.validate()
 				}
 			}

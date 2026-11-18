@@ -18,14 +18,14 @@ fn duplex_receives_its_first_send_and_an_independent_reply_after_input_eof() {
             cmd()
                 .arg("--dir")
                 .arg(temp.path())
-                .args(["duplex", &target, "--timeout", "300ms", "--format", "json"])
+                .args(["duplex", &target, "--format", "json"])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
                 .unwrap(),
         );
-        writeln!(child.0.stdin.take().unwrap(), "{}", json!({"seq":900,"time":"2000-01-01T00:00:00Z","meta":{"tags":["request"]},"data":{"from":"alice","request":1}})).unwrap();
+        writeln!(child.0.stdin.take().unwrap(), "{}", json!({"seq":900,"time":"2000-01-01T00:00:00.000000000Z","meta":{"tags":["request"]},"data":{"from":"alice","request":1}})).unwrap();
         let until = Instant::now() + Duration::from_secs(3);
         let request = loop {
             match writer.get(1) {
@@ -54,20 +54,16 @@ fn duplex_receives_its_first_send_and_an_independent_reply_after_input_eof() {
                 plasmite::api::Feed::default().tags(["reply"]),
             )
             .unwrap();
-        let status = wait_within(
-            &mut child.0,
-            Duration::from_secs(5),
-            "duplex receive timeout after EOF",
+        let bytes = read_message_lines(child.0.stdout.take().unwrap(), 2, Duration::from_secs(5));
+        #[cfg(unix)]
+        assert!(
+            wait_within(
+                &mut child.0,
+                Duration::from_secs(5),
+                "duplex after closing stdout"
+            )
+            .success()
         );
-        let mut bytes = Vec::new();
-        child
-            .0
-            .stdout
-            .take()
-            .unwrap()
-            .read_to_end(&mut bytes)
-            .unwrap();
-        assert_eq!(status.code(), Some(124), "remote={remote}");
         let messages = parse_json_lines(&bytes);
         assert_eq!(messages.len(), 2, "remote={remote}: {messages:?}");
         assert_eq!(messages[0]["seq"], 1);
@@ -108,7 +104,7 @@ fn duplex_accepts_json_from_a_terminal_without_an_identity() {
         cmd()
             .arg("--dir")
             .arg(temp.path())
-            .args(["duplex", "events", "--timeout", "300ms", "--format", "json"])
+            .args(["duplex", "events", "--format", "json"])
             .stdin(slave)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -116,16 +112,8 @@ fn duplex_accepts_json_from_a_terminal_without_an_identity() {
             .unwrap(),
     );
     writeln!(master, "{{\"from\":\"application\",\"n\":1}}").unwrap();
-    let status = wait_within(&mut child.0, Duration::from_secs(5), "terminal duplex");
-    let mut bytes = Vec::new();
-    child
-        .0
-        .stdout
-        .take()
-        .unwrap()
-        .read_to_end(&mut bytes)
-        .unwrap();
-    assert_eq!(status.code(), Some(124));
+    let bytes = read_message_lines(child.0.stdout.take().unwrap(), 1, Duration::from_secs(5));
+    assert!(wait_within(&mut child.0, Duration::from_secs(5), "terminal duplex").success());
     assert_eq!(
         parse_json_lines(&bytes)[0]["data"],
         json!({"from":"application","n":1})

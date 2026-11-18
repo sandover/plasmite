@@ -102,6 +102,28 @@ pub fn parse_json_lines(output: &[u8]) -> Vec<Value> {
     text.lines().map(parse_json).collect()
 }
 
+pub fn read_message_lines(
+    reader: impl Read + Send + 'static,
+    count: usize,
+    timeout: Duration,
+) -> Vec<u8> {
+    let (send, receive) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut output = Vec::new();
+        for _ in 0..count {
+            if reader.read_until(b'\n', &mut output).expect("read message") == 0 {
+                break;
+            }
+        }
+        drop(reader);
+        let _ = send.send(output);
+    });
+    receive
+        .recv_timeout(timeout)
+        .expect("read expected messages")
+}
+
 pub fn read_line_with_timeout<R: Read + Send + 'static>(reader: R, timeout: Duration) -> String {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -122,10 +144,6 @@ pub fn read_json_value<R: Read>(reader: R) -> Value {
 pub fn parse_error_json(output: &[u8]) -> Value {
     let text = std::str::from_utf8(output).expect("utf8");
     parse_json(text)
-}
-
-pub fn parse_notice_json(line: &str) -> Value {
-    parse_json(line.trim())
 }
 
 pub fn fetch_message(pool_dir: &Path, pool: &str, seq: u64) -> Value {

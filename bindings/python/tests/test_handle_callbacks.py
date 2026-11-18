@@ -89,8 +89,8 @@ class HandleCallbacks(unittest.TestCase):
 
     def test_get_sequence_and_open_follow_options(self):
         for method, symbol in [
-            ("_get_json", "plsm_internal_pool_get_json"),
-            ("_get_lite3", "plsm_internal_pool_get_lite3"),
+            ("_get_json", "plsm_pool_fetch"),
+            ("_get_lite3", "plsm_pool_fetch_lite3"),
         ]:
             with self.subTest(method=method):
                 pool = self.fresh_pool()
@@ -193,7 +193,12 @@ class HandleCallbacks(unittest.TestCase):
                 elif args == "read_tags":
                     call = lambda: handle.follow(tags=closing_tags(handle.close))
                 else:
-                    call = lambda: handle.next_event(closing_int(handle.close))
+                    with patch.object(plasmite._LIB, symbol) as native:
+                        with self.assertRaises(plasmite.UsageError):
+                            handle.next_event(object())
+                        native.assert_not_called()
+                    handle.close()
+                    continue
                 self.assert_closed_before_native(symbol, call)
                 handle.close()
 

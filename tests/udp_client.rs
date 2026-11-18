@@ -165,7 +165,7 @@ fn follows_arrival_order_across_progress_skips_duplicates_and_clock_steps() {
                 assert_eq!(message.meta.tags, ["lab"]);
                 assert_eq!(message.data, json!({"temperature": 23}));
             }
-            UdpEvent::Gap {
+            UdpEvent::Skip {
                 first,
                 last,
                 reason,
@@ -277,7 +277,7 @@ fn finite_follow_drains_early_skips_and_terminal_progress_after_close() {
     follow.close();
     assert_eq!(
         follow.next_event().unwrap(),
-        Some(UdpEvent::Gap {
+        Some(UdpEvent::Skip {
             first: 2,
             last: 2,
             reason: UdpSkipReason::Oversized
@@ -285,7 +285,7 @@ fn finite_follow_drains_early_skips_and_terminal_progress_after_close() {
     );
     assert_eq!(
         follow.next_event().unwrap(),
-        Some(UdpEvent::Gap {
+        Some(UdpEvent::Skip {
             first: 3,
             last: 3,
             reason: UdpSkipReason::Pressure
@@ -298,7 +298,6 @@ fn finite_follow_drains_early_skips_and_terminal_progress_after_close() {
             next_seq: 5,
             end_seq: Some(4),
             terminal: true,
-            retention_gap: false
         })
     );
     assert_eq!(follow.next_event().unwrap(), None);
@@ -547,7 +546,7 @@ fn view_follow_preserves_arrival_order_and_retained_snapshots() {
                 assert_eq!(bytes.span(), Some(b"native bytes\0".as_slice()));
                 retained.push(frame);
             }
-            plasmite::api::UdpViewEvent::Gap {
+            plasmite::api::UdpViewEvent::Skip {
                 first,
                 last,
                 reason,

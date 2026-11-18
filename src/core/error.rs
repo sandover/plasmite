@@ -6,6 +6,7 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorKind {
@@ -20,18 +21,18 @@ pub enum ErrorKind {
     RetentionGap,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Error {
     kind: ErrorKind,
-    message: Option<String>,
-    hint: Option<String>,
+    message: Option<Box<str>>,
+    hint: Option<Box<str>>,
     path: Option<PathBuf>,
     seq: Option<u64>,
     detail: ErrorDetail,
-    source: Option<Box<dyn StdError + Send + Sync>>,
+    source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 enum ErrorDetail {
     None,
     Offset(u64),
@@ -107,12 +108,12 @@ impl Error {
     }
 
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
-        self.message = Some(message.into());
+        self.message = Some(message.into().into_boxed_str());
         self
     }
 
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
-        self.hint = Some(hint.into());
+        self.hint = Some(hint.into().into_boxed_str());
         self
     }
 
@@ -132,7 +133,7 @@ impl Error {
     }
 
     pub fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
-        self.source = Some(Box::new(source));
+        self.source = Some(Arc::new(source));
         self
     }
 }

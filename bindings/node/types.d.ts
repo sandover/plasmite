@@ -25,7 +25,6 @@ export const enum ErrorKind {
 }
 export const DEFAULT_POOL_DIR: string | undefined
 export const DEFAULT_POOL_SIZE_BYTES: number
-export const DEFAULT_POOL_SIZE: number
 
 export interface Lite3Frame {
   seq: bigint
@@ -141,12 +140,12 @@ export function toLite3(message: MessageView): Buffer
 
 export class Pool {
   feedReceipt(value: object | Message, options?: FeedOptions): Promise<FeedReceipt>
-  feedJsonReceipt(payload: Buffer, options?: FeedOptions): FeedReceipt
-  feedLite3Receipt(payload: Buffer, options?: Omit<FeedOptions, "tags">): FeedReceipt
+  feedJsonReceipt(payload: Buffer, options?: FeedOptions): Promise<FeedReceipt>
+  feedLite3Receipt(payload: Buffer, options?: Omit<FeedOptions, "tags">): Promise<FeedReceipt>
   feedLite3(payload: Buffer, options?: Omit<FeedOptions, "tags">): Promise<Message>
   info(): PoolInfo
   feed(value: object | Message, options?: FeedOptions): Promise<Message>
-  feedJson(payload: Buffer, options?: FeedOptions): Buffer
+  feedJson(payload: Buffer, options?: FeedOptions): Promise<Buffer>
   feedView<T = unknown>(value: unknown, options?: FeedOptions): Promise<MessageView<T>>
   followView<T = unknown>(options?: ReadOptions): Promise<Reader<MessageView<T>>>
   fetchView<T = unknown>(options?: ReadOptions): Promise<Reader<MessageView<T>>>
@@ -188,15 +187,14 @@ export type UdpEvent =
       payload: Buffer
       message: Message
     }
-  // "gap" is the compatibility name for a server skip; "unknown" is reserved.
-  | { kind: "gap"; first: bigint; last: bigint; reason: "unknown" | "oversized" | "retention" | "pressure" }
+  // "unknown" is reserved.
+  | { kind: "skip"; first: bigint; last: bigint; reason: "unknown" | "oversized" | "retention" | "pressure" }
   | {
       kind: "progress"
       startSeq: bigint
       nextSeq: bigint
       endSeq: bigint | null
       terminal: boolean
-      retentionGap: boolean
     }
 
 export class UdpClient {
@@ -207,20 +205,21 @@ export class UdpClient {
 }
 
 export class UdpPool {
-  feed(payload: object | Message, options?: FeedOptions): void
+  feed(payload: object | Message | MessageView, options?: FeedOptions): Promise<void>
   fetch(options?: ReadOptions): Promise<UdpFollow>
   follow(options?: ReadOptions): Promise<UdpFollow>
   followView<T = unknown>(options?: ReadOptions): Promise<UdpViewFollow<T>>
   fetchView<T = unknown>(options?: ReadOptions): Promise<UdpViewFollow<T>>
-  feedLite3(payload: Buffer): void
+  feedLite3(payload: Buffer): Promise<void>
   close(): void
   [Symbol.dispose](): void
 }
 
 export class UdpFollow {
   readonly finished: boolean
-  nextEvent(timeoutMs?: number | bigint, options?: UdpWaitOptions): Promise<UdpEvent | null>
-  events(options?: { pollIntervalMs?: number | bigint; signal?: AbortSignal }): AsyncGenerator<UdpEvent, void, unknown>
+  nextEvent(wait?: number, options?: UdpWaitOptions): Promise<UdpEvent | null>
+  next(wait?: number): Promise<IteratorResult<UdpEvent | undefined>>
+  events(options?: { signal?: AbortSignal }): AsyncGenerator<UdpEvent, void, unknown>
   cancel(): void
   close(): void
   [Symbol.dispose](): void
@@ -233,8 +232,9 @@ export type UdpViewEvent<T = unknown> =
 
 export interface UdpViewFollow<T = unknown> {
   readonly finished: boolean
-  nextEvent(timeoutMs?: number | bigint, options?: UdpWaitOptions): Promise<UdpViewEvent<T> | null>
-  events(options?: { pollIntervalMs?: number | bigint; signal?: AbortSignal }): AsyncGenerator<UdpViewEvent<T>, void, unknown>
+  nextEvent(wait?: number, options?: UdpWaitOptions): Promise<UdpViewEvent<T> | null>
+  next(wait?: number): Promise<IteratorResult<UdpViewEvent<T> | undefined>>
+  events(options?: { signal?: AbortSignal }): AsyncGenerator<UdpViewEvent<T>, void, unknown>
   cancel(): void
   close(): void
   [Symbol.dispose](): void

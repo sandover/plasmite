@@ -31,10 +31,7 @@ There are three top-level commands, ordered by cost and coverage:
 
 ### Plasmite 2.0 contract checks
 
-The [shared read cases](../../tests/fixtures/conformance/reads.json) specify
-pool contents, read options and expected sequences. The Rust and CLI runner
-uses `cargo test --test conformance_v2`. It also opens a pool written by
-Plasmite 1.3.0. The binding test commands run the corresponding read cases:
+The [shared read cases](../../tests/fixtures/conformance/reads.json) specify pool contents, read options and expected sequences. The Rust and CLI runner uses `cargo test --test conformance_v2`. It also opens a pool written by Plasmite 1.3.0. The binding test commands run the corresponding read cases:
 
 ```sh
 just bindings-go-test
@@ -44,10 +41,7 @@ cargo test --test remote_integration
 just abi-test abi-smoke
 ```
 
-The remote suite checks that HTTP reports errors and continues across server
-limits. The C tests check option layout, ownership, cancellation and
-retention-gap details.
-
+The remote suite checks that HTTP reports errors and continues across server limits. The C tests check option layout, ownership, cancellation and retention-gap details.
 ### Linux ARM release archives
 
 The GitHub SDK preview targets are `aarch64-unknown-linux-gnu` and
@@ -272,36 +266,17 @@ the same file.
 
 ### Plasmite 2.0 conformance
 
-Run `just conformance`. The runners read `tests/fixtures/conformance/reads.json`.
-Each read case names its selection through `since` or `last`, optionally
-sets `tags`, and lists the expected sequences or error kind. `seed` sets up
-the starting history. `after_open` adds messages after the reader opens but
-before it pulls its first result. `cli_error` records when the CLI's exact
-sequence shorthand reports a different result from an empty stream.
+Run `just conformance`. The runners read `tests/fixtures/conformance/reads.json`. Each read case names its selection through `since` or `last`, optionally sets `tags`, and lists the expected sequences or error kind. `seed` sets up the starting history. `after_open` adds messages after the reader opens but before it pulls its first result. `cli_error` records when the CLI's exact sequence shorthand reports a different result from an empty stream.
 
-The Rust runner verifies the opening boundary, live reads and filtered
-retention errors. The CLI runner checks finite reads and the exact sequence
-shorthand.
+The Rust runner verifies the opening boundary, live reads and filtered retention errors. The CLI runner checks finite reads and the exact sequence shorthand.
 
 ### Pool file compatibility
 
-`tests/fixtures/pool-v1.3.0.plasmite` is a 16 KiB pool written by the
-`v1.3.0` source at `04db8c011e78d8bef562e6ce2c5fd3030e5fb2d2`.
-It contains sequence 1 with data `{"point":[10,20],"tool":"pen"}` and tags
-`gfx` and `scope:sharedCanvas`, followed by sequence 2 with data
-`{"ready":true}` and tag `system`. Copy the fixture to a temporary directory
-before writing to it in an upgrade test.
+`tests/fixtures/pool-v1.3.0.plasmite` is a 16 KiB pool written by the `v1.3.0` source at `04db8c011e78d8bef562e6ce2c5fd3030e5fb2d2`. It contains sequence 1 with data `{"point":[10,20],"tool":"pen"}` and tags `gfx` and `scope:sharedCanvas`, followed by sequence 2 with data `{"ready":true}` and tag `system`. Copy the fixture to a temporary directory before writing to it in an upgrade test.
 
 ### Owned-view contracts
 
-Use matching native assets when running the view suites. The shared fixtures in
-`tests/fixtures/owned_views.json` cover strict input rules; runtime tests also
-check actual acquisition, exact i64 values, native bytes, negative zero, retained
-children, ring overwrite and explicit conversion. Go checks that children survive
-reassignment of their message wrapper. Streams check cancellation, tag/gap
-policy, explicit batch bounds and retained results after close. UDP checks keep
-arrival order, duplicates and late packets rather than inferring loss.
-
+Use matching native assets when running the view suites. The shared fixtures in `tests/fixtures/owned_views.json` cover strict input rules; runtime tests also check actual acquisition, exact i64 values, native bytes, negative zero, retained children, ring overwrite and explicit conversion. Go checks that children survive reassignment of their message wrapper. Streams check cancellation, tag/gap policy, explicit batch bounds and retained results after close. UDP checks keep arrival order, duplicates and late packets rather than inferring loss.
 The binding suites include Python `test_views.py`, `test_append_views.py` and
 `test_view_streams.py`; Go local view/input/stream tests and UDP tests; and Node
 view, native-input, portable and HTTP tests. Node's `npm run test:portable`

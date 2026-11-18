@@ -7,8 +7,7 @@ ABI stability:
   - Within a major version, this header is additive-only: no field removals,
     no reordering of struct members, no changes to enum discriminant values.
   - New functions and struct fields are appended at the end.
-  - If a breaking change is unavoidable, it bumps the major version and the
-    old symbols remain available via versioned symbol names (when supported).
+  - Breaking changes require a new major version. Each major has its own shared library name.
 
 Ownership rules:
   - Handles (plsm_client_t*, plsm_pool_t*, plsm_stream_t*) are opaque.
@@ -39,13 +38,12 @@ Caller obligations:
     behavior in the caller and is not converted into a Plasmite error.
 
 Linking:
-  - Dynamic: link against libplasmite.dylib / .so / .dll.
+  - Dynamic: use libplasmite.2.dylib, libplasmite.so.2, or plasmite2.dll.
   - Static: link against libplasmite.a (include system libs: -lpthread -ldl -lm).
   - pkg-config: `pkg-config --cflags --libs plasmite` (available when installed
     via Homebrew tap or release SDK tarball).
 
 Notes: All allocations returned must be freed by the caller via provided free functions.
-Notes: Remote pool refs are not supported by this ABI; use CLI or HTTP API instead.
 */
 
 #ifndef PLASMITE_H
@@ -90,7 +88,7 @@ typedef struct plsm_buf {
 
 typedef enum plsm_udp_event_kind {
     PLSM_UDP_EVENT_FRAME = 1,
-    PLSM_UDP_EVENT_GAP = 2, /* Compatibility name: an explicit server SKIP. */
+    PLSM_UDP_EVENT_SKIP = 2,
     PLSM_UDP_EVENT_PROGRESS = 3
 } plsm_udp_event_kind_t;
 
@@ -114,7 +112,6 @@ typedef struct plsm_udp_event {
     uint64_t end_seq;
     uint8_t has_end;
     uint8_t terminal;
-    uint8_t retention_gap;
     uint8_t reserved;
     plsm_buf_t payload;
 } plsm_udp_event_t;
@@ -198,8 +195,6 @@ int plsm_pool_follow_lite3(plsm_pool_t *, const plsm_read_options_t *, plsm_lite
 /* View readers return immutable message snapshots through plsm_view_stream_next
  * or plsm_view_stream_next_batch. Each caller owns the returned view. Cancel
  * and free the reader with plsm_stream_cancel and plsm_stream_free. */
-int plsm_pool_follow_view(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
-int plsm_pool_fetch_view(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
 
 int plsm_client_new(const char *pool_dir, plsm_client_t **out_client, plsm_error_t **out_err);
 void plsm_client_free(plsm_client_t *client);
@@ -210,15 +205,7 @@ void plsm_client_free(plsm_client_t *client);
 int plsm_pool_create(plsm_client_t *client, const char *pool_ref, uint64_t size_bytes, plsm_pool_t **out_pool, plsm_error_t **out_err);
 void plsm_pool_free(plsm_pool_t *pool);
 
-int plsm_stream_next(
-    plsm_stream_t *stream,
-    plsm_buf_t *out_message,
-    plsm_error_t **out_err);
 
-int plsm_lite3_stream_next(
-    plsm_lite3_stream_t *stream,
-    plsm_lite3_frame_t *out_frame,
-    plsm_error_t **out_err);
 
 void plsm_stream_free(plsm_stream_t *stream);
 void plsm_lite3_stream_free(plsm_lite3_stream_t *stream);
@@ -259,6 +246,7 @@ int plsm_udp_pool_feed_lite3(
     plsm_udp_pool_t *pool,
     const uint8_t *payload,
     size_t payload_len,
+    const plsm_feed_options_t *options,
     plsm_error_t **out_err);
 /*
  * plsm_udp_follow_next returns 1 for an event, 0 when `timeout_ms` expires,
@@ -266,7 +254,7 @@ int plsm_udp_pool_feed_lite3(
  * Use one reader per follow handle. Cancel may run during next; a wait checks
  * cancellation within 50 ms. Before close, cancel and wait for every active
  * call to return. Close releases the subscription and frees the handle.
- * Do not use a handle after close. A zero timeout polls without blocking.
+ * Zero polls once. UINT64_MAX waits without a time limit.
  */
 int plsm_udp_follow_next(
     plsm_udp_follow_t *follow,
@@ -282,14 +270,12 @@ int plsm_udp_event_message(
     plsm_error_t **out_err);
 
 /*
- * Bounded local-stream waits: 1=message, 0=wait expired, 2=stream finished,
- * 3=cancelled, -1=error. Wait expiry retains the cursor and message count.
- * Zero polls once; the original open-time deadline still ends the stream.
- * The budget cannot interrupt a file operation already waiting on an OS lock.
- * Use one reader per handle. Cancel may overlap next/next_wait, is permanent,
- * and is observed within 50 ms while idle. Cancel and wait for active reads
- * before free. Output buffers belong to the caller only on status 1.
- * The legacy next functions retain their original 1/0/-1 results.
+ * Reader waits: 1=message, 0=wait expired, 2=reader finished, 3=cancelled,
+ * -1=error. A timeout leaves the reader open. Zero polls once; UINT64_MAX
+ * waits without a time limit. A read failure remains visible on later calls.
+ * The wait cannot interrupt a file operation already waiting on an OS lock.
+ * Cancel may overlap a read and is permanent. Wait for the read before free.
+ * Output buffers belong to the caller only on status 1.
  */
 int plsm_stream_next_wait(plsm_stream_t *stream, uint64_t timeout_ms,
                           plsm_buf_t *out_message, plsm_error_t **out_err);
@@ -358,7 +344,7 @@ int plsm_view_from_lite3(const uint8_t *bytes, size_t len, uint64_t seq,
 int plsm_pool_feed_json_view(plsm_pool_t *pool, const uint8_t *json, size_t len,
     const plsm_feed_options_t *options, const plsm_message_view_t **out, plsm_error_t **err);
 int plsm_pool_feed_view(plsm_pool_t *pool, const plsm_message_view_t *source,
-    uint32_t durability, const plsm_message_view_t **out, plsm_error_t **err);
+    const plsm_feed_options_t *options, const plsm_message_view_t **out, plsm_error_t **err);
 void plsm_view_retain(const plsm_message_view_t *view);
 void plsm_view_release(const plsm_message_view_t *view);
 plsm_value_ref_t plsm_view_root(const plsm_message_view_t *view);
@@ -415,14 +401,14 @@ int plsm_view_to_json(const plsm_message_view_t *view, plsm_buf_t *out, plsm_err
  * guards; free the handle once afterward. No publication occurs on build errors.
  * A flush error can follow publication, as for other appends. */
 typedef struct plsm_builder plsm_builder_t;
-/* Independent immutable owners from the existing tail state machine. Tags use
- * UTF-8 spans and count accepted messages toward max_messages. Cancel/free use
- * plsm_stream_cancel/free. Serialized reads only; cancel may run concurrently.
+/* Independent immutable owners from the same reader as JSON. Pass tags as
+ * UTF-8 spans when opening. Use plsm_stream_cancel and plsm_stream_free.
+ * Serialize reads. Cancel may run concurrently.
  * next waits for the first item, then acquires available companions only.
  * max_count/max_bytes must be positive; bytes bound encoded payload snapshots.
  * An oversized first record errors without consuming it. Each returned owner
  * requires plsm_view_release, including any prefix returned before an error.
- * UINT64_MAX timeout waits under the open-time deadline; zero polls.
+ * Zero polls once; UINT64_MAX waits without a time limit.
  * Status: 0=wait expired, 1=items, 2=finished, 3=cancelled, -1=error.
  * out has max_count slots; count always reports initialized owners. */
 int plsm_view_stream_next(plsm_stream_t *stream, uint64_t timeout_ms,
@@ -444,7 +430,7 @@ int plsm_builder_put(plsm_builder_t *builder, size_t parent,
     const uint8_t *key, size_t key_len, const plsm_view_value_t *value,
     size_t *child_node, plsm_error_t **err);
 int plsm_pool_feed_builder_view(plsm_pool_t *pool, plsm_builder_t *builder,
-    uint32_t durability, const plsm_message_view_t **out, plsm_error_t **err);
+    const plsm_feed_options_t *options, const plsm_message_view_t **out, plsm_error_t **err);
 /* Copy a checked subtree while the source owner remains alive. SIZE_MAX parent
  * fills an empty data object from a source object and requires NULL key/zero
  * length. It preserves the data_node returned by builder_new; other parents use

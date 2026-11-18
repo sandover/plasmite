@@ -183,7 +183,7 @@ func BenchmarkOwnedUDP(b *testing.B) {
 								udpBenchmarkValue = len(frame.Payload)
 								udpBenchmarkRaw = frame.Payload
 							case "raw_forward":
-								_, e = destination.FeedLite3Receipt(frame.Payload, local.DurabilityFast)
+								_, e = destination.FeedLite3Receipt(frame.Payload)
 							case "json_selected":
 								var out struct{ Value int }
 								e = json.Unmarshal(frame.Message.Data, &out)

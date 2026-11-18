@@ -55,7 +55,7 @@ check-release-targets:
 # Run Go bindings tests with repo-local caches.
 bindings-go-test:
 	cargo build -p plasmite
-	@case "$(uname -s)" in Darwin) ln -sf libplasmite.dylib target/debug/libplasmite.2.dylib ;; Linux) ln -sf libplasmite.so target/debug/libplasmite.so.2 ;; esac
+	bash scripts/stage_versioned_library.sh target/debug
 	mkdir -p "${GOCACHE:-tmp/go-cache}" tmp/go-tmp
 	cd bindings/go && GOCACHE="${GOCACHE:-$(pwd)/../../tmp/go-cache}" GOTMPDIR="$(pwd)/../../tmp/go-tmp" PLASMITE_LIB_DIR="$(pwd)/../../target/debug" LD_LIBRARY_PATH="$(pwd)/../../target/debug:${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(pwd)/../../target/debug:${DYLD_LIBRARY_PATH:-}" PKG_CONFIG="/usr/bin/true" CGO_CFLAGS="-I$(pwd)/../../include" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
 
@@ -66,11 +66,13 @@ bindings-go-contract-test:
 # Run Python bindings unit tests.
 bindings-python-test:
 	cargo build -p plasmite
+	bash scripts/stage_versioned_library.sh target/debug
 	cd bindings/python && PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" python3 -m unittest discover -s tests
 
 # Run Node bindings tests.
 bindings-node-test:
 	cargo build -p plasmite
+	bash scripts/stage_versioned_library.sh target/debug
 	cd bindings/node && PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
 	bash scripts/node_pack_smoke.sh
 	bash scripts/node_remote_only_smoke.sh
@@ -81,6 +83,10 @@ bindings-node-typecheck:
 
 # Run all language bindings tests and checks.
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
+
+# Verify the installed native bindings against one HTTPS server and an ABI mismatch.
+bindings-contract-smoke:
+	bash scripts/bindings_contract_smoke.sh
 
 # Check browser sequence precision, bounded history, and recovery behavior.
 ui-smoke:
@@ -111,7 +117,7 @@ _trim-target:
 
 # Cross-language and artifact checks. Requires Go, Node, Python, and uv.
 # `bindings-test` includes node pack and remote-only smoke tests.
-integration: osc-example-test cookbook-smoke abi-smoke bindings-test cross-artifact-smoke ui-smoke
+integration: osc-example-test cookbook-smoke abi-smoke bindings-test bindings-contract-smoke cross-artifact-smoke ui-smoke
 
 # Canonical release candidate gate before merging, tagging, or publishing.
 release-gate: check integration abi-release
@@ -120,11 +126,13 @@ release-gate: check integration abi-release
 # Build shared library artifacts for local ABI usage.
 abi:
 	cargo build --lib
+	bash scripts/stage_versioned_library.sh target/debug
 	@ls -1 target/debug/libplasmite.* 2>/dev/null || true
 
 # Build release shared library artifacts.
 abi-release:
 	cargo build --release
+	bash scripts/stage_versioned_library.sh target/release
 	@ls -1 target/release/libplasmite.* 2>/dev/null || true
 
 # Build ABI artifacts and run ABI smoke unit.

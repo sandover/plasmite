@@ -3,7 +3,6 @@ package local
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"github.com/sandover/plasmite/bindings/go/api"
 	"math"
 	"reflect"
@@ -123,7 +122,7 @@ func TestNativeAppendPreservesMapSnapshotAndCloseReentrancy(t *testing.T) {
 		t.Fatalf("map snapshot %#v %v", decoded, err)
 	}
 	closing := inputJSONHook{run: func() ([]byte, error) { pool.Close(); return []byte(`{}`), nil }}
-	if _, err = pool.FeedView(map[string]any{"hook": closing}, nil); !errors.Is(err, ErrClosed) {
+	if _, err = pool.FeedView(map[string]any{"hook": closing}, nil); !isUsage(err) {
 		t.Fatalf("reentrant close %v", err)
 	}
 }

@@ -73,11 +73,28 @@ impl MessageView {
     pub fn from_bytes(bytes: &[u8], seq: u64, time: u64) -> Result<Self, Error> {
         Self::from_owned(bytes.to_vec(), seq, time, 0)
     }
+
+    /// Check a complete message supplied as feed input, before assigning its identity.
+    #[doc(hidden)]
+    pub fn from_feed_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Self::check_owned(bytes.to_vec(), 0, 0, 0, ErrorKind::Usage)
+    }
+
     pub(crate) fn from_owned(
         bytes: Vec<u8>,
         seq: u64,
         time: u64,
         flags: u32,
+    ) -> Result<Self, Error> {
+        Self::check_owned(bytes, seq, time, flags, ErrorKind::Corrupt)
+    }
+
+    fn check_owned(
+        bytes: Vec<u8>,
+        seq: u64,
+        time: u64,
+        flags: u32,
+        data_kind: ErrorKind,
     ) -> Result<Self, Error> {
         let mut owner = Self {
             snapshot: std::sync::Arc::new(Snapshot {
@@ -124,8 +141,11 @@ impl MessageView {
         }
         let meta = owner.root().get("meta")?.ok_or_else(corrupt)?;
         let data = owner.root().get("data")?.ok_or_else(corrupt)?;
-        if meta.kind() != sys::LITE3_TYPE_OBJECT || data.kind() != sys::LITE3_TYPE_OBJECT {
+        if meta.kind() != sys::LITE3_TYPE_OBJECT {
             return Err(corrupt());
+        }
+        if data.kind() != sys::LITE3_TYPE_OBJECT {
+            return Err(Error::new(data_kind).with_message("data is not object"));
         }
         let tags = meta.get("tags")?.ok_or_else(corrupt)?;
         if tags.kind() != sys::LITE3_TYPE_ARRAY {

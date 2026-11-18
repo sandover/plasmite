@@ -7,7 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -15,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use crate::api::{
     DEFAULT_POOL_SIZE, Error, ErrorKind, Feed, LocalClient, Message, Pool, PoolInfo, PoolOptions,
-    PoolRef, Read, ReadPoll, Since,
+    PoolRef, Read, ReadStatus, Since,
 };
 use crate::interface_wire::{ErrorKindWire, MessageWire, error_policy};
 #[cfg(test)]
@@ -30,6 +29,7 @@ const INVALID_PARAMS_CODE: i32 = -32602;
 const INTERNAL_ERROR_CODE: i32 = -32603;
 const DEFAULT_READ_COUNT: usize = 20;
 const MAX_READ_COUNT: usize = 200;
+const MAX_EXAMINED_COUNT: usize = 1000;
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 10_000;
 const MAX_WAIT_TIMEOUT_MS: u64 = 60_000;
 const MCP_INSTRUCTIONS: &str = concat!(
@@ -862,50 +862,19 @@ impl PlasmiteMcpHandler {
                 return api_error_tool_result(tool, with_missing_pool_hint(err, &pool, false));
             }
         };
-        let reader = if live {
-            opened.follow_lite3(options)
-        } else {
-            opened.fetch_lite3(options)
-        };
-        let mut reader = match reader {
-            Ok(reader) => reader,
-            Err(err) => return api_error_tool_result(tool, err),
-        };
-        let deadline = Instant::now() + Duration::from_millis(wait_ms);
-        let mut messages = Vec::with_capacity(count);
-        let ended = loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            match reader.poll(remaining) {
-                Ok(ReadPoll::Message(frame)) => {
-                    let message = match Message::from_lite3(frame.seq, frame.time, &frame.payload) {
-                        Ok(message) => message,
-                        Err(err) => return api_error_tool_result(tool, err),
-                    };
-                    messages.push(message_json_value(message));
-                    if messages.len() == count {
-                        let (next, upper) = reader.position();
-                        break if upper.is_some() && (next.is_none() || next > upper) {
-                            "complete"
-                        } else {
-                            "limit"
-                        };
-                    }
-                }
-                Ok(ReadPoll::Waiting) => break "limit",
-                Ok(ReadPoll::Complete) => break "complete",
-                Ok(ReadPoll::Cancelled) => {
-                    return api_error_tool_result(
-                        tool,
-                        Error::new(ErrorKind::Permission).with_message("access key was revoked"),
-                    );
-                }
-                Err(err) => return api_error_tool_result(tool, err),
-            }
-        };
-        ToolCallResult::success_with_structured(
-            format!("Read {} message(s) from `{pool}`.", messages.len()),
-            json!({"messages": messages, "next_seq": reader.position().0, "ended": ended}),
-        )
+        match read_batch(
+            &opened,
+            options,
+            live,
+            count,
+            Duration::from_millis(wait_ms),
+        ) {
+            Ok(payload) => ToolCallResult::success_with_structured(
+                format!("Read {} message(s) from `{pool}`.", payload.messages.len()),
+                payload.into_json(),
+            ),
+            Err(error) => api_error_tool_result(tool, error),
+        }
     }
 }
 
@@ -1067,10 +1036,13 @@ impl McpHandler for PlasmiteMcpHandler {
             .client
             .open_pool(&pool_ref, false)
             .map_err(api_error_jsonrpc)?;
-        let info = opened.info().map_err(api_error_jsonrpc)?;
-        let batch = read_messages_for_tool(&opened, &info, DEFAULT_READ_COUNT, None, None, &[])
-            .map_err(|err| api_error_jsonrpc(*err))?;
-        let payload = read_batch_json_value(batch, None);
+        let mut options = Read::last(DEFAULT_READ_COUNT as u64);
+        if let Some(cancel) = &self.cancel {
+            options = options.cancel(cancel.clone());
+        }
+        let payload = read_batch(&opened, options, false, DEFAULT_READ_COUNT, Duration::ZERO)
+            .map_err(api_error_jsonrpc)?
+            .into_json();
         let text = serde_json::to_string(&payload)
             .map_err(|_| JsonRpcError::internal_error("failed to encode resource payload"))?;
         Ok(ResourceReadResult {
@@ -1338,156 +1310,91 @@ fn message_json_value(message: crate::api::Message) -> Value {
 
 struct ReadBatch {
     messages: Vec<Value>,
-    next_after_seq: Option<u64>,
-    last_returned_seq: Option<u64>,
-    oldest_available_seq: Option<u64>,
-    newest_available_seq: Option<u64>,
-    fell_behind: bool,
+    next_seq: Option<u64>,
+    ended: &'static str,
 }
 
 impl ReadBatch {
-    fn empty(
-        after_seq: Option<u64>,
-        oldest_available_seq: Option<u64>,
-        newest_available_seq: Option<u64>,
-        fell_behind: bool,
-    ) -> Self {
-        Self {
-            messages: Vec::new(),
-            next_after_seq: after_seq,
-            last_returned_seq: None,
-            oldest_available_seq,
-            newest_available_seq,
-            fell_behind,
-        }
+    fn into_json(self) -> Value {
+        json!({"messages": self.messages, "next_seq": self.next_seq, "ended": self.ended})
     }
 }
 
-fn read_batch_json_value(batch: ReadBatch, timed_out: Option<bool>) -> Value {
-    let mut value = Map::from_iter([
-        ("messages".into(), Value::Array(batch.messages)),
-        ("next_after_seq".into(), batch.next_after_seq.into()),
-        ("last_returned_seq".into(), batch.last_returned_seq.into()),
-        (
-            "oldest_available_seq".into(),
-            batch.oldest_available_seq.into(),
-        ),
-        (
-            "newest_available_seq".into(),
-            batch.newest_available_seq.into(),
-        ),
-        ("fell_behind".into(), batch.fell_behind.into()),
-    ]);
-    if let Some(timed_out) = timed_out {
-        value.insert("timed_out".into(), timed_out.into());
-    }
-    Value::Object(value)
-}
-
-fn read_messages_for_tool(
+fn read_batch(
     pool: &Pool,
-    info: &PoolInfo,
+    options: Read,
+    live: bool,
     count: usize,
-    after_seq: Option<u64>,
-    since_ns: Option<u64>,
-    required_tags: &[String],
-) -> Result<ReadBatch, Box<Error>> {
-    let (Some(oldest), Some(newest)) = (info.bounds.oldest_seq, info.bounds.newest_seq) else {
-        return Ok(ReadBatch::empty(after_seq, None, None, false));
+    wait: Duration,
+) -> Result<ReadBatch, Error> {
+    let mut reader = if live {
+        pool.follow_lite3(options)?
+    } else {
+        pool.fetch_lite3(options)?
     };
-    let fell_behind = after_seq.is_some_and(|cursor| {
-        cursor
-            .checked_add(1)
-            .is_some_and(|next_seq| next_seq < oldest)
-    });
-    if count == 0 {
-        return Ok(ReadBatch::empty(
-            after_seq,
-            Some(oldest),
-            Some(newest),
-            fell_behind,
-        ));
-    }
-
-    let start_seq = match after_seq {
-        Some(after_seq) => {
-            let Some(next_seq) = after_seq.checked_add(1) else {
-                return Ok(ReadBatch::empty(
-                    Some(after_seq),
-                    Some(oldest),
-                    Some(newest),
-                    fell_behind,
-                ));
+    let (_, upper) = reader.position();
+    collect_batch(count, wait, upper, |remaining| {
+        let result = reader.poll_selected(remaining, |frame, tags| {
+            let message = if crate::api::frame_matches_tags(&frame, tags)? {
+                Some(message_json_value(Message::from_lite3(
+                    frame.seq,
+                    frame.time,
+                    &frame.payload,
+                )?))
+            } else {
+                None
             };
-            oldest.max(next_seq)
-        }
-        None => oldest,
-    };
-    if start_seq > newest {
-        return Ok(ReadBatch::empty(
-            after_seq,
-            Some(oldest),
-            Some(newest),
-            fell_behind,
-        ));
-    }
-
-    let mut messages = VecDeque::new();
-    let mut next_after_seq = after_seq;
-    let mut cursor = pool.cursor_from_seq(start_seq).map_err(Box::new)?;
-    loop {
-        let frame = match cursor.next(pool).map_err(Box::new)? {
-            crate::core::cursor::CursorResult::Message(frame) => frame,
-            crate::core::cursor::CursorResult::FellBehind => continue,
-            crate::core::cursor::CursorResult::WouldBlock => {
-                next_after_seq = Some(newest);
-                break;
-            }
-        };
-        if frame.seq > newest {
-            next_after_seq = Some(newest);
-            break;
-        }
-        if frame.seq < start_seq || next_after_seq.is_some_and(|seq| frame.seq <= seq) {
-            continue;
-        }
-        next_after_seq = Some(frame.seq);
-        let message = crate::api::Message::from_lite3(frame.seq, frame.time, &frame.payload)
-            .map_err(Box::new)?;
-        if !message_has_tags(&message.meta.tags, required_tags) {
-            continue;
-        }
-        if since_ns.is_some_and(|since| message.time < since) {
-            continue;
-        }
-
-        messages.push_back(message_json_value(message));
-        if after_seq.is_some() {
-            if messages.len() >= count {
-                break;
-            }
-        } else if messages.len() > count {
-            messages.pop_front();
-        }
-    }
-    let last_returned_seq = messages
-        .back()
-        .and_then(|message| message.get("seq"))
-        .and_then(Value::as_u64);
-    Ok(ReadBatch {
-        messages: messages.into_iter().collect(),
-        next_after_seq,
-        last_returned_seq,
-        oldest_available_seq: Some(oldest),
-        newest_available_seq: Some(newest),
-        fell_behind,
+            // Even a filtered record counts against the per-call scan limit.
+            Ok(Some(message))
+        });
+        (result, reader.position().0)
     })
 }
 
-fn message_has_tags(message_tags: &[String], required_tags: &[String]) -> bool {
-    required_tags
-        .iter()
-        .all(|required| message_tags.iter().any(|tag| tag == required))
+fn collect_batch(
+    count: usize,
+    wait: Duration,
+    upper: Option<u64>,
+    mut poll: impl FnMut(Duration) -> (Result<ReadStatus<Option<Value>>, Error>, Option<u64>),
+) -> Result<ReadBatch, Error> {
+    let deadline = Instant::now() + wait;
+    let mut messages = Vec::with_capacity(count);
+    let mut examined = 0;
+    loop {
+        let (result, mut next_seq) = poll(deadline.saturating_duration_since(Instant::now()));
+        let ended = match result {
+            Ok(ReadStatus::Message(message)) => {
+                examined += 1;
+                messages.extend(message);
+                if upper.is_some() && (next_seq.is_none() || next_seq > upper) {
+                    "complete"
+                } else if messages.len() == count || examined == MAX_EXAMINED_COUNT {
+                    "limit"
+                } else {
+                    continue;
+                }
+            }
+            Ok(ReadStatus::Waiting) => "limit",
+            Ok(ReadStatus::Complete) => "complete",
+            Ok(ReadStatus::Cancelled) => {
+                return Err(
+                    Error::new(ErrorKind::Permission).with_message("access key was revoked")
+                );
+            }
+            Err(error) if !messages.is_empty() => {
+                // Return the prefix first. Reopening at this checkpoint reports
+                // the unread record or the retention gap before any later data.
+                next_seq = error.missing().or(next_seq);
+                "limit"
+            }
+            Err(error) => return Err(error),
+        };
+        return Ok(ReadBatch {
+            messages,
+            next_seq,
+            ended,
+        });
+    }
 }
 
 fn invalid_argument_result(tool: &str, field: &str, detail: impl Into<String>) -> ToolCallResult {
@@ -1582,6 +1489,10 @@ fn api_error_jsonrpc(err: Error) -> JsonRpcError {
     }
     if let Some(offset) = err.offset() {
         data.insert("offset".to_string(), json!(offset));
+    }
+    if let Some((missing, next_seq)) = err.missing().zip(err.next_seq()) {
+        data.insert("missing".into(), json!(missing));
+        data.insert("next_seq".into(), json!(next_seq));
     }
     if !data.is_empty() {
         rpc_error.data = Some(Value::Object(data));
@@ -2515,84 +2426,77 @@ mod tests {
     }
 
     #[test]
-    fn read_without_index_keeps_bounded_latest_matches_and_checkpoints() {
+    fn a_gap_during_a_batch_returns_the_prefix_and_resume_reports_the_gap() {
+        use crate::api::ReadStatus;
         let dir = tempfile::tempdir().unwrap();
-        let mut pool = Pool::create(
-            dir.path().join("linear.plasmite"),
-            PoolOptions::new(1024 * 1024).with_index_capacity(0),
-        )
+        let path = dir.path().join("gap.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        writer
+            .append_json_now(&json!({"first": true}), &[], Durability::Fast)
+            .unwrap();
+        let pool = Pool::open(&path).unwrap();
+        let mut reader = pool.follow_lite3(Read::since(Since::Oldest)).unwrap();
+        let batch = super::collect_batch(20, std::time::Duration::ZERO, None, |wait| {
+            let result = reader.poll_selected(wait, |frame, _| Ok(Some(Some(json!(frame.seq)))));
+            if matches!(result, Ok(ReadStatus::Message(_))) {
+                let large = json!({"padding": "x".repeat(4096)});
+                for _ in 0..40 {
+                    writer
+                        .append_json_now(&large, &[], Durability::Fast)
+                        .unwrap();
+                }
+            }
+            (result, reader.position().0)
+        })
         .unwrap();
-        for seq in 1..=1000 {
-            let tags = if seq % 2 == 0 {
-                vec!["even".to_string()]
-            } else {
-                vec![]
-            };
-            pool.append_json(
-                &json!({"seq": seq}),
-                &tags,
-                AppendOptions::new(seq * 1_000_000, Durability::Fast),
-            )
-            .unwrap();
-        }
-        let info = pool.info().unwrap();
-        let tags = vec!["even".to_string()];
-        let batch = super::read_messages_for_tool(&pool, &info, 3, None, None, &tags).unwrap();
-        assert_eq!(
-            batch
-                .messages
-                .iter()
-                .map(|value| value["seq"].as_u64().unwrap())
-                .collect::<Vec<_>>(),
-            [996, 998, 1000]
-        );
-        assert_eq!(batch.next_after_seq, Some(1000));
-        let batch = super::read_messages_for_tool(&pool, &info, 2, Some(995), None, &tags).unwrap();
-        assert_eq!(batch.next_after_seq, Some(998));
-        assert_eq!(batch.last_returned_seq, Some(998));
-        let batch =
-            super::read_messages_for_tool(&pool, &info, 2, Some(u64::MAX), None, &tags).unwrap();
-        assert!(batch.messages.is_empty());
-        assert_eq!(batch.next_after_seq, Some(u64::MAX));
+        assert_eq!(batch.messages, vec![json!(1)]);
+        assert_eq!(batch.next_seq, Some(2));
+        assert_eq!(batch.ended, "limit");
+        let gap = pool.follow_lite3(Read::since(Since::Seq(2))).err().unwrap();
+        assert_eq!(gap.missing(), Some(2));
+        assert_eq!(gap.next_seq(), writer.info().unwrap().bounds.oldest_seq);
     }
 
     #[test]
-    fn indexed_checkpoint_does_not_scan_an_unrelated_prefix() {
-        use std::io::{Seek, SeekFrom, Write};
+    fn a_decode_error_during_a_batch_preserves_the_prefix() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("indexed.plasmite");
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(65536).with_index_capacity(16)).unwrap();
-        for seq in 1..=3 {
-            pool.append_json_now(&json!({"seq": seq}), &[], Durability::Fast)
+        let path = dir.path().join("corrupt.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        pool.append_json_now(&json!({"first": true}), &[], Durability::Fast)
+            .unwrap();
+        let invalid =
+            crate::core::lite3::Lite3Buf::from_json_str(r#"{"meta":{"tags":[]},"data":[]}"#)
                 .unwrap();
-        }
-        let info = pool.info().unwrap();
-        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        file.seek(SeekFrom::Start(info.ring_offset)).unwrap();
-        file.write_all(b"bad!").unwrap();
-        let batch = super::read_messages_for_tool(&pool, &info, 1, Some(2), None, &[]).unwrap();
-        assert_eq!(batch.last_returned_seq, Some(3));
+        pool.append_with_options(invalid.as_slice(), AppendOptions::new(10, Durability::Fast))
+            .unwrap();
+        let batch =
+            super::read_batch(&pool, Read::new(), false, 20, std::time::Duration::ZERO).unwrap();
+        assert_eq!(batch.messages.len(), 1);
+        assert_eq!(batch.next_seq, Some(2));
+        let error = super::read_batch(
+            &pool,
+            Read::since(Since::Seq(2)),
+            false,
+            20,
+            std::time::Duration::ZERO,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Corrupt);
     }
 
     #[test]
-    fn read_at_last_sequence_does_not_wrap() {
-        use std::io::{Seek, SeekFrom, Write};
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("last.plasmite");
-        let mut pool = Pool::create(&path, PoolOptions::new(65536).with_index_capacity(0)).unwrap();
-        pool.append_json_now(&json!({"last": true}), &[], Durability::Fast)
-            .unwrap();
-        let offset = pool.info().unwrap().ring_offset;
-        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        for offset in [88, 96, offset + 16] {
-            file.seek(SeekFrom::Start(offset)).unwrap();
-            file.write_all(&u64::MAX.to_le_bytes()).unwrap();
-        }
-        let info = pool.info().unwrap();
-        let batch = super::read_messages_for_tool(&pool, &info, 1, None, None, &[]).unwrap();
-        assert_eq!(batch.last_returned_seq, Some(u64::MAX));
-        assert_eq!(batch.next_after_seq, Some(u64::MAX));
+    fn a_filter_that_matches_nothing_still_has_a_scan_limit() {
+        use crate::api::ReadStatus;
+        let mut next = 1;
+        let batch = super::collect_batch(20, std::time::Duration::ZERO, None, |_| {
+            next += 1;
+            (Ok(ReadStatus::Message(None)), Some(next))
+        })
+        .unwrap();
+        assert!(batch.messages.is_empty());
+        assert_eq!(batch.next_seq, Some(super::MAX_EXAMINED_COUNT as u64 + 1));
+        assert_eq!(batch.ended, "limit");
     }
 
     #[test]
@@ -2755,11 +2659,14 @@ mod tests {
             .map(|message| message["seq"].as_u64().expect("seq"))
             .collect::<Vec<_>>();
         assert_eq!(seqs, vec![1, 2, 3]);
-        assert_eq!(payload["next_after_seq"], json!(3));
-        assert_eq!(payload["last_returned_seq"], json!(3));
-        assert_eq!(payload["oldest_available_seq"], json!(1));
-        assert_eq!(payload["newest_available_seq"], json!(3));
-        assert_eq!(payload["fell_behind"], json!(false));
+        let fetched = handler
+            .call_tool(ToolCallRequest {
+                name: "plasmite_fetch".into(),
+                arguments: map_args(json!({"pool": "events", "last": 20})),
+            })
+            .unwrap();
+        assert_eq!(Some(&payload), fetched.structured_content.as_ref());
+        assert_eq!(fetched.structured_content.unwrap()["next_seq"], json!(4));
     }
 
     #[test]

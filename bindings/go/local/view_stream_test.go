@@ -115,7 +115,7 @@ func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 	stream.Close()
 	select {
 	case err = <-done:
-		if !errors.Is(err, ErrClosed) {
+		if !isUsage(err) {
 			t.Fatalf("wrong close: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -173,7 +173,7 @@ func TestWholeViewForwardingSharesProofAndRetagsExplicitly(t *testing.T) {
 		t.Fatal("option reassignment changed the earlier source")
 	}
 	closing := newTestPool(t, client, "forward-close")
-	if _, err = closing.FeedView(forwarded, nil, func(*api.FeedConfig) { closing.Close() }); !errors.Is(err, ErrClosed) {
+	if _, err = closing.FeedView(forwarded, nil, func(*api.FeedConfig) { closing.Close() }); !isUsage(err) {
 		t.Fatalf("reentrant forward close: %v", err)
 	}
 	sourcePool.Close()

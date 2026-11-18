@@ -88,6 +88,7 @@ impl RemoteRead {
 
     pub fn close(&mut self) {
         self.0.reader = None;
+        self.0.failure = None;
     }
 }
 
@@ -110,6 +111,7 @@ impl RemoteLite3Read {
 
     pub fn close(&mut self) {
         self.0.reader = None;
+        self.0.failure = None;
     }
 }
 
@@ -129,6 +131,7 @@ struct Stream {
     reader: Option<TailReader>,
     resumed: Option<(u64, Option<u64>)>,
     last_message: Option<u64>,
+    failure: Option<Box<Error>>,
 }
 
 enum Record {
@@ -155,6 +158,7 @@ impl Stream {
             reader: None,
             resumed: None,
             last_message: None,
+            failure: None,
         };
         stream.reopen()?;
         Ok(stream)
@@ -191,44 +195,37 @@ impl Stream {
                         pairs.append_pair("since", &value);
                     }
                 }
-                if let Some(until) = self.selection.until {
-                    pairs.append_pair("until", &until.to_string());
-                }
             }
             for tag in &self.selection.tags {
                 pairs.append_pair("tag", tag);
             }
+        }
+        if url.query() == Some("") {
+            url.set_query(None);
         }
         let accept = if self.binary {
             "application/x-plasmite-lite3-stream"
         } else {
             "application/jsonl"
         };
-        self.reader = if let Some(cancel) = &self.selection.cancel {
-            let key = self
-                .pool
-                .client
-                .access_key()?
-                .map(std::borrow::Cow::into_owned);
-            cancellable_read::open(url, accept, key, Arc::clone(cancel))?
-                .map(|body| BufReader::new(Box::new(body) as Box<dyn std::io::Read + Send + Sync>))
-        } else {
-            let response = request_result_v2(
-                self.pool
-                    .client
-                    .open("GET", &url)?
-                    .set("Accept", accept)
-                    .call(),
-            )?;
-            Some(BufReader::new(response.into_reader()))
-        };
+        let key = self
+            .pool
+            .client
+            .key_for_request(&url)?
+            .map(std::borrow::Cow::into_owned);
+        self.reader = cancellable_read::open(url, accept, key, self.selection.cancel.clone())?
+            .map(|body| BufReader::new(Box::new(body) as Box<dyn std::io::Read + Send + Sync>));
         Ok(())
     }
 
     fn next_record(&mut self) -> ApiResult<Option<Record>> {
+        if let Some(error) = &self.failure {
+            return Err((**error).clone());
+        }
         let result = self.advance();
-        if result.is_err() {
+        if let Err(error) = &result {
             self.reader = None;
+            self.failure = Some(Box::new(error.clone()));
         }
         result
     }
@@ -277,9 +274,7 @@ impl Stream {
                         return Err(protocol_error("invalid stream cutoff"));
                     }
                     if let Some((previous, end)) = self.resumed
-                        && (end != until
-                            || next_seq < previous
-                            || (!self.live && next_seq == previous))
+                        && (end != until || next_seq < previous)
                     {
                         return Err(protocol_error("stream cutoff failed to advance the read"));
                     }
@@ -449,6 +444,10 @@ mod tests {
             ),
             (
                 "/v2/pools/events/fetch?since=8&until=10&tag=keep",
+                "{\"type\":\"cutoff\",\"next_seq\":8,\"until\":10}\n",
+            ),
+            (
+                "/v2/pools/events/fetch?since=8&until=10&tag=keep",
                 concat!(
                     "{\"seq\":9,\"time\":\"2026-11-17T00:00:00.000000123Z\",\"data\":{},\"meta\":{\"tags\":[\"keep\"]}}\n",
                     "{\"type\":\"complete\"}\n"
@@ -471,6 +470,36 @@ mod tests {
     }
 
     #[test]
+    fn a_404_without_a_version_reports_an_old_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let client = RemoteClient::new(&origin).unwrap();
+        let pool = RemotePool {
+            client,
+            base_url: Url::parse(&origin).unwrap(),
+            pool: "events".into(),
+            pool_ref: PoolRef::name("events"),
+        };
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = BufReader::new(&mut socket);
+            let mut line = String::new();
+            while request.read_line(&mut line).unwrap() != 0 && line != "\r\n" {
+                line.clear();
+            }
+            socket
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        let error = pool.fetch(Selection::new()).err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::Io);
+        assert_eq!(error.hint(), Some("Upgrade the server to Plasmite 2.0."));
+        server.join().unwrap();
+    }
+
+    #[test]
     fn missing_ending_is_a_terminal_io_error() {
         let (pool, server) = responses([(
             "/v2/pools/events/fetch",
@@ -485,7 +514,7 @@ mod tests {
             reader.next_message().expect_err("incomplete read").kind(),
             ErrorKind::Io
         );
-        assert!(reader.next_message().expect("closed reader").is_none());
+        assert_eq!(reader.next_message().unwrap_err().kind(), ErrorKind::Io);
         server.join().expect("mock server exit");
     }
 }

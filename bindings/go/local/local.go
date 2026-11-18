@@ -1,5 +1,5 @@
 /*
-Purpose: Go bindings for the libplasmite C ABI (v0).
+Purpose: Go bindings for the libplasmite C ABI (major 2).
 Key Exports: Client, Pool, Stream, Durability, Error.
 Role: Minimal, ergonomic wrapper around include/plasmite.h for Go users.
 Invariants: Caller must Close resources; JSON bytes in/out; errors returned as Go error.
@@ -14,14 +14,14 @@ package local
 #cgo linux LDFLAGS: -l:libplasmite.so.2
 #cgo windows LDFLAGS: -lplasmite2
 #include "plasmite.h"
-int plsm_internal_pool_get_json(plsm_pool_t *, uint64_t, plsm_buf_t *, plsm_error_t **);
-int plsm_internal_pool_get_lite3(plsm_pool_t *, uint64_t, plsm_lite3_frame_t *, plsm_error_t **);
 #include <stdlib.h>
 */
 import "C"
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -48,11 +48,6 @@ const (
 
 type Error = api.Error
 
-var (
-	ErrClosed          = api.ErrClosed
-	ErrInvalidArgument = api.ErrInvalidArgument
-)
-
 // Client serializes native handle access, including Close.
 // A Client must not be copied.
 type Client struct {
@@ -68,14 +63,14 @@ type Pool struct {
 }
 
 // Stream serializes native reads and Close. A Stream must not be copied.
-// Close waits for an active read; use a finite stream timeout for bounded shutdown.
+// Pass a context to Next to bound its wait. Close stops subsequent reads.
 type Stream struct {
 	mu  sync.Mutex
 	ptr *C.plsm_stream_t
 }
 
 // Lite3Stream serializes native reads and Close. A Lite3Stream must not be copied.
-// Close waits for an active read; use a finite stream timeout for bounded shutdown.
+// Pass a context to Next to bound its wait. Close stops subsequent reads.
 type Lite3Stream struct {
 	mu  sync.Mutex
 	ptr *C.plsm_lite3_stream_t
@@ -242,40 +237,32 @@ func (p *Pool) Close() {
 }
 
 func (p *Pool) getJSON(seq uint64) ([]byte, error) {
-	if p == nil {
-		return nil, closedError("pool")
+	stream, err := p.Fetch(Since(seq))
+	if err != nil {
+		return nil, err
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
+	defer stream.Close()
+	message, err := stream.Next(context.Background())
+	if err == io.EOF {
+		return nil, &Error{Kind: ErrorNotFound, Message: "message not found", Seq: &seq}
 	}
-	var cBuf C.plsm_buf_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_internal_pool_get_json(p.ptr, C.uint64_t(seq), &cBuf, &cErr)
-	if rc != 0 {
-		return nil, fromCError(cErr)
+	if err != nil {
+		return nil, err
 	}
-	return copyAndFreeBuf(&cBuf), nil
+	return message.Raw, nil
 }
 
-// getLite3 returns the raw Lite3 payload and metadata for the given sequence.
 func (p *Pool) getLite3(seq uint64) (*Lite3Frame, error) {
-	if p == nil {
-		return nil, closedError("pool")
+	stream, err := p.FetchLite3(Since(seq))
+	if err != nil {
+		return nil, err
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
+	defer stream.Close()
+	frame, err := stream.Next(context.Background())
+	if err == io.EOF {
+		return nil, &Error{Kind: ErrorNotFound, Message: "message not found", Seq: &seq}
 	}
-	var cFrame C.plsm_lite3_frame_t
-	var cErr *C.plsm_error_t
-	rc := C.plsm_internal_pool_get_lite3(p.ptr, C.uint64_t(seq), &cFrame, &cErr)
-	if rc != 0 {
-		return nil, fromCError(cErr)
-	}
-	return copyAndFreeLite3Frame(&cFrame), nil
+	return frame, err
 }
 
 func (s *Stream) Close() {
@@ -341,11 +328,14 @@ func (s *Lite3Stream) nextWait(wait uint64) (*Lite3Frame, int, error) {
 }
 
 func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {
-	if buf == nil || buf.data == nil || buf.len == 0 {
+	if buf == nil {
+		return nil
+	}
+	defer C.plsm_buf_free(buf)
+	if buf.data == nil || buf.len == 0 {
 		return nil
 	}
 	data := C.GoBytes(unsafe.Pointer(buf.data), C.int(buf.len))
-	C.plsm_buf_free(buf)
 	return data
 }
 
@@ -417,9 +407,9 @@ func cStringArray(values []string) (**C.char, func()) {
 }
 
 func closedError(target string) error {
-	return fmt.Errorf("%w: %s is closed", ErrClosed, target)
+	return api.ClosedError(target)
 }
 
 func invalidArgumentError(message string) error {
-	return fmt.Errorf("%w: %s", ErrInvalidArgument, message)
+	return api.InvalidArgumentError(message)
 }

@@ -32,7 +32,6 @@ static PyTypeObject *snapshot_type, *object_type, *array_type, *bytes_type, *ite
 static PyObject *error_factory, *library_owner;
 static uintptr_t configured_handle;
 static PyInterpreterState *configured_interpreter;
-static int (*get_view)(plsm_pool_t *, uint64_t, const plsm_message_view_t **, plsm_error_t **);
 static int (*from_bytes)(const uint8_t *, size_t, uint64_t, uint64_t, const plsm_message_view_t **,
                          plsm_error_t **);
 static void (*release_view)(const plsm_message_view_t *);
@@ -55,12 +54,12 @@ static int (*builder_new)(const plsm_text_t *, size_t, plsm_builder_t **, size_t
                           plsm_error_t **);
 static int (*builder_put)(plsm_builder_t *, size_t, const uint8_t *, size_t,
                           const plsm_view_value_t *, size_t *, plsm_error_t **);
-static int (*append_builder)(plsm_pool_t *, plsm_builder_t *, uint32_t,
+static int (*append_builder)(plsm_pool_t *, plsm_builder_t *, const plsm_feed_options_t *,
                              const plsm_message_view_t **, plsm_error_t **);
 static void (*builder_free)(plsm_builder_t *);
 static int (*copy_value)(plsm_builder_t *, size_t, const uint8_t *, size_t, plsm_value_ref_t,
                          plsm_error_t **);
-static int (*append_owner)(plsm_pool_t *, const plsm_message_view_t *, uint32_t,
+static int (*append_owner)(plsm_pool_t *, const plsm_message_view_t *, const plsm_feed_options_t *,
                            const plsm_message_view_t **, plsm_error_t **);
 
 static int (*stream_next)(plsm_stream_t *, uint64_t, size_t, size_t, const plsm_message_view_t **,
@@ -569,33 +568,6 @@ static PyObject *next_snapshots(PyObject *module, PyObject *args) {
     Py_DECREF(items);
     return result;
 }
-static PyObject *get_snapshot(PyObject *module, PyObject *args) {
-    (void)module;
-    if (!configured_handle) {
-        PyErr_SetString(PyExc_RuntimeError, "view backend is not configured");
-        return NULL;
-    }
-    PyObject *address, *sequence;
-    if (!PyArg_ParseTuple(args, "OO", &address, &sequence))
-        return NULL;
-    plsm_pool_t *pool = PyLong_AsVoidPtr(address);
-    if (PyErr_Occurred())
-        return NULL;
-    uint64_t seq = PyLong_AsUnsignedLongLong(sequence);
-    if (PyErr_Occurred())
-        return NULL;
-    const plsm_message_view_t *view = NULL;
-    plsm_error_t *error = NULL;
-    int rc;
-    Py_BEGIN_ALLOW_THREADS
-    rc = get_view(pool, seq, &view, &error);
-    Py_END_ALLOW_THREADS
-    if (rc) {
-        fail(error);
-        return NULL;
-    }
-    return snapshot_from_owner(view);
-}
 static PyObject *bytes_snapshot(PyObject *module, PyObject *args) {
     (void)module;
     if (!configured_handle) {
@@ -781,12 +753,13 @@ static PyObject *append_python(PyObject *module, PyObject *args) {
     plsm_pool_t *pool = PyLong_AsVoidPtr(address);
     if (PyErr_Occurred())
         return NULL;
+    const plsm_feed_options_t options = {.struct_size = sizeof(options), .durability = durability};
     if (Py_IS_TYPE(data, snapshot_type) && tags == Py_None) {
         const plsm_message_view_t *view = NULL;
         plsm_error_t *error = NULL;
         int rc;
         Py_BEGIN_ALLOW_THREADS
-        rc = append_owner(pool, ((Snapshot *)data)->view, durability, &view, &error);
+        rc = append_owner(pool, ((Snapshot *)data)->view, &options, &view, &error);
         Py_END_ALLOW_THREADS
         if (rc) {
             fail(error);
@@ -850,7 +823,7 @@ static PyObject *append_python(PyObject *module, PyObject *args) {
     const plsm_message_view_t *view = NULL;
     /* Input access has finished; the builder now owns all bytes. */
     Py_BEGIN_ALLOW_THREADS
-    rc = append_builder(pool, builder, durability, &view, &error);
+    rc = append_builder(pool, builder, &options, &view, &error);
     builder_free(builder);
     Py_END_ALLOW_THREADS
     if (rc) {
@@ -898,7 +871,6 @@ static PyObject *configure(PyObject *module, PyObject *args) {
         }                                                                                          \
         memcpy(&field, &symbol, sizeof(field));                                                    \
     } while (0)
-    LOAD(get_view, "plsm_internal_pool_get_view");
     LOAD(from_bytes, "plsm_view_from_lite3");
     LOAD(release_view, "plsm_view_release");
     LOAD(view_seq, "plsm_view_seq");
@@ -934,7 +906,6 @@ static PyObject *configure(PyObject *module, PyObject *args) {
 }
 static PyMethodDef module_methods[] = {{"_configure", configure, METH_VARARGS, NULL},
                                        {"adopt_owner", adopt_owner, METH_O, NULL},
-                                       {"get", get_snapshot, METH_VARARGS, NULL},
                                        {"append", append_python, METH_VARARGS, NULL},
                                        {"from_bytes", bytes_snapshot, METH_VARARGS, NULL},
                                        {"next_batch", next_snapshots, METH_VARARGS, NULL},

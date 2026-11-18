@@ -12,7 +12,6 @@ use plasmite::api::RemoteClient;
 use serde_json::Value;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use url::Url;
@@ -225,42 +224,6 @@ pub(crate) fn parse_size(input: &str) -> Result<u64, Error> {
             .with_message("size overflow")
             .with_hint("Use a smaller size value.")
     })
-}
-
-pub(crate) fn parse_duration(input: &str) -> Result<Duration, Error> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("invalid duration")
-            .with_hint("Use a number plus ms|s|m|h (e.g. 10s)."));
-    }
-    let split = trimmed.char_indices().find(|(_, ch)| !ch.is_ascii_digit());
-    let (num_str, unit) = match split {
-        Some((idx, _)) => trimmed.split_at(idx),
-        None => ("", ""),
-    };
-    if num_str.is_empty() || unit.is_empty() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("invalid duration")
-            .with_hint("Use a number plus ms|s|m|h (e.g. 10s)."));
-    }
-    let value: u64 = num_str.parse().map_err(|_| {
-        Error::new(ErrorKind::Usage)
-            .with_message("invalid duration")
-            .with_hint("Use a number plus ms|s|m|h (e.g. 10s).")
-    })?;
-    let millis = match unit {
-        "ms" => value,
-        "s" => value.saturating_mul(1_000),
-        "m" => value.saturating_mul(60_000),
-        "h" => value.saturating_mul(3_600_000),
-        _ => {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("invalid duration")
-                .with_hint("Use a number plus ms|s|m|h (e.g. 10s)."));
-        }
-    };
-    Ok(Duration::from_millis(millis))
 }
 
 pub(crate) fn parse_durability(input: &str) -> Result<Durability, Error> {

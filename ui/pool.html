@@ -355,7 +355,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
     <script>
       (() => {
         const $ = (id) => document.getElementById(id);
-        const { parseJSON, readEvents, followEvents, sequence, cursor, tailStart, messageJSON, loginURL } = PlasmiteUI;
+        const { parseJSON, readJsonEvents, followEvents, sequence, cursor, tailStart, messageJSON, loginURL } = PlasmiteUI;
         const poolPath = location.pathname.slice("/ui/pools/".length);
         const poolName = (() => { try { return decodeURIComponent(poolPath); } catch (_) { return poolPath; } })();
         const requested = Number(new URLSearchParams(location.search).get("n") || "400");
@@ -1120,20 +1120,27 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             }
             const start = first.seq - BigInt(pageSize);
             const from = start > oldest ? start : oldest;
-            const query = new URLSearchParams({ gap_policy: "error", since_seq: from, max: first.seq - from, timeout_ms: 1000 });
-            const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query,
-              { cache: "no-store", signal: controller.signal });
-            if (response.status === 401) { toLogin(); return; }
-            if (!response.ok || !response.body) throw new Error("Earlier messages failed (" + response.status + ")");
-            await readEvents(response.body, event => {
-              if (generation !== state.generation) return false;
-              if (event.name === "pool" && acceptPool(event.data)) return false;
-              if (event.name === "error") throw new Error(event.data.error?.message || "Earlier messages were overwritten");
-              if (event.name !== "message") return;
-              if (event.data.seq >= first.seq) return false;
-              older.push(fromRaw(event.data));
-              return older.length < pageSize;
-            }, controller.signal);
+            let next = from;
+            while (next != null) {
+              const query = new URLSearchParams({ since: next, until: first.seq - 1n });
+              const response = await fetch("/v2/pools/" + encodeURIComponent(poolName) + "/fetch?" + query,
+                { cache: "no-store", signal: controller.signal });
+              if (response.status === 401) { toLogin(); return; }
+              if (!response.ok || !response.body) throw new Error("Earlier messages failed (" + response.status + ")");
+              if (response.headers.get("plasmite-incarnation") !== state.info?.incarnation) {
+                await response.body.cancel();
+                await loadInfo(controller.signal);
+                return;
+              }
+              next = null;
+              await readJsonEvents(response.body, event => {
+                if (generation !== state.generation) return false;
+                if (event.name === "error") throw new Error(event.data.error?.message || "Earlier messages were overwritten");
+                if (event.name === "cutoff") next = event.data.next_seq;
+                if (event.name !== "message") return;
+                older.push(fromRaw(event.data));
+              }, controller.signal);
+            }
             if (!older.length) showNotice("No earlier messages arrived. They may have been overwritten; try Load earlier again.");
           } catch (error) {
             showNotice(controller.signal.aborted ? "Loading earlier messages timed out. Try Load earlier again." :
@@ -1166,25 +1173,39 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           let generation = state.generation;
           if (state.nextSeq != null && cursor(state.nextSeq) == null) return;
           await followEvents({
-            retryMs, signal: controller.signal,
+            retryMs, signal: controller.signal, read: readJsonEvents,
             url() {
-              const query = new URLSearchParams({ gap_policy: "continue" });
-              if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
-              return "/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query;
+              const query = new URLSearchParams();
+              if (state.nextSeq != null) query.set("since", cursor(state.nextSeq));
+              return "/v2/pools/" + encodeURIComponent(poolName) + "/follow?" + query;
             },
-            onResponse(response) {
+            async onResponse(response) {
               generation = state.generation;
               if (response.status === 401) { toLogin(); return false; }
               if (response.status === 404) { showMissing(); return false; }
-              if (response.ok && response.body) setLive(true);
+              if (response.ok && response.body) {
+                const incarnation = response.headers.get("plasmite-incarnation");
+                if (incarnation !== state.info?.incarnation) {
+                  if (!await loadInfo(controller.signal) || generation !== state.generation) return false;
+                  if (incarnation !== state.info?.incarnation) {
+                    await response.body.cancel();
+                    throw new Error("Pool changed while opening the stream");
+                  }
+                }
+                setLive(true);
+              }
             },
             onEvent(event) {
               if (generation !== state.generation) return false;
-              if (event.name === "pool") {
-                if (acceptPool(event.data, false)) throw new Error("Pool replaced");
+              if (event.name === "cutoff") {
+                state.nextSeq = event.data.next_seq;
                 return;
               }
-              if (event.name === "error") throw new Error("Stream error");
+              if (event.name === "error") {
+                const error = event.data.error;
+                if (error?.kind === "RetentionGap") state.nextSeq = error.next_seq;
+                throw new Error(error?.message || "Stream error");
+              }
               if (event.name === "message") {
                 addMessage(event.data);
                 return cursor(state.nextSeq) != null;

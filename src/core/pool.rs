@@ -762,16 +762,6 @@ impl Pool {
         }
     }
 
-    // Start a range at the validated index entry when available. Without an
-    // index the cursor traverses the ring once, rather than once per lookup.
-    pub(crate) fn cursor_from_seq(&self, seq: u64) -> Result<crate::core::cursor::Cursor, Error> {
-        let _lock = self.read_lock()?;
-        let header = self.header_locked()?;
-        let mut cursor = crate::core::cursor::Cursor::new();
-        self.seek_index_locked(&mut cursor, header, seq);
-        Ok(cursor)
-    }
-
     pub(crate) fn seek_index_locked(
         &self,
         cursor: &mut crate::core::cursor::Cursor,
@@ -909,6 +899,7 @@ impl Pool {
 
     /// Copy a stable frame directly into caller storage. An undersized buffer
     /// receives only the required length; it never receives a partial payload.
+    #[cfg(test)]
     pub(crate) fn get_into(
         &self,
         seq: u64,
@@ -2437,7 +2428,7 @@ mod tests {
 
     #[test]
     fn notify_reader_child() {
-        use crate::api::{FollowOptions, PoolApiExt};
+        use crate::api::{Read, Since};
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
         let Some(path) = std::env::var_os("PLASMITE_NOTIFY_READER_PATH") else {
@@ -2448,14 +2439,9 @@ mod tests {
         let marker = |kind: &str| path.with_extension(format!("{reader_id}{kind}"));
         let reader = Pool::open(&path).expect("independent reader");
         let cancelled = Arc::new(AtomicBool::new(false));
-        let mut options = FollowOptions {
-            start: crate::api::FollowStart::all(),
-            ..Default::default()
-        };
-        options.poll_interval = Duration::from_millis(5);
-        options.timeout = Some(Duration::from_secs(3));
-        options.cancel = Some(Arc::clone(&cancelled));
-        let mut tail = reader.follow_legacy(options);
+        let mut tail = reader
+            .follow(Read::since(Since::Oldest).cancel(Arc::clone(&cancelled)))
+            .expect("open reader");
         // The separate process registers its waiter before any append.
         fs::write(marker("ready"), b"ready").expect("ready");
         for expected in 1..=128 {

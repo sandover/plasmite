@@ -50,23 +50,30 @@ pub(super) fn open(
     url: Url,
     accept: &'static str,
     key: Option<AccessKey>,
-    cancel: Arc<AtomicBool>,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> ApiResult<Option<Reader>> {
-    if cancel.load(Ordering::Acquire) {
+    if cancel
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::Acquire))
+    {
         return Ok(None);
     }
     let (stop, stopped) = oneshot::channel();
     let (demand, mut requests) = async_mpsc::channel(1);
     let (deliver, chunks) = mpsc::channel();
     let (ready, opened) = mpsc::channel();
-    let flag = Arc::clone(&cancel);
+    let flag = cancel.clone();
     stream_runtime()?.spawn(async move {
         tokio::select! {
             biased;
             _ = stopped => {},
             _ = async {
-                while !flag.load(Ordering::Acquire) {
-                    tokio::time::sleep(Duration::from_millis(25)).await;
+                if let Some(flag) = flag {
+                    while !flag.load(Ordering::Acquire) {
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                    }
+                } else {
+                    std::future::pending::<()>().await;
                 }
             } => {},
             _ = async move {
@@ -105,7 +112,13 @@ pub(super) fn open(
                 _stop: stop,
             })
         }),
-        Err(_) if cancel.load(Ordering::Acquire) => Ok(None),
+        Err(_)
+            if cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Acquire)) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(transport_error("stream could not open", error)),
     }
 }
@@ -130,6 +143,11 @@ fn stream_runtime() -> ApiResult<&'static Runtime> {
 }
 
 async fn connect(url: Url, accept: &'static str, key: Option<AccessKey>) -> ApiResult<Body> {
+    if key.is_some() && url.scheme() != "https" {
+        return Err(
+            Error::new(ErrorKind::Corrupt).with_message("saved native connections must use HTTPS")
+        );
+    }
     let host = match url.host().expect("validated server URL") {
         Host::Domain(name) => name.to_owned(),
         Host::Ipv4(ip) => ip.to_string(),

@@ -113,18 +113,16 @@ async fn read<const LIVE: bool>(
         (None, Some(last)) => Read::last(last),
         (None, None) => Read::new(),
     };
-    if let Some(end) = query.until {
-        if LIVE
+    if query.until.is_some()
+        && (LIVE
             || !query
                 .since
                 .as_ref()
-                .is_some_and(|since| since.parse::<u64>().is_ok())
-        {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("until requires an explicit continuation sequence on fetch")
-                .into());
-        }
-        options = options.until(end);
+                .is_some_and(|since| since.parse::<u64>().is_ok()))
+    {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("until requires an explicit continuation sequence on fetch")
+            .into());
     }
     let tags = url::form_urlencoded::parse(raw_query.as_deref().unwrap_or_default().as_bytes())
         .filter_map(|(key, value)| (key == "tag").then(|| value.into_owned()));
@@ -136,23 +134,20 @@ async fn read<const LIVE: bool>(
     let permit = acquire_tail_permit(&state)?;
     let client = state.client.clone();
     let timeout = Duration::from_millis(state.max_tail_timeout_ms);
-    let deadline = Instant::now()
-        .checked_add(timeout)
-        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("stream limit is out of range"))?;
     let (send, receive) = mpsc::channel(16);
     let (opened, opening) = tokio::sync::oneshot::channel();
     let revoked = grant.as_ref().map(AccessGrant::cancellation_flag);
     let worker = ReadWorker {
         send,
-        deadline,
+        timeout,
         revoked,
         binary,
     };
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        worker.run::<LIVE>(client, pool_ref, options, opened);
+        worker.run::<LIVE>(client, pool_ref, options, query.until, opened);
     });
-    tokio::time::timeout(timeout, opening)
+    let incarnation = tokio::time::timeout(timeout, opening)
         .await
         .map_err(|_| Error::new(ErrorKind::Busy).with_message("stream opening took too long"))?
         .map_err(|_| Error::new(ErrorKind::Io).with_message("stream could not open"))??;
@@ -174,6 +169,10 @@ async fn read<const LIVE: bool>(
         })
         .map(Ok::<_, std::convert::Infallible>);
     let mut response = Response::new(Body::from_stream(body));
+    response.headers_mut().insert(
+        "plasmite-incarnation",
+        HeaderValue::from_str(&incarnation).expect("native identity is ASCII"),
+    );
     let media_type = if binary {
         "application/x-plasmite-lite3-stream"
     } else {
@@ -187,7 +186,7 @@ async fn read<const LIVE: bool>(
 
 struct ReadWorker {
     send: mpsc::Sender<Bytes>,
-    deadline: Instant,
+    timeout: Duration,
     revoked: Option<Arc<AtomicBool>>,
     binary: bool,
 }
@@ -198,7 +197,8 @@ impl ReadWorker {
         client: LocalClient,
         pool_ref: PoolRef,
         options: Read,
-        opened: tokio::sync::oneshot::Sender<Result<(), Error>>,
+        until: Option<u64>,
+        opened: tokio::sync::oneshot::Sender<Result<String, Error>>,
     ) {
         let pool = match client.open_pool(&pool_ref, false) {
             Ok(pool) => pool,
@@ -207,15 +207,24 @@ impl ReadWorker {
                 return;
             }
         };
+        let incarnation = match pool.incarnation() {
+            Ok(incarnation) => incarnation,
+            Err(error) => {
+                let _ = opened.send(Err(error));
+                return;
+            }
+        };
         let stream = if LIVE {
             pool.follow_lite3(options)
+        } else if let Some(until) = until {
+            pool.continue_fetch_lite3(options, until)
         } else {
             pool.fetch_lite3(options)
         };
         let mut reader = match stream {
             Ok(reader) => reader,
             Err(error) if error.kind() == ErrorKind::RetentionGap => {
-                if opened.send(Ok(())).is_ok() {
+                if opened.send(Ok(incarnation)).is_ok() {
                     self.error(&error);
                 }
                 return;
@@ -225,7 +234,13 @@ impl ReadWorker {
                 return;
             }
         };
-        if opened.send(Ok(())).is_err() {
+        let Some(deadline) = Instant::now().checked_add(self.timeout) else {
+            let _ = opened.send(Err(
+                Error::new(ErrorKind::Usage).with_message("stream limit is out of range")
+            ));
+            return;
+        };
+        if opened.send(Ok(incarnation)).is_err() {
             return;
         }
 
@@ -243,7 +258,7 @@ impl ReadWorker {
                 // The worker already runs on a blocking thread. Let the receiver
                 // wake it as soon as there is room while checking revocation and
                 // the cutoff even if the consumer has stopped reading.
-                let wait = self.deadline.saturating_duration_since(Instant::now());
+                let wait = deadline.saturating_duration_since(Instant::now());
                 let room = tokio::runtime::Handle::current().block_on(async {
                     tokio::time::timeout(
                         wait.min(Duration::from_millis(50)),
@@ -257,14 +272,14 @@ impl ReadWorker {
                         continue;
                     }
                     Ok(Err(_)) => return,
-                    Err(_) if Instant::now() >= self.deadline => {
+                    Err(_) if Instant::now() >= deadline => {
                         self.cutoff(reader.position());
                         return;
                     }
                     Err(_) => continue,
                 }
             }
-            let wait = self.deadline.saturating_duration_since(Instant::now());
+            let wait = deadline.saturating_duration_since(Instant::now());
             if wait.is_zero() {
                 self.cutoff(reader.position());
                 return;
@@ -356,6 +371,69 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn quiet_read_releases_its_slot_when_response_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let reference = PoolRef::name("quiet");
+        client
+            .create_pool(&reference, PoolOptions::new(65536))
+            .unwrap();
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = permits.clone().try_acquire_owned().unwrap();
+        let (send, receive) = mpsc::channel(2);
+        let (opened, opening) = tokio::sync::oneshot::channel();
+        let done = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            ReadWorker {
+                send,
+                timeout: Duration::from_secs(5),
+                revoked: None,
+                binary: false,
+            }
+            .run::<true>(client, reference, Read::new(), None, opened);
+        });
+        opening.await.unwrap().unwrap();
+        drop(receive);
+        tokio::time::timeout(Duration::from_millis(500), done)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(permits.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn revoked_quiet_read_sends_an_error_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let reference = PoolRef::name("revoked");
+        client
+            .create_pool(&reference, PoolOptions::new(65536))
+            .unwrap();
+        let (send, mut receive) = mpsc::channel(2);
+        let (opened, opening) = tokio::sync::oneshot::channel();
+        let revoked = Arc::new(AtomicBool::new(false));
+        let worker = ReadWorker {
+            send,
+            timeout: Duration::from_secs(5),
+            revoked: Some(revoked.clone()),
+            binary: false,
+        };
+        let done = tokio::task::spawn_blocking(move || {
+            worker.run::<true>(client, reference, Read::new(), None, opened);
+        });
+        opening.await.unwrap().unwrap();
+        revoked.store(true, Ordering::Release);
+        let bytes = tokio::time::timeout(Duration::from_millis(500), receive.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let error: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error["type"], "error");
+        assert_eq!(error["error"]["kind"], "Permission");
+        done.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn full_read_queue_keeps_room_for_cutoff_at_the_next_unsent_record() {
         let dir = tempfile::tempdir().unwrap();
         let client = LocalClient::new().with_pool_dir(dir.path());
@@ -372,11 +450,11 @@ mod tests {
         let done = tokio::task::spawn_blocking(move || {
             let worker = ReadWorker {
                 send,
-                deadline: Instant::now() + Duration::from_millis(250),
+                timeout: Duration::from_millis(250),
                 revoked: None,
                 binary: false,
             };
-            worker.run::<false>(client, pool_ref, Read::new(), opened);
+            worker.run::<false>(client, pool_ref, Read::new(), None, opened);
         });
         opening.await.unwrap().unwrap();
         done.await.unwrap();

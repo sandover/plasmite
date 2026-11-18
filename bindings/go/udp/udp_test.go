@@ -311,7 +311,7 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 			}
 		}
 		follow.Cancel()
-		if _, err := follow.Next(context.Background()); !errors.Is(err, api.ErrClosed) {
+		if _, err := follow.Next(context.Background()); !isUsage(err) {
 			t.Fatalf("read after close returned %v, want ErrClosed", err)
 		}
 	})
@@ -470,7 +470,7 @@ func checkNativeFramesRetainArrivalOrder(t *testing.T, mode string) {
 	defer cancel()
 	var retained []*local.MessageView
 	var sequences []uint64
-	var skips []*Gap
+	var skips []*Skip
 	var progress []*Progress
 	for {
 		event, err := follow.Next(ctx)
@@ -499,7 +499,7 @@ func checkNativeFramesRetainArrivalOrder(t *testing.T, mode string) {
 				t.Fatal("view identity/bytes changed")
 			}
 			retained = append(retained, event.View)
-		case *Gap:
+		case *Skip:
 			skips = append(skips, event)
 		case *Progress:
 			progress = append(progress, event)
@@ -592,7 +592,7 @@ func TestViewFollowCancelsAndClosesWhileIdle(t *testing.T) {
 	follow.Close()
 	select {
 	case err = <-done:
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, ErrClosed) {
+		if !errors.Is(err, context.Canceled) && !isUsage(err) {
 			t.Fatalf("wrong close: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -616,4 +616,9 @@ func fetchLocalView(pool *local.Pool, seq uint64) (*local.MessageView, error) {
 	}
 	defer reader.Close()
 	return reader.Next(context.Background())
+}
+
+func isUsage(err error) bool {
+	var typed *api.Error
+	return errors.As(err, &typed) && typed.Kind == api.ErrorUsage
 }

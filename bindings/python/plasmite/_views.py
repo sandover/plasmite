@@ -4,7 +4,6 @@ import base64
 import ctypes
 import json
 import os
-import operator
 import platform
 import sysconfig
 import sys
@@ -16,7 +15,8 @@ from . import (
     _require_open,
     _take_error,
     plsm_error_t,
-    _optional_non_negative_int,
+    _wait_deadline,
+    _wait_ms,
     _ensure_bytes,
 )
 
@@ -130,26 +130,16 @@ def to_json(value):
     raise TypeError("to_json expects a Plasmite view or scalar")
 
 
-def get_view(pool, seq):
-    if not isinstance(seq, int) or not 0 <= seq < 1 << 64:
-        raise ValueError("seq must fit an unsigned 64-bit integer")
-    # Match the integer conversion before borrowing a pool pointer. An object
-    # can report __class__=int while its __index__ still runs Python callbacks.
-    seq = operator.index(seq)
-    _require_open(pool._ptr, "pool")
-    return backend.get(ctypes.cast(pool._ptr, ctypes.c_void_p).value, seq)
-
-
-def from_lite3(payload, seq=0, timestamp_ns=0):
+def from_lite3(payload, seq=0, time=0):
     if not isinstance(payload, (bytes, bytearray, memoryview)):
         raise TypeError("payload must be bytes-like")
-    if not all(isinstance(n, int) and 0 <= n < 1 << 64 for n in [seq, timestamp_ns]):
+    if not all(isinstance(n, int) and 0 <= n < 1 << 64 for n in [seq, time]):
         raise ValueError("identity must fit unsigned 64-bit integers")
     encoded = bytes(payload)
     # __bytes__ may return a subtype; its __len__ is not the native buffer size.
     if type(encoded) is not bytes:
         encoded = bytes.__getitem__(encoded, slice(None))
-    return backend.from_bytes(encoded, seq, timestamp_ns)
+    return backend.from_bytes(encoded, seq, time)
 
 
 def append_view(pool, data, tags, durability):
@@ -172,35 +162,32 @@ class ViewStream:
         return self
 
     def __next__(self):
-        return self._read(1, sys.maxsize, None)[0]
+        return self.next()
 
-    def next_batch(self, max_count, max_bytes, timeout_ms=None):
-        # Normalize callbacks before borrowing a pointer or calculating deadlines.
+    def next(self, wait=None):
+        items = self.next_batch(1, sys.maxsize, wait)
+        return items[0] if items else None
+
+    def next_batch(self, max_count, max_bytes, wait=None):
+        # Normalize callbacks before borrowing a native handle.
         if not isinstance(max_count, int) or not isinstance(max_bytes, int):
             raise TypeError("batch bounds must be integers")
         max_count, max_bytes = int(max_count), int(max_bytes)
         if not 0 < max_count <= sys.maxsize or not 0 < max_bytes <= sys.maxsize:
             raise ValueError("batch bounds must be positive and fit address space")
-        timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
-        timeout_ms = None if timeout_ms is None else int(timeout_ms)
-        return self._read(max_count, max_bytes, timeout_ms)
-
-    def _read(self, max_count, max_bytes, timeout_ms):
-        deadline = None if timeout_ms is None else time.monotonic() + timeout_ms / 1000
+        deadline = _wait_deadline(wait)
         stream = self._stream
         while True:
             if self._cancel is not None and self._cancel.is_set():
                 stream.cancel()
                 raise StopIteration
-            wait = (
-                50
-                if deadline is None
-                else min(50, max(0, int((deadline - time.monotonic()) * 1000)))
-            )
             with stream._lock:
-                _require_open(stream._ptr, "stream")
+                if not stream._ptr:
+                    raise StopIteration
                 address = ctypes.cast(stream._ptr, ctypes.c_void_p).value
-                status, items = backend.next_batch(address, max_count, max_bytes, wait)
+                status, items = backend.next_batch(
+                    address, max_count, max_bytes, _wait_ms(deadline, self._cancel)
+                )
             if status == 1:
                 if self._cancel is not None and self._cancel.is_set():
                     stream.cancel()
@@ -208,7 +195,7 @@ class ViewStream:
                 return items
             if status in (2, 3):
                 raise StopIteration
-            if deadline is not None and time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic_ns() >= deadline:
                 return []
 
     def cancel(self):

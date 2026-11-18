@@ -4,9 +4,6 @@
  * The input is an unexported immutable Go allocation validated once. C retains
  * no pointers. Every pointer-free slot refers to that same allocation. */
 #include "plasmite.h"
-int plsm_internal_pool_get_into(plsm_pool_t *, uint64_t, uint8_t *, size_t, size_t *,
-    uint64_t *, uint32_t *, plsm_error_t **);
-int plsm_internal_pool_get_view(plsm_pool_t *, uint64_t, plsm_message_view_t **, plsm_error_t **);
 typedef struct {
     uint32_t kind, reserved;
     int64_t integer;
@@ -22,12 +19,6 @@ int plsm_go_message_json(const uint8_t *, size_t, const size_t *, size_t, size_t
 
 /* Return small C results by value. Go need not heap-allocate one escaping output
  * variable per pointer argument, and every result pointer owns native memory. */
-typedef struct { int status; plsm_error_t *error; size_t len; uint64_t timestamp; uint32_t flags; } plsm_go_get_result_t;
-static inline plsm_go_get_result_t plsm_go_get_into(plsm_pool_t *pool, uint64_t seq, uint8_t *data, size_t capacity) {
-    plsm_go_get_result_t result = {0};
-    result.status = plsm_internal_pool_get_into(pool,seq,data,capacity,&result.len,&result.timestamp,&result.flags,&result.error);
-    return result;
-}
 typedef struct { int status; plsm_error_t *error; size_t data,meta; plsm_buf_t proof; } plsm_go_validation_t;
 static inline plsm_go_validation_t plsm_go_validate_result(const uint8_t *data,size_t len) {
     plsm_go_validation_t result = {0};

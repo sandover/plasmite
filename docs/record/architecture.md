@@ -181,7 +181,7 @@ Key invariants:
 ## Write/read paths
 
 The storage reader returns an owned Lite3 frame. Interface adapters choose the
-representation their caller requests. C JSON readers validates the immutable
+representation their caller requests. C JSON readers validate the immutable
 frame, borrows its tags, keys and string values, and formats the envelope
 directly through Serde. It uses temporary collection-entry lists to retain
 deterministic key order. Native byte fields stream base64 into that same writer.
@@ -277,8 +277,6 @@ reports the losses the server can announce.
 
 `duplex` opens its reader before sending and keeps receiving after input ends.
 Command capture uses an ordinary shell pipe into `feed --input-format lines`.
-The major release keeps the pool format and replaces the old public verbs so
-each surface can share the new vocabulary.
 
 ## Transport architecture
 
@@ -302,38 +300,19 @@ Plasmite is transport-agnostic at the core.
   Only explicit server skips produce gap reports; DATA/progress sequence jumps
   never suppress a message or establish loss. Opening and normal reception share
   packet validation and event handling; their wait and retry rules stay separate.
-  The client performs no data repair. Public `Gap`/`udp-gap` names describe server
+  The client performs no data repair. Public `Skip`/`udp-skip` names describe server
   skips for compatibility; the reserved `Unknown` value is not a wire skip reason.
   UDP feed reports local submission success. HTTP feed returns a
   committed message or a numeric receipt. The private wire codec serves the CLI/server and library.
 - Future transports must be adapters over the existing core, not alternate correctness engines.
 
-Adapters use the core's storage rules. Keep network operations and delivery
-policy outside `src/core`. Core helpers such as the read-only native file
-identity check apply to every adapter; they carry no transport-specific state.
+Adapters use the core's storage rules. Keep network operations and delivery policy outside `src/core`. Core helpers such as the read-only native file identity check apply to every adapter; they carry no transport-specific state.
 
-The HTTP adapter runs synchronous pool operations on Tokio's blocking worker
-pool. A semaphore admits at most `--max-tail-concurrency` ordinary storage
-operations at once; reusing this existing server budget avoids a second tuning
-surface. Admission is immediate. A request that arrives when every permit is in
-use receives the shared `Busy` error instead of waiting in an unbounded queue.
-Long-lived tail streams and MCP waits retain their specialized concurrency
-path, so ordinary storage pressure does not occupy an async runtime worker or
-prevent health and MCP routing from making progress.
+The HTTP adapter runs synchronous pool operations on Tokio's blocking worker pool. A semaphore admits at most `--max-tail-concurrency` ordinary storage operations at once; reusing this existing server budget avoids a second tuning surface. Admission is immediate. A request that arrives when every permit is in use receives the shared `Busy` error instead of waiting in an unbounded queue. Long-lived tail streams and MCP waits retain their specialized concurrency path, so ordinary storage pressure does not occupy an async runtime worker or prevent health and MCP routing from making progress.
 
-Once admitted, a blocking operation runs to completion even if its requesting
-future is dropped. Its permit remains held until the operation exits. This
-preserves the synchronous core's ownership and locking rules during request
-cancellation. HTTP tail producers carry an absolute deadline from admission
-through reads and bounded output-queue waits. Expiry releases the tail permit
-even if the connected client stops draining the queue.
+Once admitted, a blocking operation runs to completion even if its requesting future is dropped. Its permit remains held until the operation exits. This preserves the synchronous core's ownership and locking rules during request cancellation. HTTP tail producers carry an absolute deadline from admission through reads and bounded output-queue waits. Expiry releases the tail permit even if the connected client stops draining the queue.
 
-HTTP JSON and binary readers carry the same end states. Complete ends a
-finite fetch, error carries the failure, and cutoff carries the next unread
-sequence when the server reaches a limit. A client opens a new request at
-that sequence and keeps its original fetch boundary. A connection that ends
-without a final record raises `Io`. This prevents partial history from looking
-like a finished fetch, including when the client filters by tags.
+HTTP JSON and binary readers carry the same end states. Complete ends a finite fetch, error carries the failure, and cutoff carries the next unread sequence when the server reaches a limit. A client opens a new request at that sequence and keeps its original fetch boundary. A connection that ends without a final record raises `Io`. This prevents partial history from looking like a finished fetch, including when the client filters by tags.
 
 ## Extension seams
 

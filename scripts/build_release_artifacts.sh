@@ -46,11 +46,11 @@ if [[ "$target" == *windows-msvc && -n "${VCToolsInstallDir:-}" ]]; then
   export PATH="$msvc_dir/bin/Hostx64/x64:$PATH"
 fi
 cargo build --release --locked --target "$target" --bins --lib
+bash "$root_dir/scripts/stage_versioned_library.sh" "$root_dir/target/$target/release" "$target"
 
 if [[ "$target" == *windows-msvc ]]; then
   (
     cd "$root_dir/target/$target/release"
-    cp plasmite.dll plasmite2.dll
     # Cargo's import library names plasmite.dll. Generate one that names the
     # distributed DLL and includes exactly the exports present in that build.
     exports="$(dumpbin.exe -nologo -exports plasmite2.dll | awk '/^[[:space:]]*[0-9]+[[:space:]]+[[:xdigit:]]+[[:space:]]+[[:xdigit:]]+[[:space:]]+plsm_/ { print $4 }')"

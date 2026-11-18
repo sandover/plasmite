@@ -189,9 +189,8 @@ receipt.
 The [UDP receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
 requires arrival-order delivery, including late messages and duplicates. Only
 explicit server skips produce gap events; sequence/progress jumps never suppress
-frames or establish loss. This source change awaits a major release. Finite
-follows end on terminal
-progress and may leave DATA in flight.
+frames or establish loss. Finite readers end on terminal progress and may
+leave DATA in flight.
 
 ```js
 const { UdpClient } = require("plasmite");
@@ -202,7 +201,7 @@ const { UdpClient } = require("plasmite");
   const follow = await pool.follow();
 
   try {
-    pool.feed({ temperature: 23 }, { tags: ["sensor"] });
+    await pool.feed({ temperature: 23 }, { tags: ["sensor"] });
     for await (const event of follow) {
       if (event.kind === "frame") {
         console.log(event.seq, event.message.data);
@@ -422,8 +421,24 @@ and remote-access changes.
 
 MIT
 
-For playback timing, use the asynchronous tail and an application scheduler; see the
+For playback timing, use the asynchronous reader and an application scheduler; see the
 [2.0 upgrade guide](../../docs/record/upgrading-2.0.md#applications-control-playback-timing).
+
+## HTTPS pools
+
+After saving a connection with `plasmite access connect https://pools.example.net:9743`, use the same module functions for a pool URL.
+
+```js
+const pool = openPool("https://pools.example.net:9743/events", { create: true });
+try {
+  await pool.feed({ ready: true }, { tags: ["status"] });
+  for await (const message of await pool.fetch({ last: 1 })) console.log(message.data);
+} finally {
+  pool.close();
+}
+```
+
+Use `reader.next(wait)` with seconds on any transport. A zero wait polls. Use an `AbortSignal` or close the reader to stop it. The separate `RemoteClient` also works without a native addon on a remote-only installation.
 
 ## Numeric feed receipts
 
@@ -433,4 +448,4 @@ console.log(receipt.seq, receipt.time); // exact bigint values
 ```
 
 `feedJsonReceipt` accepts JSON bytes and `feedLite3Receipt` accepts encoded
-Lite3 bytes. Both return the committed sequence and time.
+Lite3 bytes. Both resolve to the committed sequence and time. All feed methods on a native pool return promises.

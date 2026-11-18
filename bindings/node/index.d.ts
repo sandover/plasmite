@@ -49,7 +49,6 @@ export interface UdpEvent {
   nextSeq?: bigint
   endSeq?: bigint
   terminal?: boolean
-  retentionGap?: boolean
 }
 export interface UdpWait {
   /** 0=timeout, 1=event, 2=finished, 3=cancelled. */
@@ -95,14 +94,12 @@ export declare class Client {
 export declare class Pool {
   prepareAppend(durability: Durability): NativeAppendTarget
   infoJson(): Buffer
-  feedJson(payload: Buffer, tags: Array<string>, durability: Durability): Buffer
+  feedJson(payload: Buffer, tags: Array<string>, durability: Durability): Promise<unknown>
   openRead(finite: boolean, kind: number, value: bigint, tags: Array<string>, view?: boolean | undefined | null): Stream
   openLite3Read(finite: boolean, kind: number, value: bigint, tags: Array<string>): Lite3Stream
-  feedLite3(payload: Buffer, durability: Durability): Buffer
-  feedJsonReceipt(payload: Buffer, tags: Array<string>, durability: Durability): FeedReceipt
-  feedLite3Receipt(payload: Buffer, durability: Durability): FeedReceipt
-  getJson(seq: number | bigint): Buffer
-  getLite3(seq: number | bigint): Lite3Frame
+  feedLite3(payload: Buffer, durability: Durability): Promise<unknown>
+  feedJsonReceipt(payload: Buffer, tags: Array<string>, durability: Durability): Promise<unknown>
+  feedLite3Receipt(payload: Buffer, durability: Durability): Promise<unknown>
   getView(seq: number | bigint): Promise<unknown>
   close(): void
 }

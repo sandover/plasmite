@@ -94,8 +94,9 @@ where
         }
         let line = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
         let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let line = std::str::from_utf8(line)
-            .map_err(|err| input_error("line input must be valid UTF-8").with_source(err))?;
+        let line = std::str::from_utf8(line).map_err(|err| {
+            input_error(&format!("line {} is not valid UTF-8", count + 1)).with_source(err)
+        })?;
         on_record(InputRecord::Json(serde_json::json!({ "line": line })))?;
         count += 1;
     }

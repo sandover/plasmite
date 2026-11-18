@@ -34,24 +34,20 @@ class Views(unittest.TestCase):
 
     def test_sequence_callback_closes_before_view_handle_borrow(self):
         from unittest.mock import patch
-        from plasmite import _views
-
         pool = self.pool
 
         class Sequence(int):
-            def __ge__(self, other):
+            def __lt__(self, other):
                 pool.close()
-                return True
+                return False
 
-        with patch.object(_views.backend, "get") as get:
+        with patch.object(plasmite._LIB, "plsm_pool_fetch") as get:
             with self.assertRaisesRegex(plasmite.PlasmiteError, "closed"):
                 pool._get_view(Sequence(1))
             get.assert_not_called()
 
     def test_index_callback_finishes_before_view_handle_borrow(self):
         from unittest.mock import patch
-        from plasmite import _views
-
         pool = self.pool
 
         class Sequence:
@@ -63,13 +59,16 @@ class Views(unittest.TestCase):
                 return True
 
             def __lt__(self, other):
-                return True
+                return False
+
+            def __gt__(self, other):
+                return False
 
             def __index__(self):
                 pool.close()
                 return 1
 
-        with patch.object(_views.backend, "get") as get:
+        with patch.object(plasmite._LIB, "plsm_pool_fetch") as get:
             with self.assertRaisesRegex(plasmite.PlasmiteError, "closed"):
                 pool._get_view(Sequence())
             get.assert_not_called()
@@ -194,7 +193,8 @@ class Views(unittest.TestCase):
 
         ffi._configure()
         seq = self.pool.feed({"blob": "abc"}).seq
-        owner = ffi.get(ctypes.cast(self.pool._ptr, ctypes.c_void_p).value, seq)
+        frame = self.pool._get_lite3(seq)
+        owner = ffi.from_bytes(frame.payload, seq, frame.time)
         ref = ffi.Ref()
         ffi._call(
             ffi.lib.plsm_value_get, owner.data._ref, b"blob", 4, ctypes.byref(ref)
@@ -268,7 +268,7 @@ class Views(unittest.TestCase):
         with self.assertRaises(plasmite.PlasmiteError):
             plasmite.view_from_lite3(b"bad")
         for seq in [-1, 1 << 64, "1"]:
-            with self.assertRaises(ValueError):
+            with self.assertRaises(plasmite.UsageError):
                 self.pool._get_view(seq)
 
 

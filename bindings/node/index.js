@@ -3,7 +3,7 @@ const { at, readStart, normalizeWait } = require("./follow");
 Purpose: JavaScript entry point for the Plasmite Node binding.
 Key Exports: Client, Pool, Message, Stream, Durability, ErrorKind.
 Role: Thin wrapper around the native N-API addon.
-Invariants: Exports align with native symbols and v0 API semantics.
+Invariants: Exports align with native symbols and 2.0 API semantics.
 Notes: Requires libplasmite to be discoverable at runtime.
 */
 
@@ -62,8 +62,7 @@ function defaultPoolDir() {
 // An unavailable default must not prevent remote-only or explicit-directory use.
 let DEFAULT_POOL_DIR;
 try { DEFAULT_POOL_DIR = defaultPoolDir(); } catch {}
-const DEFAULT_POOL_SIZE = 1024 * 1024;
-const DEFAULT_POOL_SIZE_BYTES = DEFAULT_POOL_SIZE;
+const DEFAULT_POOL_SIZE_BYTES = 1024 * 1024;
 const UINT64_MAX = (1n << 64n) - 1n;
 let native = null;
 let nativeLoadError = null;
@@ -208,28 +207,33 @@ class Pool {
 
   async feedLite3(payload, { durability = Durability.Fast } = {}) {
     try {
-      return parseNativeMessage(this._inner.feedLite3(payload, durability));
+      return parseNativeMessage(await this._inner.feedLite3(payload, durability));
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
   async feedReceipt(value, { tags, durability = Durability.Fast } = {}) {
+    const message = messageReference(value);
+    if (message) {
+      if (tags !== undefined) throw usageError("cannot supply tags when forwarding a message");
+      return this.feedLite3Receipt(toLite3(value), { durability });
+    }
     const [data, labels] = feedInput(value, tags);
     return this.feedJsonReceipt(Buffer.from(JSON.stringify(data)), { tags: labels, durability });
   }
 
-  feedJsonReceipt(payload, { tags = [], durability = Durability.Fast } = {}) {
+  async feedJsonReceipt(payload, { tags = [], durability = Durability.Fast } = {}) {
     try {
-      return this._inner.feedJsonReceipt(payload, tags, durability);
+      return await this._inner.feedJsonReceipt(payload, tags, durability);
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
-  feedLite3Receipt(payload, { durability = Durability.Fast } = {}) {
+  async feedLite3Receipt(payload, { durability = Durability.Fast } = {}) {
     try {
-      return this._inner.feedLite3Receipt(payload, durability);
+      return await this._inner.feedLite3Receipt(payload, durability);
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -242,7 +246,8 @@ class Pool {
    */
   _getJson(seq) {
     try {
-      return this._inner.getJson(seq);
+      const stream = this._inner.openRead(true, 2, normalizeUint64(seq, "seq"), [], false);
+      try { return stream.nextJson() ?? missingMessage(seq); } finally { stream.close(); }
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -292,7 +297,8 @@ class Pool {
    */
   _getLite3(seq) {
     try {
-      return this._inner.getLite3(seq);
+      const stream = this._inner.openLite3Read(true, 2, normalizeUint64(seq, "seq"), []);
+      try { return stream.next() ?? missingMessage(seq); } finally { stream.close(); }
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -324,7 +330,7 @@ class Pool {
     let start;
     try { start = readStart(since, last); } catch (err) { throw usageError(err.message); }
     const [kind, value] = start;
-    if (signal?.aborted) return new Reader(null, signal);
+    if (signal?.aborted) throw abortError(signal);
     try {
       const labels = normalizeTagFilter(tags);
       if (representation === "lite3") {
@@ -348,13 +354,18 @@ class Pool {
   }
 
   async feed(value, { tags, durability = Durability.Fast } = {}) {
+    const message = messageReference(value);
+    if (message) {
+      if (tags !== undefined) throw usageError("cannot supply tags when forwarding a message");
+      return this.feedLite3(toLite3(value), { durability });
+    }
     const [data, labels] = feedInput(value, tags);
-    return parseNativeMessage(this.feedJson(Buffer.from(JSON.stringify(data)), { tags: labels, durability }));
+    return parseNativeMessage(await this.feedJson(Buffer.from(JSON.stringify(data)), { tags: labels, durability }));
   }
 
-  feedJson(payload, { tags = [], durability = Durability.Fast } = {}) {
+  async feedJson(payload, { tags = [], durability = Durability.Fast } = {}) {
     try {
-      return this._inner.feedJson(payload, tags, durability);
+      return await this._inner.feedJson(payload, tags, durability);
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -371,6 +382,10 @@ class Pool {
   [Symbol.dispose]() {
     this.close();
   }
+}
+
+function missingMessage(seq) {
+  throw new PlasmiteNativeError("message not found", { kind: ErrorKind.NotFound, seq: BigInt(seq) });
 }
 
 function feedInput(value, tags) {
@@ -607,7 +622,7 @@ class UdpPool {
     this._inner = inner;
   }
 
-  feedLite3(payload) {
+  async feedLite3(payload) {
     if (!Buffer.isBuffer(payload)) {
       throw new TypeError("payload must be a Buffer containing a complete Lite3 document");
     }
@@ -618,7 +633,12 @@ class UdpPool {
     }
   }
 
-  feed(value, { tags, durability = Durability.Fast } = {}) {
+  async feed(value, { tags, durability = Durability.Fast } = {}) {
+    if (messageReference(value)) {
+      if (tags !== undefined) throw usageError("cannot supply tags when forwarding a message");
+      if (durability !== Durability.Fast) throw usageError("UDP feed only supports fast durability");
+      return this.feedLite3(toLite3(value));
+    }
     const [data, labels] = feedInput(value, tags);
     try {
       this._inner.feedJson(Buffer.from(JSON.stringify(data)), labels, durability);
@@ -673,8 +693,10 @@ class UdpFollow {
     this._cancelled = false;
   }
 
-  async nextEvent(timeoutMs = 1000, { signal = this._signal } = {}) {
-    const timeout = normalizeUint64(timeoutMs, "timeoutMs");
+  async nextEvent(wait, { signal = this._signal } = {}) {
+    let timeout;
+    try { timeout = wait === undefined ? UINT64_MAX : BigInt(normalizeWait(wait)); }
+    catch (err) { throw usageError(err.message); }
     if (signal?.aborted) throw abortError(signal);
     if (this._closed || this.finished) return null;
     const abort = () => this._inner.interruptRead();
@@ -700,16 +722,20 @@ class UdpFollow {
     return this._closed || this._cancelled || this._inner.isFinished;
   }
 
-  events({ pollIntervalMs = 50, signal } = {}) {
+  async next(wait) {
+    const value = await this.nextEvent(wait);
+    return { done: value === null && this.finished, value: value ?? undefined };
+  }
+
+  events({ signal = this._signal } = {}) {
     const follow = this;
-    const timeoutMs = normalizeUint64(pollIntervalMs, "pollIntervalMs");
     let stopped = false;
     let reading = false;
     async function* read() {
       while (!stopped) {
         let event;
         reading = true;
-        try { event = await follow.nextEvent(timeoutMs, { signal }); }
+        try { event = await follow.nextEvent(undefined, { signal }); }
         finally { reading = false; }
         if (stopped) return;
         if (event) { yield event; continue; }
@@ -773,9 +799,9 @@ function decorateUdpEvent(event) {
       message: parseMessage(event.message),
     });
   }
-  if (event.kind === "gap") {
+  if (event.kind === "skip") {
     return Object.freeze({
-      kind: "gap",
+      kind: "skip",
       first: event.first,
       last: event.last,
       reason: event.reason,
@@ -787,7 +813,6 @@ function decorateUdpEvent(event) {
     nextSeq: event.nextSeq,
     endSeq: event.endSeq ?? null,
     terminal: Boolean(event.terminal),
-    retentionGap: Boolean(event.retentionGap),
   });
 }
 
@@ -832,7 +857,6 @@ module.exports = {
   UdpFollow,
   Message,
   DEFAULT_POOL_DIR,
-  DEFAULT_POOL_SIZE,
   DEFAULT_POOL_SIZE_BYTES,
   Durability,
   ErrorKind,

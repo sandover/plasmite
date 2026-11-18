@@ -140,11 +140,17 @@ pub(super) fn fetch(
         _ => ReadOptions::new(),
     }
     .tags(tags);
+    let read_error = |error: Error| match seq {
+        Some(seq) if error.kind() == ErrorKind::Usage => error
+            .with_message("SEQ must be a positive sequence at or before the next unwritten message")
+            .with_seq(seq),
+        _ => error,
+    };
     let mut found = false;
     match resolve_pool_target(pool, context.optional_pool_dir())? {
         PoolTarget::LocalPath(path) => {
             let handle = Pool::open(&path).map_err(|err| add_missing_pool_hint(err, pool))?;
-            for frame in handle.fetch_lite3(options)? {
+            for frame in handle.fetch_lite3(options).map_err(read_error)? {
                 let frame = frame?;
                 if mode.is_binary() {
                     emit_lite3(frame.seq, frame.time, &frame.payload, mode)?;
@@ -166,7 +172,7 @@ pub(super) fn fetch(
                 .open_pool(&PoolRef::name(name), false)
                 .map_err(|err| add_missing_pool_hint(err, pool))?;
             if mode.is_binary() {
-                for frame in handle.fetch_lite3(options)? {
+                for frame in handle.fetch_lite3(options).map_err(read_error)? {
                     let frame = frame?;
                     emit_lite3(frame.seq, frame.time, &frame.payload, mode)?;
                     found = true;
@@ -175,7 +181,7 @@ pub(super) fn fetch(
                     }
                 }
             } else {
-                for message in handle.fetch(options)? {
+                for message in handle.fetch(options).map_err(read_error)? {
                     emit_message(message_to_json(message?), mode, context.color_mode())?;
                     found = true;
                     if seq.is_some() {
@@ -190,11 +196,14 @@ pub(super) fn fetch(
         } => {
             let handle =
                 plasmite::api::UdpClient::new(endpoint)?.open_pool(&PoolRef::name(name))?;
-            let mut reader = handle.fetch(options)?;
+            let mut reader = handle.fetch(options).map_err(read_error)?;
             let mut skipped = false;
             while let Some(event) = reader.next_event()? {
                 match event {
                     plasmite::api::UdpEvent::Frame(frame) => {
+                        if seq.is_some_and(|seq| frame.seq != seq) {
+                            continue;
+                        }
                         if mode.is_binary() {
                             emit_lite3(frame.seq, frame.time, &frame.payload, mode)?;
                         } else {
@@ -209,11 +218,14 @@ pub(super) fn fetch(
                             break;
                         }
                     }
-                    plasmite::api::UdpEvent::Gap {
+                    plasmite::api::UdpEvent::Skip {
                         first,
                         last,
                         reason,
                     } => {
+                        if seq.is_some_and(|seq| !(first..=last).contains(&seq)) {
+                            continue;
+                        }
                         skipped = true;
                         super::stream_support::report_udp_skip(
                             "fetch", pool, first, last, reason, context,
@@ -222,7 +234,7 @@ pub(super) fn fetch(
                     plasmite::api::UdpEvent::Progress { .. } => {}
                 }
             }
-            if skipped {
+            if skipped && seq.is_none() {
                 return Ok(CommandResult::with_code(1));
             }
         }

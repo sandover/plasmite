@@ -52,6 +52,17 @@ static int valid_utf8(const char *text, size_t len)
                         if ((word & UINT64_C(0x8080808080808080)) == 0) {
                                 p += sizeof(word);
                                 len -= sizeof(word);
+                                /* Enter the wider scan only after finding ASCII. */
+                                while (len >= 4 * sizeof(word)) {
+                                        uint64_t words[4];
+                                        memcpy(words, p, sizeof(words));
+                                        if ((words[0] | words[1] | words[2] | words[3]) &
+                                            UINT64_C(0x8080808080808080)) {
+                                                break;
+                                        }
+                                        p += sizeof(words);
+                                        len -= sizeof(words);
+                                }
                                 continue;
                         }
                 }

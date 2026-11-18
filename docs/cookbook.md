@@ -458,6 +458,7 @@ defer p.Close()
 reader, err := p.Follow(plasmite.Tags("alert"))
 if err != nil { log.Fatal(err) }
 defer reader.Close()
+ctx := context.Background()
 for {
     msg, err := reader.Next(ctx)
     if err != nil { break }
@@ -635,18 +636,13 @@ all matching messages, including your own appends. Applications can use data and
 tags for their own conventions. For remote use, connect with `access connect`,
 then run `pls duplex https://192.0.2.10:9743/events --last 20`.
 
-Input EOF closes sending while reception continues, so a script can send a
-request and wait for another process's reply:
+Input EOF closes sending while reception continues. A program can write a request, close stdin, read the reply and close stdout.
 
 ```bash
-printf '{"ping": true}\n' | pls duplex events --timeout 5s || [ $? -eq 124 ]
+printf '{"ping": true}\n' | pls duplex events
 ```
 
-The shell example accepts exit 124 as the chosen end of the receive session.
-`--timeout` exits 124 after a period without output. Ctrl+C or closed stdout
-also ends the session. Use `feed` for a finite copy that exits at input EOF.
-See the [2.0 upgrade guide](record/upgrading-2.0.md) when replacing
-older `--me`/`--echo-self` usage.
+Press Ctrl+C when you finish receiving. Use `feed` for a finite copy that exits at input EOF.
 
 ---
 
@@ -791,8 +787,7 @@ At initialization, the server explains the core model:
 An invited key grants full access to every pool in the served directory,
 including creating and deleting pools, reading messages, and appending
 messages. Existing pools also appear as MCP resources; reading one returns up
-to the latest 20 messages. Tag filters require every specified tag. MCP does
-not currently expose jq `where` filtering.
+to the latest 20 messages. MCP filters by tags only and requires every specified tag.
 
 `plasmite_feed` is an append, not an upsert. If its transport fails after an
 ambiguous response, retrying can append a duplicate; use an application-level

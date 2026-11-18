@@ -10,7 +10,7 @@ test('native views retain exact values and independent snapshot lifetime', async
   const client = new Client(dir);
   const pool = client.createPool('views', 65536);
   t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  pool.feedJson(Buffer.from('{"metrics":{"power":42},"samples":[{"value":1},{"value":2}],"large":9223372036854775807,"negativeZero":-0.0,"__proto__":{"x":1},"then":null,"mixed":[null,false,0,""],"�":5}'));
+  await pool.feedJson(Buffer.from('{"metrics":{"power":42},"samples":[{"value":1},{"value":2}],"large":9223372036854775807,"negativeZero":-0.0,"__proto__":{"x":1},"then":null,"mixed":[null,false,0,""],"�":5}'));
   const [first, second] = await Promise.all([pool._getView(1n), pool._getView(1n)]);
   assert.equal(first.seq, 1n);
   assert.equal('large' in first.data, true);
@@ -92,7 +92,7 @@ test('native byte views preserve bytes and export independent mutable buffers', 
   assert.ok(position >= 0);
   assert.equal(payload.indexOf(needle, position + 1), -1);
   payload[position] = 4; // LITE3_TYPE_BYTES, formerly LITE3_TYPE_STRING.
-  const seq = pool.feedLite3Receipt(payload).seq;
+  const seq = (await pool.feedLite3Receipt(payload)).seq;
   const view = await pool._getView(seq);
   const expected = Buffer.concat([token, Buffer.from([0])]);
   assert.equal(Array.isArray(view.data.blob), false);
@@ -111,7 +111,7 @@ test('native conversion preserves stored key order and exact scalar semantics', 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-conversion-'));
   const client = new Client(dir), pool = client.createPool('views', 65536);
   t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  pool.feedJson(Buffer.from('{"z":-0.0,"9":9,"2":2,"a":"\\u0000\\n雪","safe":9007199254740991,"low":-9007199254740991,"nested":{"y":1,"b":2},"__proto__":{"ok":true}}'));
+  await pool.feedJson(Buffer.from('{"z":-0.0,"9":9,"2":2,"a":"\\u0000\\n雪","safe":9007199254740991,"low":-9007199254740991,"nested":{"y":1,"b":2},"__proto__":{"ok":true}}'));
   const view = await pool._getView(1n);
   const native = toNative(view.data);
   assert.deepEqual(Object.keys(native), Object.keys(view.data));
@@ -122,7 +122,7 @@ test('native conversion preserves stored key order and exact scalar semantics', 
   assert.equal(native.low, Number.MIN_SAFE_INTEGER);
   assert.equal(Object.hasOwn(native, '__proto__'), true);
   assert.equal(Object.getPrototypeOf(native), Object.prototype);
-  pool.feedJson(Buffer.from('{"z":9223372036854775807,"a":-9223372036854775808}'));
+  await pool.feedJson(Buffer.from('{"z":9223372036854775807,"a":-9223372036854775808}'));
   const unsafe = toNative((await pool._getView(2n)).data);
   assert.equal(unsafe.z, 9223372036854775807n);
   assert.equal(unsafe.a, -9223372036854775808n);
@@ -140,7 +140,7 @@ test('native copies select the parser only for JSON-safe owners', async t => {
   const client = new Client(dir), pool = client.createPool('views', 65536);
   t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   await pool.feed({ z: 1, a: 2 });
-  pool.feedJson(Buffer.from('{"z":9223372036854775807}'));
+  await pool.feedJson(Buffer.from('{"z":9223372036854775807}'));
   let parses = 0;
   const parse = text => { parses++; return JSON.parse(text); };
   const safe = await pool._inner.getView(1n);

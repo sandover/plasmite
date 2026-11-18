@@ -245,14 +245,7 @@ then read every served pool after proving that it receives replies at its
 socket. This check limits spoofed bulk replies; it grants no identity or access
 rights. Old `--udp` configurations keep reads disabled.
 
-Clients use `feed`, `follow`, or `duplex` with `udp://HOST:PORT/POOL`. Follow
-supports new messages and selected history. The
-[receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices) provides
-arrival-order delivery, including late messages and duplicates. This source
-change awaits a major release. Only explicit server skips produce notices;
-sequence jumps
-and progress never prove network loss or block later DATA. A finite follow ends
-on terminal progress, so packets still in flight may go unread.
+Use `feed`, `fetch`, `follow`, or `duplex` with `udp://HOST:PORT/POOL`. Readers receive messages in arrival order, including late messages and duplicates. A finite fetch ends on terminal progress, so packets still in flight may go unread. [UDP receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
 
 Follow renews a 30-second lease every 10 seconds while receiving. It never
 retries message delivery or falls back to HTTP. Outgoing DATA includes 40 bytes
@@ -647,8 +640,8 @@ details remain on the local listener.
 
 Use `plasmite serve --help` and `plasmite access --help` for command options.
 See the [CLI guide](../cli.md) for pool URL and output rules, the
-[remote protocol](../../spec/remote/v0/SPEC.md) for HTTP behavior, and the
-[MCP contract](../../spec/mcp/2025-11-25/SPEC.md) for authorization and tool
+[remote protocol](../../spec/v2/SPEC.md#http) for HTTP behavior, and the
+[MCP contract](../../spec/v2/SPEC.md#mcp) for authorization and tool
 messages.
 
 This major version replaces the earlier token-based setup. It removes

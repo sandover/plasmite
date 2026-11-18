@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -66,7 +67,7 @@ func fillPast(t *testing.T, pool *Pool, seq uint64) {
 		}
 		if _, err := getTestMessage(pool, seq); err != nil {
 			var plasmiteErr *Error
-			if errors.As(err, &plasmiteErr) && plasmiteErr.Kind == ErrorNotFound {
+			if errors.As(err, &plasmiteErr) && plasmiteErr.Kind == ErrorRetentionGap {
 				return
 			}
 			t.Fatalf("check retained sequence: %v", err)
@@ -95,9 +96,9 @@ func TestPoolLookupErrorsDistinguishMissingSequenceAndCorruptFile(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = getTestMessage(pool, 42)
+	_, err = getTestMessage(pool, 1)
 	pool.Close()
-	assertError(err, ErrorNotFound, "", uint64Ptr(42))
+	assertError(err, ErrorNotFound, "", uint64Ptr(1))
 
 	if err := os.Truncate(poolPath, 4); err != nil {
 		t.Fatal(err)
@@ -188,8 +189,8 @@ func TestFollowLite3RetentionGapPolicy(t *testing.T) {
 	if !errors.As(err, &plasmiteErr) || plasmiteErr.Kind != ErrorRetentionGap {
 		t.Fatalf("expected retention gap, got %T: %v", err, err)
 	}
-	if plasmiteErr.Seq == nil || *plasmiteErr.Seq != first.Seq {
-		t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr.Seq)
+	if plasmiteErr.Missing != first.Seq || plasmiteErr.NextSeq <= first.Seq {
+		t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr)
 	}
 }
 
@@ -219,11 +220,11 @@ func TestOpenFollowReportsFirstMissingSequenceAfterOverwrite(t *testing.T) {
 	fillPast(t, pool, firstMissing)
 	_, err = stream.Next(ctx)
 	var gap *Error
-	if !errors.As(err, &gap) || gap.Kind != ErrorRetentionGap || gap.Seq == nil || *gap.Seq != firstMissing {
+	if !errors.As(err, &gap) || gap.Kind != ErrorRetentionGap || gap.Missing != firstMissing || gap.NextSeq <= firstMissing {
 		t.Fatalf("expected gap at %d, got %#v", firstMissing, err)
 	}
-	if _, err := stream.Next(ctx); err != io.EOF {
-		t.Fatalf("expected the failed stream to end, got %v", err)
+	if _, err := stream.Next(ctx); !errors.As(err, &gap) || gap.Missing != firstMissing {
+		t.Fatalf("expected the reader to keep reporting the gap, got %v", err)
 	}
 }
 
@@ -237,7 +238,7 @@ func TestCloseIdempotent(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on closed pool")
 	}
-	if !errors.Is(err, ErrClosed) {
+	if !isUsage(err) {
 		t.Fatalf("expected ErrClosed, got %v", err)
 	}
 
@@ -247,25 +248,25 @@ func TestCloseIdempotent(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on closed client")
 	}
-	if !errors.Is(err, ErrClosed) {
+	if !isUsage(err) {
 		t.Fatalf("expected ErrClosed, got %v", err)
 	}
 }
 
 func TestArgumentErrorsUseSentinel(t *testing.T) {
-	if _, err := NewClient(""); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := NewClient(""); !isUsage(err) {
 		t.Fatalf("expected ErrInvalidArgument for empty poolDir, got %v", err)
 	}
 
 	client := newTestClient(t)
 
-	if _, err := client.CreatePool(PoolRefName(""), testPoolSizeBytes); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := client.CreatePool(PoolRefName(""), testPoolSizeBytes); !isUsage(err) {
 		t.Fatalf("expected ErrInvalidArgument for empty pool ref, got %v", err)
 	}
 
 	pool := newTestPool(t, client, "args")
 
-	if _, err := pool.FeedJSON(nil, nil, DurabilityFast); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := pool.FeedJSON(nil, nil); !isUsage(err) {
 		t.Fatalf("expected ErrInvalidArgument for empty payload, got %v", err)
 	}
 }
@@ -342,7 +343,7 @@ func uint64Ptr(val uint64) *uint64 {
 }
 
 func feedLite3Sequence(pool *Pool, payload []byte, durability Durability) (uint64, error) {
-	receipt, err := pool.FeedLite3Receipt(payload, durability)
+	receipt, err := pool.FeedLite3Receipt(payload, WithDurability(durability))
 	if err != nil {
 		return 0, err
 	}
@@ -412,7 +413,7 @@ func TestNumericFeedReceipts(t *testing.T) {
 	if string(message.Data) != `{"text":"hello"}` {
 		t.Fatalf("stored data: %s", message.Data)
 	}
-	second, err := pool.FeedLite3Receipt(stored.Payload, api.DurabilityFast)
+	second, err := pool.FeedLite3Receipt(stored.Payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,10 +424,10 @@ func TestNumericFeedReceipts(t *testing.T) {
 	if second.Seq != 2 || second.Time != frame.Time {
 		t.Fatalf("binary identity: %+v", second)
 	}
-	if _, err := pool.FeedJSONReceipt([]byte("bad"), nil, api.DurabilityFast); err == nil {
+	if _, err := pool.FeedJSONReceipt([]byte("bad"), nil); err == nil {
 		t.Fatal("accepted bad JSON")
 	}
-	if _, err := pool.FeedLite3Receipt([]byte("bad"), api.DurabilityFast); err == nil {
+	if _, err := pool.FeedLite3Receipt([]byte("bad")); err == nil {
 		t.Fatal("accepted bad binary")
 	}
 	third, err := pool.FeedReceipt(map[string]any{}, nil)
@@ -583,5 +584,92 @@ func TestSharedV2ReadCases(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestFeedForwardsAllMessageRepresentations(t *testing.T) {
+	pool := newTestPool(t, newTestClient(t), "forward")
+	view, err := pool.FeedView(map[string]any{"n": 1}, []string{"tag"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := pool.Feed(view, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []any{view, *original, original} {
+		forwarded, err := pool.Feed(source, nil)
+		if err != nil || string(forwarded.Data) != string(original.Data) || !reflect.DeepEqual(forwarded.Tags(), []string{"tag"}) {
+			t.Fatalf("forward %T: %#v, %v", source, forwarded, err)
+		}
+		if _, err := pool.Feed(source, []string{}); !isUsage(err) {
+			t.Fatalf("expected Usage for a tag override, got %v", err)
+		}
+	}
+}
+
+func isUsage(err error) bool {
+	var typed *api.Error
+	return errors.As(err, &typed) && typed.Kind == api.ErrorUsage
+}
+
+func TestHTTPSPoolReference(t *testing.T) {
+	origin := os.Getenv("PLASMITE_TEST_HTTPS_ORIGIN")
+	if origin == "" {
+		t.Skip("run the HTTPS binding contract smoke")
+	}
+	client := newTestClient(t)
+	ref := PoolRefURI(origin + "/go")
+	created, err := client.CreatePool(ref, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer created.Close()
+	pool, err := client.OpenPool(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	live, err := pool.Follow(Tags("test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+	short, expire := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer expire()
+	if _, err := live.Next(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("idle wait returned %v", err)
+	}
+	first, err := created.Feed(map[string]any{"from": "go"}, []string{"test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	message, err := live.Next(ctx)
+	if err != nil || message.Seq != first.Seq {
+		t.Fatalf("follow: %#v, %v", message, err)
+	}
+	reader, err := pool.Fetch(Last(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	message, err = reader.Next(ctx)
+	if err != nil || string(message.Data) != `{"from":"go"}` {
+		t.Fatalf("fetch: %#v, %v", message, err)
+	}
+	if _, err := reader.Next(ctx); err != io.EOF {
+		t.Fatalf("finished fetch returned %v", err)
+	}
+}
+
+func TestRejectsWrongABIMajor(t *testing.T) {
+	if os.Getenv("PLASMITE_WRONG_ABI") == "" {
+		t.Skip("run the native binding contract smoke")
+	}
+	_, err := NewClient(t.TempDir())
+	if !isUsage(err) || !strings.Contains(err.Error(), "requires ABI major 2; found 1") {
+		t.Fatalf("expected clear ABI version error, got %v", err)
 	}
 }

@@ -7,6 +7,8 @@ mod abi;
 mod abi_borrowed;
 mod abi_builder;
 mod abi_fields;
+#[cfg(not(target_arch = "wasm32"))]
+mod abi_remote;
 mod abi_views;
 pub mod api;
 mod core;

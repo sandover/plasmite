@@ -15,7 +15,6 @@ import "C"
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"runtime"
@@ -36,19 +35,14 @@ type Frame = api.UDPFrame
 // ViewFrame keeps DATA in the same Go-owned view type as local reads.
 type ViewFrame = api.UDPViewFrame[*local.MessageView]
 
-// Gap keeps the public name for an explicit server skip.
-type Gap = api.UDPGap
+// Skip reports a range the server explicitly skipped.
+type Skip = api.UDPSkip
 type Progress = api.UDPProgress
 
 func Since(selection any) api.ReadOption { return api.Since(selection) }
 func At(timeNS uint64) api.Instant       { return api.At(timeNS) }
 func Last(count uint64) api.ReadOption   { return api.Last(count) }
 func Tags(tags ...string) api.ReadOption { return api.Tags(tags...) }
-
-var (
-	ErrClosed          = api.ErrClosed
-	ErrInvalidArgument = api.ErrInvalidArgument
-)
 
 type Client struct {
 	mu  sync.Mutex
@@ -120,7 +114,7 @@ func (c *Client) Close() {
 	}
 }
 
-func (p *Pool) FeedLite3(payload []byte) error {
+func (p *Pool) FeedLite3(payload []byte, opts ...api.FeedOption) error {
 	if p == nil {
 		return closedError("UDP pool")
 	}
@@ -132,11 +126,16 @@ func (p *Pool) FeedLite3(payload []byte) error {
 	if len(payload) == 0 {
 		return invalidArgument("Lite3 payload is required")
 	}
+	options := C.plsm_feed_options_t{
+		struct_size: C.uint32_t(C.sizeof_plsm_feed_options_t),
+		durability:  C.uint32_t(api.ApplyFeedOptions(opts...).Durability),
+	}
 	var cErr *C.plsm_error_t
 	rc := C.plsm_udp_pool_feed_lite3(
 		p.ptr,
 		(*C.uint8_t)(unsafe.Pointer(&payload[0])),
 		C.size_t(len(payload)),
+		&options,
 		&cErr,
 	)
 	runtime.KeepAlive(payload)
@@ -147,6 +146,22 @@ func (p *Pool) FeedLite3(payload []byte) error {
 }
 
 func (p *Pool) Feed(value any, tags []string, opts ...api.FeedOption) error {
+	if view, ok := value.(local.MessageView); ok {
+		return p.Feed(&view, tags, opts...)
+	}
+	if view, ok := value.(*local.MessageView); ok {
+		if view == nil {
+			return invalidArgument("missing message view")
+		}
+		if tags != nil {
+			return invalidArgument("cannot supply tags when forwarding a message")
+		}
+		return p.FeedLite3(view.Lite3(), opts...)
+	}
+	payload, tags, err := api.EncodeFeedJSON(value, tags)
+	if err != nil {
+		return err
+	}
 	if p == nil {
 		return closedError("UDP pool")
 	}
@@ -154,19 +169,6 @@ func (p *Pool) Feed(value any, tags []string, opts ...api.FeedOption) error {
 	defer p.mu.Unlock()
 	if p.ptr == nil {
 		return closedError("UDP pool")
-	}
-	var payload []byte
-	if message, ok := value.(*api.Message); ok && message != nil {
-		if tags != nil {
-			return &api.Error{Kind: api.ErrorUsage, Message: "cannot supply tags when forwarding a message"}
-		}
-		tags, payload = message.Tags(), message.Data
-	} else {
-		var err error
-		payload, err = json.Marshal(value)
-		if err != nil {
-			return &api.Error{Kind: api.ErrorUsage, Message: fmt.Sprintf("cannot encode feed value: %v", err)}
-		}
 	}
 	cTags, free := nativeview.TagSpans(tags)
 	defer free()
@@ -373,19 +375,18 @@ func eventFromC(event C.plsm_udp_event_t, raw bool) (api.UDPEvent, error) {
 		}
 		frame.Message = message
 		return frame, nil
-	case C.PLSM_UDP_EVENT_GAP:
+	case C.PLSM_UDP_EVENT_SKIP:
 		reasons := [...]string{"unknown", "oversized", "retention", "pressure"}
 		reason := "unknown"
 		if event.reason < C.uint32_t(len(reasons)) {
 			reason = reasons[int(event.reason)]
 		}
-		return &api.UDPGap{First: uint64(event.first), Last: uint64(event.last), Reason: reason}, nil
+		return &api.UDPSkip{First: uint64(event.first), Last: uint64(event.last), Reason: reason}, nil
 	case C.PLSM_UDP_EVENT_PROGRESS:
 		progress := &api.UDPProgress{
-			StartSeq:     uint64(event.start_seq),
-			NextSeq:      uint64(event.next_seq),
-			Terminal:     event.terminal != 0,
-			RetentionGap: event.retention_gap != 0,
+			StartSeq: uint64(event.start_seq),
+			NextSeq:  uint64(event.next_seq),
+			Terminal: event.terminal != 0,
 		}
 		if event.has_end != 0 {
 			end := uint64(event.end_seq)
@@ -393,7 +394,7 @@ func eventFromC(event C.plsm_udp_event_t, raw bool) (api.UDPEvent, error) {
 		}
 		return progress, nil
 	default:
-		return nil, fmt.Errorf("plasmite: unknown UDP event kind %d", uint32(event.kind))
+		return nil, &Error{Kind: api.ErrorInternal, Message: fmt.Sprintf("unknown UDP event kind %d", uint32(event.kind))}
 	}
 }
 
@@ -433,11 +434,11 @@ func fromCError(cErr *C.plsm_error_t) *api.Error {
 }
 
 func invalidArgument(message string) error {
-	return fmt.Errorf("%w: %s", api.ErrInvalidArgument, message)
+	return api.InvalidArgumentError(message)
 }
 
 func closedError(target string) error {
-	return fmt.Errorf("%w: %s is closed", api.ErrClosed, target)
+	return api.ClosedError(target)
 }
 
 func boolToUint32(value bool) C.uint32_t {

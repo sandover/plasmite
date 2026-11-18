@@ -65,13 +65,13 @@ def run(lane, fixture, count):
                 with client.open_pool("source") as pool:
                     open_follow = pool.follow_view if lane.startswith("view") else pool.follow
                     with open_follow(since=1) as stream:
-                        warm = stream.next_event(timeout_ms=1000)
+                        warm = stream.next_event(wait=1)
                         assert warm.seq == 1
                         cpu, thread_cpu, start = time.process_time_ns(), time.thread_time_ns(), time.perf_counter_ns()
                         checksum = 0
                         for seq in range(2, count + 2):
                             permit.put(True)
-                            event = stream.next_event(timeout_ms=1000)
+                            event = stream.next_event(wait=1)
                             assert event.seq == seq and event.time == 123456789
                             if lane == "raw":
                                 checksum += len(event.payload)

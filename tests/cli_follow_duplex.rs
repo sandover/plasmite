@@ -511,35 +511,83 @@ fn follow_tag_filters_messages() {
 }
 
 #[test]
-fn follow_since_future_exits_empty() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
+fn follow_since_a_future_time_waits_for_a_new_message() {
+    use plasmite::api::{Feed, Pool, PoolOptions};
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("events.plasmite");
+    let mut pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+    pool.feed(&json!({"old":true}), Feed::new()).unwrap();
+    assert_eq!(
+        pool.fetch(plasmite::api::Read::since(plasmite::api::Since::At(
+            u64::MAX
+        )))
+        .unwrap()
+        .count(),
+        0,
+    );
+    let mut child = KillOnDrop(
+        cmd()
+            .args([
+                "follow",
+                path.to_str().unwrap(),
+                "--since",
+                "2999-01-01T00:00:00Z",
+                "--one",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let (send, receive) = mpsc::channel();
+    let output = child.0.stdout.take().unwrap();
+    let waiter = thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(output).read_line(&mut line).unwrap();
+        let _ = send.send(line);
+    });
+    for _ in 0..100 {
+        pool.feed(&json!({"fresh":true}), Feed::new()).unwrap();
+        if let Ok(line) = receive.recv_timeout(Duration::from_millis(10)) {
+            let message: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(message["data"], json!({"fresh":true}));
+            waiter.join().unwrap();
+            assert!(wait_within(&mut child.0, Duration::from_secs(2), "future follow").success());
+            return;
+        }
+    }
+    panic!("follow did not deliver a record written after opening");
+}
 
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "fetch",
-            "demo",
-            "--since",
-            "2999-01-01T00:00:00Z",
-        ])
-        .output()
-        .expect("follow");
-    assert!(follower.status.success());
-    assert!(follower.stdout.is_empty());
+#[cfg(unix)]
+#[test]
+fn follow_exits_when_a_socket_stdout_closes() {
+    use plasmite::api::{Feed, Pool, PoolOptions};
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("events.plasmite");
+    let mut pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+    pool.feed(&json!({"ready":true}), Feed::new()).unwrap();
+    let (parent, stdout) = UnixStream::pair().unwrap();
+    parent
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut follower = KillOnDrop(
+        cmd()
+            .args(["follow", path.to_str().unwrap(), "--last", "1"])
+            .stdout(Stdio::from(OwnedFd::from(stdout)))
+            .spawn()
+            .unwrap(),
+    );
+    let mut parent = BufReader::new(parent);
+    let mut line = String::new();
+    parent.read_line(&mut line).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&line).unwrap()["seq"],
+        1
+    );
+    drop(parent);
+    assert!(wait_within(&mut follower.0, Duration::from_secs(2), "socket follow").success());
 }
 
 #[test]
@@ -720,25 +768,12 @@ fn follow_emits_drop_notice_on_stderr() {
     let notice_line = rx
         .recv_timeout(Duration::from_secs(15))
         .expect("drop notice");
-    let notice_json = parse_notice_json(&notice_line);
-    let notice = notice_json
-        .get("notice")
-        .and_then(|v| v.as_object())
-        .expect("notice object");
-    assert_eq!(notice.get("kind").and_then(|v| v.as_str()), Some("drop"));
-    assert_eq!(notice.get("cmd").and_then(|v| v.as_str()), Some("follow"));
-    assert_eq!(notice.get("pool").and_then(|v| v.as_str()), Some("demo"));
-    let details = notice
-        .get("details")
-        .and_then(|v| v.as_object())
-        .expect("details");
-    let dropped = details
-        .get("dropped_count")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    assert!(dropped > 0);
-    assert!(details.get("last_seen_seq").is_some());
-    assert!(details.get("next_seen_seq").is_some());
+    let report = parse_error_json(notice_line.as_bytes());
+    let error = &report["error"];
+    assert_eq!(error["kind"], "RetentionGap");
+    let missing = error["missing"].as_u64().unwrap();
+    let next_seq = error["next_seq"].as_u64().unwrap();
+    assert!(next_seq > missing);
 
     drop(follower);
 }
@@ -1066,35 +1101,32 @@ fn duplex_remote_url_accepts_future_since() {
     let access_home = temp.path().join("access-home");
     connect_to_server(&server, &access_home);
     let pool_url = format!("{}/chat", server.remote_url);
-    let mut duplex = cmd()
-        .args([
-            "duplex",
-            &pool_url,
-            "--timeout",
-            "300ms",
-            "--since",
-            "2999-01-01T00:00:00Z",
-            "--format",
-            "json",
-        ])
-        .env("PLASMITE_ACCESS_HOME", &access_home)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("duplex");
+    let mut duplex = KillOnDrop(
+        cmd()
+            .args([
+                "duplex",
+                &pool_url,
+                "--since",
+                "2999-01-01T00:00:00Z",
+                "--format",
+                "json",
+            ])
+            .env("PLASMITE_ACCESS_HOME", &access_home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("duplex"),
+    );
     writeln!(
-        duplex.stdin.take().expect("stdin"),
+        duplex.0.stdin.take().expect("stdin"),
         "{{\"from\":\"alice\",\"msg\":\"hello\"}}"
     )
     .expect("send JSON");
-    let output = duplex.wait_with_output().expect("duplex output");
-    assert!(
-        output.status.code() == Some(124),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let messages = parse_json_lines(&output.stdout);
+    let output = read_message_lines(duplex.0.stdout.take().unwrap(), 1, Duration::from_secs(5));
+    #[cfg(unix)]
+    assert!(wait_within(&mut duplex.0, Duration::from_secs(5), "HTTPS duplex").success());
+    let messages = parse_json_lines(&output);
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0]["data"], json!({"from":"alice","msg":"hello"}));
     let pool = client
@@ -1147,16 +1179,7 @@ fn duplex_https_sends_complete_messages_and_receives_after_eof() {
     let target = format!("{}/events", server.base_url);
     let mut child = KillOnDrop(
         cmd()
-            .args([
-                "duplex",
-                &target,
-                "--last",
-                "1",
-                "--timeout",
-                "200ms",
-                "--format",
-                "json",
-            ])
+            .args(["duplex", &target, "--last", "1", "--format", "json"])
             .env("PLASMITE_ACCESS_HOME", &access_home)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1164,19 +1187,10 @@ fn duplex_https_sends_complete_messages_and_receives_after_eof() {
             .spawn()
             .unwrap(),
     );
-    writeln!(child.0.stdin.take().unwrap(), "{}", json!({"seq":900,"time":"2000-01-01T00:00:00Z","meta":{"tags":["copied"]},"data":{"from":"alice","msg":"application"}})).unwrap();
-    assert_eq!(
-        wait_within(&mut child.0, Duration::from_secs(5), "HTTPS duplex").code(),
-        Some(124)
-    );
-    let mut output = Vec::new();
-    child
-        .0
-        .stdout
-        .take()
-        .unwrap()
-        .read_to_end(&mut output)
-        .unwrap();
+    writeln!(child.0.stdin.take().unwrap(), "{}", json!({"seq":900,"time":"2000-01-01T00:00:00.000000000Z","meta":{"tags":["copied"]},"data":{"from":"alice","msg":"application"}})).unwrap();
+    let output = read_message_lines(child.0.stdout.take().unwrap(), 2, Duration::from_secs(5));
+    #[cfg(unix)]
+    assert!(wait_within(&mut child.0, Duration::from_secs(5), "HTTPS duplex").success());
     let messages = parse_json_lines(&output);
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0]["data"], json!({"seed":true}));

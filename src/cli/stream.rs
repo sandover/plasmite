@@ -8,16 +8,13 @@ use super::feed_support::{
 };
 use super::output::OutputMode;
 use super::result::CommandResult;
-use super::stream_support::{FollowSignal, follow_local, follow_remote, follow_udp};
-use super::support::{
-    add_missing_pool_create_hint, parse_duration, remote_client, resolve_pool_target,
-};
+use super::stream_support::{follow_local, follow_remote, follow_udp};
+use super::support::{add_missing_pool_create_hint, remote_client, resolve_pool_target};
 use crate::{InputMode, PoolTarget};
 use plasmite::api::{Durability, Error, ErrorKind, LocalClient, Pool, PoolRef, Read, Since};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
 
 pub(super) struct FollowArgs {
     pub(super) pool: String,
@@ -32,7 +29,6 @@ pub(super) struct DuplexArgs {
     pub(super) pool: String,
     pub(super) create: bool,
     pub(super) last: Option<u64>,
-    pub(super) timeout: Option<String>,
     pub(super) since: Option<String>,
 }
 
@@ -49,11 +45,11 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             let pool = LocalClient::new()
                 .open_pool(&PoolRef::path(&path), args.create)
                 .map_err(add_missing_pool_create_hint)?;
-            follow_local(&pool, &args, read, context, &mut |_| {})
+            follow_local(&pool, &args, read, context, &mut || {})
         }
         PoolTarget::Remote { base_url, pool } => {
             let handle = remote_client(base_url)?.open_pool(&PoolRef::name(pool), args.create)?;
-            follow_remote(&handle, &args, read, context, &mut |_| {})
+            follow_remote(&handle, &args, read, context, &mut || {})
         }
         PoolTarget::Udp { endpoint, pool } => {
             if args.create {
@@ -62,7 +58,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             }
             let handle =
                 plasmite::api::UdpClient::new(endpoint)?.open_pool(&PoolRef::name(pool))?;
-            follow_udp(&handle, &args, read, context, &mut |_| {})
+            follow_udp(&handle, &args, read, context, &mut || {})
         }
     }
 }
@@ -93,7 +89,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         one: false,
     };
     let read = follow.read()?;
-    let timeout = args.timeout.as_deref().map(parse_duration).transpose()?;
     let color_mode = context.color_mode();
     let context = context.clone();
 
@@ -104,7 +99,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                 .map_err(add_missing_pool_create_hint)?;
             let mut sender = Pool::open(&path)?;
             duplex_session(
-                timeout,
                 move |signal| follow_local(&receiver, &follow, read, &context, signal),
                 move |stop| {
                     ingest_from_stdin(
@@ -128,7 +122,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let sender = client.open_pool(&PoolRef::name(pool), args.create)?;
             let receiver = sender.clone();
             duplex_session(
-                timeout,
                 move |signal| follow_remote(&receiver, &follow, read, &context, signal),
                 move |stop| {
                     ingest_from_stdin_remote(
@@ -156,7 +149,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                 plasmite::api::UdpClient::new(endpoint)?.open_pool(&PoolRef::name(pool))?;
             let receiver = sender.clone();
             duplex_session(
-                timeout,
                 move |signal| follow_udp(&receiver, &follow, read, &context, signal),
                 move |stop| {
                     super::feed_support::ingest_from_stdin_udp(
@@ -173,12 +165,10 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
 }
 
 fn duplex_session(
-    timeout: Option<Duration>,
-    receive: impl FnOnce(&mut dyn FnMut(FollowSignal)) -> Result<CommandResult, Error> + Send + 'static,
+    receive: impl FnOnce(&mut dyn FnMut()) -> Result<CommandResult, Error> + Send + 'static,
     send: impl FnOnce(&AtomicBool) -> Result<u64, Error> + Send + 'static,
 ) -> Result<CommandResult, Error> {
     enum Event {
-        Output,
         Sending(Result<u64, Error>),
         Receiving(Result<CommandResult, Error>),
     }
@@ -194,33 +184,19 @@ fn duplex_session(
     });
     std::thread::spawn(move || {
         let mut ready = Some(ready);
-        let result = receive(&mut |event| match event {
-            FollowSignal::Opened => {
-                if let Some(ready) = ready.take() {
-                    let _ = ready.send(());
-                }
-            }
-            FollowSignal::Message => {
-                if timeout.is_some() {
-                    let _ = events.try_send(Event::Output);
-                }
+        let result = receive(&mut || {
+            if let Some(ready) = ready.take() {
+                let _ = ready.send(());
             }
         });
         let _ = events.send(Event::Receiving(result));
     });
     let outcome = loop {
-        let next = match timeout {
-            Some(timeout) => replies.recv_timeout(timeout),
-            None => replies
-                .recv()
-                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
-        };
-        match next {
-            Ok(Event::Output | Event::Sending(Ok(_))) => {}
+        match replies.recv() {
+            Ok(Event::Sending(Ok(_))) => {}
             Ok(Event::Sending(Err(error))) => break Err(error),
             Ok(Event::Receiving(outcome)) => break outcome,
-            Err(mpsc::RecvTimeoutError::Timeout) => break Ok(CommandResult::with_code(124)),
-            Err(mpsc::RecvTimeoutError::Disconnected) => break Ok(CommandResult::ok()),
+            Err(_) => break Ok(CommandResult::ok()),
         }
     };
     stop.store(true, Ordering::Release);

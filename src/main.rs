@@ -217,13 +217,13 @@ fn normalize_args<I>(args: I) -> Vec<OsString>
 where
     I: IntoIterator<Item = OsString>,
 {
-    let mut child_args = false;
+    let mut positional_only = false;
     args.into_iter()
         .map(|arg| {
             if arg == "--" {
-                child_args = true;
+                positional_only = true;
             }
-            if child_args {
+            if positional_only {
                 return arg;
             }
             let replacement = arg.to_str().and_then(|value| match value {
@@ -246,32 +246,22 @@ mod tests {
     use crate::cli::output_support::{
         format_bytes, format_relative_time, format_seq_range, format_timestamp_human,
     };
-    use crate::cli::support::{parse_duration, parse_size, resolve_pool_target};
+    use crate::cli::support::{parse_size, resolve_pool_target};
     use clap::CommandFactory;
     use serde_json::json;
     use std::io::Cursor;
     use std::path::{Path, PathBuf};
-    use std::time::Duration;
 
     #[test]
     fn directory_conflicts_include_all_scopes_and_equal_spellings() {
         use std::ffi::OsString;
         let conflict = ["plasmite", "--dir", "/one", "pool", "list", "--dir=/two"];
         let equal = ["plasmite", "--dir", "/one", "pool", "list", "--dir=/one"];
-        let child = [
-            "plasmite",
-            "--dir",
-            "/one",
-            "tap",
-            "demo",
-            "--",
-            "echo",
-            "--dir=/two",
-        ];
+        let positional = ["plasmite", "--dir", "/one", "feed", "--", "--dir=/two"];
         for (args, expected) in [
             (conflict.as_slice(), true),
             (equal.as_slice(), false),
-            (child.as_slice(), false),
+            (positional.as_slice(), false),
         ] {
             let args = args.iter().map(OsString::from).collect::<Vec<_>>();
             assert_eq!(super::has_conflicting_directories(&args), expected);
@@ -279,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn argument_normalization_preserves_child_arguments() {
+    fn argument_normalization_respects_end_of_options() {
         use std::ffi::OsString;
         let args = [
             "plasmite",
@@ -323,7 +313,7 @@ mod tests {
             ("plasmite doctor", vec!["all", "format", "help"]),
             (
                 "plasmite duplex",
-                vec!["create", "format", "help", "last", "since", "timeout"],
+                vec!["create", "format", "help", "last", "since"],
             ),
             (
                 "plasmite feed",
@@ -553,13 +543,6 @@ mod tests {
         assert!(parse_size("1MiB").is_err());
         assert!(parse_size("2Gi").is_err());
         assert!(parse_size("3KiB").is_err());
-    }
-
-    #[test]
-    fn parse_duration_accepts_ms_s_m() {
-        assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
-        assert_eq!(parse_duration("5s").unwrap(), Duration::from_secs(5));
-        assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
     }
 
     #[test]

@@ -41,18 +41,17 @@ fn main() {
             repo_root.join("target").join("release"),
         ]);
 
-    let names = if target_os == "macos" {
-        ["libplasmite.2.dylib", "libplasmite.dylib"]
+    let name = if target_os == "macos" {
+        "libplasmite.2.dylib"
     } else {
-        ["libplasmite.so.2", "libplasmite.so"]
+        "libplasmite.so.2"
     };
     let library = candidates
-        .flat_map(|dir| names.map(|name| dir.join(name)))
+        .map(|dir| dir.join(name))
         .find(|path| path.is_file())
         .expect("build libplasmite or set PLASMITE_LIB_DIR");
 
-    // Cargo emits an unversioned filename. Its install name or SONAME
-    // determines which versioned file the operating system loads at runtime.
+    // Link the same versioned library the package ships beside the addon.
     println!("cargo:rerun-if-changed={}", library.display());
     println!("cargo:rustc-link-arg={}", library.display());
 }

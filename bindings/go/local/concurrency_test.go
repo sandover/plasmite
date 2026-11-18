@@ -45,7 +45,7 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 			<-start
 			for i := 0; i < 1000; i++ {
 				if err := operation(); err != nil {
-					if !errors.Is(err, ErrClosed) {
+					if !isUsage(err) {
 						workerErrors <- err
 					}
 					return
@@ -113,7 +113,7 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 		t.Fatalf("existing stream after pool close: %#v, %v", message, err)
 	}
 
-	if _, err := getTestMessage(pool, seed.Seq); !errors.Is(err, ErrClosed) {
+	if _, err := getTestMessage(pool, seed.Seq); !isUsage(err) {
 		t.Fatalf("read after close: expected ErrClosed, got %v", err)
 	}
 }
@@ -121,7 +121,7 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 func TestNativeWaitExpiryKeepsTheCursor(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "wait-position")
-	stream, err := pool.openRead(false, false, []api.ReadOption{Since(uint64(1))})
+	stream, err := pool.openRead(false, []api.ReadOption{Since(uint64(1))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestClientConcurrentOpenAndClose(t *testing.T) {
 			for i := 0; i < 1000; i++ {
 				pool, err := client.OpenPool(PoolRefName("existing"))
 				if err != nil {
-					if !errors.Is(err, ErrClosed) {
+					if !isUsage(err) {
 						failures <- err
 					}
 					return
@@ -190,7 +190,7 @@ func TestClientConcurrentOpenAndClose(t *testing.T) {
 	for err := range failures {
 		t.Fatalf("concurrent client operation: %v", err)
 	}
-	if _, err := client.CreatePool(PoolRefName("closed"), testPoolSizeBytes); !errors.Is(err, ErrClosed) {
+	if _, err := client.CreatePool(PoolRefName("closed"), testPoolSizeBytes); !isUsage(err) {
 		t.Fatalf("create after close: expected ErrClosed, got %v", err)
 	}
 }
@@ -228,7 +228,7 @@ func TestStreamsConcurrentReadAndClose(t *testing.T) {
 				go func() {
 					defer workers.Done()
 					<-start
-					if err := next(); !errors.Is(err, io.EOF) && !errors.Is(err, ErrClosed) {
+					if err := next(); !errors.Is(err, io.EOF) && !isUsage(err) {
 						failures <- fmt.Errorf("idle read: expected EOF or ErrClosed, got %v", err)
 					}
 				}()
@@ -249,7 +249,7 @@ func TestStreamsConcurrentReadAndClose(t *testing.T) {
 			for err := range failures {
 				t.Fatal(err)
 			}
-			if err := next(); !errors.Is(err, ErrClosed) {
+			if err := next(); !isUsage(err) {
 				t.Fatalf("read after close: expected ErrClosed, got %v", err)
 			}
 		})

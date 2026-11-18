@@ -2,7 +2,7 @@
 Purpose: Centralize Node binding value mappings shared across local and remote paths.
 Key Exports: ERROR_KIND_VALUES, mapErrorKind, mapDurability.
 Role: Keep error-kind and durability normalization behavior consistent.
-Invariants: Error kind names map to stable numeric values for v0 semantics.
+Invariants: Error kind names map to stable numeric values for 2.0 semantics.
 Invariants: Durability accepts fast/flush and numeric enum aliases 0/1.
 */
 

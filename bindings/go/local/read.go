@@ -9,7 +9,6 @@ import "C"
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -26,7 +25,7 @@ func Last(count uint64) api.ReadOption   { return api.Last(count) }
 func Tags(tags ...string) api.ReadOption { return api.Tags(tags...) }
 
 func (p *Pool) Follow(opts ...api.ReadOption) (api.Reader, error) {
-	stream, err := p.openRead(false, false, opts)
+	stream, err := p.openRead(false, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +33,7 @@ func (p *Pool) Follow(opts ...api.ReadOption) (api.Reader, error) {
 }
 
 func (p *Pool) Fetch(opts ...api.ReadOption) (api.Reader, error) {
-	stream, err := p.openRead(true, false, opts)
+	stream, err := p.openRead(true, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +41,7 @@ func (p *Pool) Fetch(opts ...api.ReadOption) (api.Reader, error) {
 }
 
 func (p *Pool) FollowView(opts ...api.ReadOption) (*ViewStream, error) {
-	stream, err := p.openRead(false, true, opts)
+	stream, err := p.openRead(false, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +49,7 @@ func (p *Pool) FollowView(opts ...api.ReadOption) (*ViewStream, error) {
 }
 
 func (p *Pool) FetchView(opts ...api.ReadOption) (*ViewStream, error) {
-	stream, err := p.openRead(true, true, opts)
+	stream, err := p.openRead(true, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +109,7 @@ func nativeReadOptions(opts []api.ReadOption) (C.plsm_read_options_t, func(), er
 	}, free, nil
 }
 
-func (p *Pool) openRead(finite, view bool, opts []api.ReadOption) (*Stream, error) {
+func (p *Pool) openRead(finite bool, opts []api.ReadOption) (*Stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -127,14 +126,9 @@ func (p *Pool) openRead(finite, view bool, opts []api.ReadOption) (*Stream, erro
 	var stream *C.plsm_stream_t
 	var nativeErr *C.plsm_error_t
 	var status C.int
-	switch {
-	case finite && view:
-		status = C.plsm_pool_fetch_view(p.ptr, &options, &stream, &nativeErr)
-	case finite:
+	if finite {
 		status = C.plsm_pool_fetch(p.ptr, &options, &stream, &nativeErr)
-	case view:
-		status = C.plsm_pool_follow_view(p.ptr, &options, &stream, &nativeErr)
-	default:
+	} else {
 		status = C.plsm_pool_follow(p.ptr, &options, &stream, &nativeErr)
 	}
 	if status != 0 {
@@ -253,45 +247,55 @@ func (c *Client) DeletePool(ref PoolRef) error {
 }
 
 func (p *Pool) Feed(value any, tags []string, opts ...FeedOption) (*api.Message, error) {
-	payload, tags, err := feedPayload(value, tags)
+	if view, ok := value.(MessageView); ok {
+		return p.Feed(&view, tags, opts...)
+	}
+	if view, ok := value.(*MessageView); ok {
+		if view == nil || len(view.bytes()) == 0 {
+			return nil, invalidArgumentError("missing message view")
+		}
+		if tags != nil {
+			return nil, invalidArgumentError("cannot supply tags when forwarding a message")
+		}
+		return p.FeedLite3(view.bytes(), opts...)
+	}
+	payload, tags, err := api.EncodeFeedJSON(value, tags)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := p.FeedJSON(payload, tags, api.ApplyFeedOptions(opts...).Durability)
+	raw, err := p.FeedJSON(payload, tags, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return api.DecodeOwnedMessage(raw)
 }
 
-func feedPayload(value any, tags []string) ([]byte, []string, error) {
-	if message, ok := value.(*api.Message); ok && message != nil {
-		if tags != nil {
-			return nil, nil, &Error{Kind: ErrorUsage, Message: "cannot supply tags when forwarding a message"}
-		}
-		return message.Data, message.Tags(), nil
-	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil, nil, &Error{Kind: ErrorUsage, Message: fmt.Sprintf("cannot encode feed value: %v", err)}
-	}
-	return payload, tags, nil
-}
-
 func (p *Pool) FeedReceipt(value any, tags []string, opts ...FeedOption) (*api.FeedReceipt, error) {
-	payload, tags, err := feedPayload(value, tags)
+	if view, ok := value.(MessageView); ok {
+		return p.FeedReceipt(&view, tags, opts...)
+	}
+	if view, ok := value.(*MessageView); ok {
+		if view == nil || len(view.bytes()) == 0 {
+			return nil, invalidArgumentError("missing message view")
+		}
+		if tags != nil {
+			return nil, invalidArgumentError("cannot supply tags when forwarding a message")
+		}
+		return p.FeedLite3Receipt(view.bytes(), opts...)
+	}
+	payload, tags, err := api.EncodeFeedJSON(value, tags)
 	if err != nil {
 		return nil, err
 	}
-	return p.FeedJSONReceipt(payload, tags, api.ApplyFeedOptions(opts...).Durability)
+	return p.FeedJSONReceipt(payload, tags, opts...)
 }
 
-func (p *Pool) FeedJSONReceipt(payload []byte, tags []string, durability Durability) (*api.FeedReceipt, error) {
-	return p.feedEncodedReceipt(payload, tags, durability, false)
+func (p *Pool) FeedJSONReceipt(payload []byte, tags []string, opts ...FeedOption) (*api.FeedReceipt, error) {
+	return p.feedEncodedReceipt(payload, tags, api.ApplyFeedOptions(opts...).Durability, false)
 }
 
-func (p *Pool) FeedLite3Receipt(payload []byte, durability Durability) (*api.FeedReceipt, error) {
-	return p.feedEncodedReceipt(payload, nil, durability, true)
+func (p *Pool) FeedLite3Receipt(payload []byte, opts ...FeedOption) (*api.FeedReceipt, error) {
+	return p.feedEncodedReceipt(payload, nil, api.ApplyFeedOptions(opts...).Durability, true)
 }
 
 func (p *Pool) feedEncodedReceipt(payload []byte, tags []string, durability Durability, lite3 bool) (*api.FeedReceipt, error) {
@@ -329,12 +333,12 @@ func (p *Pool) feedEncodedReceipt(payload []byte, tags []string, durability Dura
 	return &api.FeedReceipt{Seq: uint64(receipt.seq), Time: uint64(receipt.time)}, nil
 }
 
-func (p *Pool) FeedJSON(payload []byte, tags []string, durability Durability) ([]byte, error) {
-	return p.feedEncoded(payload, tags, durability, false)
+func (p *Pool) FeedJSON(payload []byte, tags []string, opts ...FeedOption) ([]byte, error) {
+	return p.feedEncoded(payload, tags, api.ApplyFeedOptions(opts...).Durability, false)
 }
 
-func (p *Pool) FeedLite3(payload []byte, durability Durability) (*api.Message, error) {
-	raw, err := p.feedEncoded(payload, nil, durability, true)
+func (p *Pool) FeedLite3(payload []byte, opts ...FeedOption) (*api.Message, error) {
+	raw, err := p.feedEncoded(payload, nil, api.ApplyFeedOptions(opts...).Durability, true)
 	if err != nil {
 		return nil, err
 	}

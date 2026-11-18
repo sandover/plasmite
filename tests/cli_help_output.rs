@@ -8,8 +8,8 @@ fn top_level_help_orients_and_routes_readers() {
     let output = cmd().arg("--help").output().expect("help");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("persistent, bounded stream"));
-    assert!(stdout.contains("feed` appends"));
+    assert!(stdout.contains("keeps a fixed amount of history"));
+    assert!(stdout.contains("Feed adds a message"));
     assert!(stdout.contains("FIRST LOCAL WORKFLOW"));
     assert!(stdout.contains("plasmite pool create chat"));
     assert!(stdout.contains("--format <FORMAT>"));
@@ -294,7 +294,7 @@ fn usage_exit_code_for_tag_on_complete_message() {
             "testpool",
             "--tag",
             "orphan",
-            r#"{"seq":7,"time":"2000-01-01T00:00:00Z","meta":{"tags":[]},"data":{"x":1}}"#,
+            r#"{"seq":7,"time":"2000-01-01T00:00:00.000000000Z","meta":{"tags":[]},"data":{"x":1}}"#,
             "--format",
             "json",
         ])

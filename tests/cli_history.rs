@@ -285,33 +285,27 @@ fn duplex_since_reads_same_local_and_remote_history() {
             .as_ref()
             .map(|s| format!("{}/history", s.base_url))
             .unwrap_or_else(|| "history".into());
-        let mut child = cmd()
-            .arg("--dir")
-            .arg(temp.path())
-            .args([
-                "duplex",
-                &target,
-                "--since",
-                "2020-09-13T12:26:40.003Z",
-                "--timeout",
-                "150ms",
-                "--format",
-                "json",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("duplex");
-        // Keep stdin open while the follow half reads history and times out.
-        let mut output = Vec::new();
-        child
-            .stdout
-            .take()
-            .expect("stdout")
-            .read_to_end(&mut output)
-            .expect("read");
-        assert_eq!(child.wait().expect("wait").code(), Some(124));
+        let mut child = KillOnDrop(
+            cmd()
+                .arg("--dir")
+                .arg(temp.path())
+                .args([
+                    "duplex",
+                    &target,
+                    "--since",
+                    "2020-09-13T12:26:40.003Z",
+                    "--format",
+                    "json",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("duplex"),
+        );
+        let output = read_message_lines(child.0.stdout.take().unwrap(), 3, Duration::from_secs(5));
+        #[cfg(unix)]
+        assert!(wait_within(&mut child.0, Duration::from_secs(5), "duplex").success());
         assert_eq!(
             parse_json_lines(&output)
                 .iter()

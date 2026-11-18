@@ -2,13 +2,13 @@
 
 Normative contracts are versioned under `spec/`.
 
-- [Plasmite 2.0 contract](v2/SPEC.md), the target for the 2.0 implementation.
+- [Plasmite 2.0 contract](v2/SPEC.md) for the current CLI, API, HTTP, UDP and MCP behavior.
 - CLI contract (1.x; historical path): `spec/v0/SPEC.md`
 - UDP input contract (v0): `spec/udp/v0/SPEC.md`
 - [UDP transport v1](udp/v1/SPEC.md): read when changing native UDP send/follow, subscription controls, or delivery events.
 - Public API contract (1.x; historical path): `spec/api/v0/SPEC.md`
-- Remote protocol contract (v0): `spec/remote/v0/SPEC.md`
-- MCP contract (2025-11-25): `spec/mcp/2025-11-25/SPEC.md`
+- Remote protocol contract (1.x; historical path): `spec/remote/v0/SPEC.md`
+- MCP contract (1.x; historical path): `spec/mcp/2025-11-25/SPEC.md`
 
 ## Distillation Rule
 

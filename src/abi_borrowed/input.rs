@@ -310,15 +310,8 @@ pub unsafe extern "C" fn plsm_go_append_nodes(
                 1 => crate::api::Durability::Flush,
                 _ => return Err(usage("invalid durability")),
             };
-            let mut view = unsafe { build(slice(nodes, count)?, slice(tag_spans, tag_count)?) }?;
-            let time = crate::api::now_ns()?;
-            let seq = pool.pool.append_with_options(
-                view.bytes(),
-                crate::api::AppendOptions::new(time, durability),
-            )?;
-            view.seq = seq;
-            view.time = time;
-            publish(view, out)
+            let view = unsafe { build(slice(nodes, count)?, slice(tag_spans, tag_count)?) }?;
+            publish(pool.pool.feed_prepared_view(view, durability)?, out)
         })(),
         error,
     )

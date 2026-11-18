@@ -88,7 +88,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 						} else if strings.HasPrefix(lane, "raw") {
 							rawStream, err = pool.FetchLite3(selection)
 						} else {
-							jsonStream, err = pool.openRead(true, false, []api.ReadOption{selection})
+							jsonStream, err = pool.openRead(true, []api.ReadOption{selection})
 						}
 						if err != nil {
 							b.Fatal(err)
@@ -154,7 +154,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 								b.Fatal("out of order")
 							}
 							if lane == "raw_forward" {
-								_, e = destination.FeedLite3Receipt(frame.Payload, DurabilityFast)
+								_, e = destination.FeedLite3Receipt(frame.Payload)
 								if e != nil {
 									b.Fatal(e)
 								}

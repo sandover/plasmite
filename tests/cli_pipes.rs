@@ -511,7 +511,7 @@ fn ordinary_partial_and_reserved_objects_use_the_same_rule_for_all_sources() {
         assert_eq!(message["data"], application);
         assert_eq!(message["meta"]["tags"], json!([]));
     }
-    let reserved = json!({"seq": 900, "time": "2000-01-01T00:00:00Z",
+    let reserved = json!({"seq": 900, "time": "2000-01-01T00:00:00.000000000Z",
         "meta": {"tags": ["copied"]}, "data": {"value": 4}});
     let file = temp.path().join("message.json");
     std::fs::write(&file, reserved.to_string()).unwrap();
@@ -542,7 +542,7 @@ fn ordinary_partial_and_reserved_objects_use_the_same_rule_for_all_sources() {
         reserved["data"]
     );
 
-    let yaml = b"---\nx: 5\n...\n---\nseq: 900\ntime: '2000-01-01T00:00:00Z'\nmeta: {tags: [yaml]}\ndata: {x: 6}\n...\n";
+    let yaml = b"---\nx: 5\n...\n---\nseq: 900\ntime: '2000-01-01T00:00:00.000000000Z'\nmeta: {tags: [yaml]}\ndata: {x: 6}\n...\n";
     let output = feed_stdin(&directory, "events", yaml);
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);

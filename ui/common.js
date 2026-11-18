@@ -26,13 +26,14 @@
     };
     const isSequence = (path) => {
       const p = protocolPath(path);
-      return (p.length === 1 && p[0] === "seq" && (path.length === 1 || path[0] === "message")) ||
+      return (p.length === 1 && (p[0] === "seq" || p[0] === "next_seq") && (path.length === 1 || path[0] === "message")) ||
+        (path.length === 2 && path[0] === "error" && ["missing", "next_seq"].includes(path[1])) ||
         (p.length === 2 && ((p[0] === "bounds" && (p[1] === "oldest" || p[1] === "newest")) ||
           (p[0] === "ring" && p[1] === "first")) && path[0] !== "message");
     };
     const enters = (path) => {
       if (!path.length) return true;
-      if (path.length === 1 && ["pool", "message", "pools"].includes(path[0])) return true;
+      if (path.length === 1 && ["pool", "message", "pools", "error"].includes(path[0])) return true;
       if (path.length === 2 && path[0] === "pools" && typeof path[1] === "number") return true;
       const p = protocolPath(path);
       return p.length === 1 && ["bounds", "ring"].includes(p[0]) && path[0] !== "message";
@@ -74,7 +75,8 @@
     const pool = (object) => {
       exact(object?.bounds, "oldest"); exact(object?.bounds, "newest"); exact(object?.ring, "first");
     };
-    exact(value, "seq"); exact(value.message, "seq");
+    exact(value, "seq"); exact(value.message, "seq"); exact(value, "next_seq");
+    exact(value.error, "missing"); exact(value.error, "next_seq");
     pool(value); pool(value.pool);
     if (Array.isArray(value.pools)) value.pools.forEach(pool);
     return value;
@@ -96,7 +98,7 @@
     return { events, rest };
   }
 
-  async function readEvents(body, onEvent, signal) {
+  async function readEvents(body, onEvent, signal, parse = parseEvents) {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -104,7 +106,7 @@
       while (!signal?.aborted) {
         const part = await reader.read();
         if (part.done) return true;
-        const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }));
+        const parsed = parse(buffer + decoder.decode(part.value, { stream: true }));
         buffer = parsed.rest;
         for (const event of parsed.events) {
           if (signal?.aborted || onEvent(event) === false) return false;
@@ -114,6 +116,20 @@
     } finally {
       try { await reader.cancel(); } catch (_) { /* The body may already be closed. */ }
     }
+  }
+
+  function jsonEvents(buffer) {
+    const lines = buffer.split("\n");
+    const rest = lines.pop();
+    const events = lines.filter(line => line.trim()).map(line => {
+      const data = parseJSON(line);
+      return { name: data.type || "message", data };
+    });
+    return { events, rest };
+  }
+
+  function readJsonEvents(body, onEvent, signal) {
+    return readEvents(body, onEvent, signal, jsonEvents);
   }
 
   function retryWait(delay, signal) {
@@ -130,15 +146,18 @@
 
   // Pages decide which responses stop a stream and where the next request resumes.
   async function followEvents({
-    url, onEvent, onResponse = () => {}, onDrop = () => {}, signal, retryMs = 1000,
+    url, onEvent, onResponse = () => {}, onDrop = () => {}, signal, retryMs = 1000, read = readEvents,
   }) {
     while (!signal?.aborted) {
       let failure;
       try {
         const response = await fetch(url(), { cache: "no-store", signal });
-        if (signal?.aborted || onResponse(response) === false) return;
+        if (signal?.aborted || await onResponse(response) === false) {
+          await response.body?.cancel();
+          return;
+        }
         if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
-        if (!await readEvents(response.body, onEvent, signal)) return;
+        if (!await read(response.body, onEvent, signal)) return;
       } catch (error) {
         failure = error;
       }
@@ -149,7 +168,7 @@
   }
 
   window.PlasmiteUI = {
-    parseJSON, readEvents, followEvents, sequence,
+    parseJSON, readEvents, readJsonEvents, followEvents, sequence,
     cursor: (next) => next > maxSequence ? null : String(next),
     tailStart: (bounds, count) => {
       if (typeof bounds.newest !== "bigint") return null;

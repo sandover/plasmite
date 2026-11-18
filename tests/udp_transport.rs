@@ -355,7 +355,7 @@ fn since_handles_nonmonotone_timestamps_and_oversized_stored_messages() -> TestR
     let mut stream = server.udp()?.fetch(Read::last(1))?;
     let mut oversized = false;
     while let Some(event) = stream.next_event()? {
-        if let UdpEvent::Gap {
+        if let UdpEvent::Skip {
             first: 4,
             last: 4,
             reason: plasmite::api::UdpSkipReason::Oversized,
@@ -885,7 +885,7 @@ fn loss_duplicate_reorder_and_lost_opening_progress_preserve_received_data() -> 
     while let Some(event) = stream.next_event()? {
         match event {
             UdpEvent::Frame(frame) => frames.push(frame.seq),
-            UdpEvent::Gap { first, last, .. } => gaps.push((first, last)),
+            UdpEvent::Skip { first, last, .. } => gaps.push((first, last)),
             _ => {}
         }
     }

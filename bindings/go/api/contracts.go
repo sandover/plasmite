@@ -11,7 +11,6 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -42,11 +41,6 @@ type Error struct {
 	NextSeq uint64
 }
 
-var (
-	ErrClosed          = errors.New("plasmite: closed")
-	ErrInvalidArgument = errors.New("plasmite: invalid argument")
-)
-
 func (e *Error) Error() string {
 	if e == nil {
 		return "plasmite: <nil error>"
@@ -58,11 +52,11 @@ func (e *Error) Error() string {
 }
 
 func ClosedError(target string) error {
-	return fmt.Errorf("%w: %s is closed", ErrClosed, target)
+	return &Error{Kind: ErrorUsage, Message: target + " is closed"}
 }
 
 func InvalidArgumentError(message string) error {
-	return fmt.Errorf("%w: %s", ErrInvalidArgument, message)
+	return &Error{Kind: ErrorUsage, Message: message}
 }
 
 type Durability uint32
@@ -95,7 +89,6 @@ func ApplyFeedOptions(opts ...FeedOption) FeedConfig {
 }
 
 const DefaultPoolSizeBytes uint64 = 1024 * 1024
-const DefaultPoolSize = DefaultPoolSizeBytes
 
 type PoolRef string
 
@@ -140,6 +133,31 @@ func (m *Message) Tags() []string {
 	return m.Meta.Tags
 }
 
+// EncodeFeedJSON keeps a forwarded message's application data and tags.
+func EncodeFeedJSON(value any, tags []string) ([]byte, []string, error) {
+	var message *Message
+	switch value := value.(type) {
+	case Message:
+		message = &value
+	case *Message:
+		if value == nil {
+			return nil, nil, InvalidArgumentError("missing message")
+		}
+		message = value
+	}
+	if message != nil {
+		if tags != nil {
+			return nil, nil, InvalidArgumentError("cannot supply tags when forwarding a message")
+		}
+		return message.Data, message.Tags(), nil
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, nil, InvalidArgumentError(fmt.Sprintf("cannot encode feed value: %v", err))
+	}
+	return payload, tags, nil
+}
+
 func DecodeMessage(raw []byte) (*Message, error) {
 	return decodeMessage(raw, false)
 }
@@ -158,11 +176,11 @@ func decodeMessage(raw []byte, owned bool) (*Message, error) {
 		Meta MessageMeta     `json:"meta"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("plasmite: decode message: %w", err)
+		return nil, &Error{Kind: ErrorCorrupt, Message: fmt.Sprintf("decode message: %v", err)}
 	}
 	parsedTime, err := time.Parse(time.RFC3339Nano, payload.Time)
 	if err != nil {
-		return nil, fmt.Errorf("plasmite: parse message time: %w", err)
+		return nil, &Error{Kind: ErrorCorrupt, Message: fmt.Sprintf("parse message time: %v", err)}
 	}
 	if !owned {
 		raw = append([]byte(nil), raw...)
@@ -193,7 +211,7 @@ type Pool interface {
 	Close()
 	Info() (PoolInfo, error)
 	Feed(value any, tags []string, opts ...FeedOption) (*Message, error)
-	FeedJSON(payload []byte, tags []string, durability Durability) ([]byte, error)
+	FeedJSON(payload []byte, tags []string, opts ...FeedOption) ([]byte, error)
 	Follow(opts ...ReadOption) (Reader, error)
 	Fetch(opts ...ReadOption) (Reader, error)
 }
@@ -221,21 +239,20 @@ type UDPViewFrame[V any] struct {
 
 func (*UDPViewFrame[V]) udpEvent() {}
 
-// UDPGap is the compatibility name for an explicit server skip, never inferred loss.
-type UDPGap struct {
+// UDPSkip reports a range the server explicitly skipped.
+type UDPSkip struct {
 	First  uint64
 	Last   uint64
 	Reason string
 }
 
-func (*UDPGap) udpEvent() {}
+func (*UDPSkip) udpEvent() {}
 
 type UDPProgress struct {
-	StartSeq     uint64
-	NextSeq      uint64
-	EndSeq       *uint64
-	Terminal     bool
-	RetentionGap bool
+	StartSeq uint64
+	NextSeq  uint64
+	EndSeq   *uint64
+	Terminal bool
 }
 
 func (*UDPProgress) udpEvent() {}

@@ -62,6 +62,13 @@ unsafe extern "C" {
     fn plsm_view_root(owner: *const Owner) -> ValueRef;
     fn plsm_view_seq(owner: *const Owner) -> u64;
     fn plsm_view_time(owner: *const Owner) -> u64;
+    fn plsm_view_retained_bytes(owner: *const Owner) -> usize;
+    fn plsm_view_json_native_safe(owner: *const Owner) -> bool;
+    fn plsm_value_to_json_stored(
+        value: ValueRef,
+        out: *mut plsm_buf_t,
+        error: *mut *mut plsm_error_t,
+    ) -> i32;
     fn plsm_view_bytes(owner: *const Owner, len: *mut usize) -> *const u8;
     fn plsm_value_get(
         value: ValueRef,
@@ -87,12 +94,6 @@ unsafe extern "C" {
     fn plsm_value_to_json(
         value: ValueRef,
         out: *mut plsm_buf_t,
-        err: *mut *mut plsm_error_t,
-    ) -> i32;
-    pub fn plsm_internal_pool_get_view(
-        pool: *mut plsm_pool_t,
-        seq: u64,
-        out: *mut *const Owner,
         err: *mut *mut plsm_error_t,
     ) -> i32;
 }
@@ -367,15 +368,13 @@ impl NativeView {
     }
     #[napi]
     pub fn materialize(&self, env: Env, node: u32, parse: JsFunction) -> Result<JsUnknown> {
-        if let Some(api) = native_json_api()
-            && unsafe { (api.safe)(self.owner.0) }
-        {
+        if unsafe { plsm_view_json_native_safe(self.owner.0) } {
             let mut out = plsm_buf_t {
                 data: ptr::null_mut(),
                 len: 0,
             };
             let mut err = ptr::null_mut();
-            if unsafe { (api.json)(self.reference(node), &mut out, &mut err) } != 0 {
+            if unsafe { plsm_value_to_json_stored(self.reference(node), &mut out, &mut err) } != 0 {
                 return Err(take_error(env, err)?);
             }
             let buffer = NativeBuf(out);
@@ -527,106 +526,8 @@ impl napi::bindgen_prelude::ObjectFinalize for NativeCursor {
     }
 }
 
-// macOS addons permit dynamic lookup for Node symbols, which also permits an
-// older libplasmite to load. Check the additive ABI before calling lazy stubs.
-#[cfg(unix)]
-pub fn available() -> bool {
-    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *SUPPORTED.get_or_init(|| {
-        [
-            c"plsm_internal_pool_get_view",
-            c"plsm_view_root",
-            c"plsm_view_release",
-            c"plsm_view_seq",
-            c"plsm_view_time",
-            c"plsm_view_bytes",
-            c"plsm_value_get",
-            c"plsm_value_index",
-            c"plsm_value_read",
-            c"plsm_value_entries",
-            c"plsm_value_to_json",
-            c"plsm_value_iter",
-            c"plsm_cursor_next",
-            c"plsm_cursor_free",
-        ]
-        .iter()
-        .all(|name| !unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }.is_null())
-    })
-}
-// Other platform loaders enforce imported symbols before addon initialization.
-#[cfg(not(unix))]
-pub fn available() -> bool {
-    true
-}
-
-type NativeJsonSafe = unsafe extern "C" fn(*const Owner) -> bool;
-type RetainedBytes = unsafe extern "C" fn(*const Owner) -> usize;
 fn backing_bytes(owner: *const Owner) -> usize {
-    static GETTER: std::sync::OnceLock<Option<RetainedBytes>> = std::sync::OnceLock::new();
-    let getter = GETTER.get_or_init(|| {
-        let symbol = optional_symbol(c"plsm_view_retained_bytes");
-        if symbol.is_null() {
-            None
-        } else {
-            Some(unsafe { std::mem::transmute::<*mut libc::c_void, RetainedBytes>(symbol) })
-        }
-    });
-    if let Some(getter) = getter {
-        unsafe { getter(owner) }
-    } else {
-        let mut len = 0;
-        unsafe { plsm_view_bytes(owner, &mut len) };
-        len
-    }
-}
-type NativeJsonFormatter =
-    unsafe extern "C" fn(ValueRef, *mut plsm_buf_t, *mut *mut plsm_error_t) -> i32;
-struct NativeJsonApi {
-    safe: NativeJsonSafe,
-    json: NativeJsonFormatter,
-}
-
-// These additions stay optional so an older owned-view library can still use
-// the direct walker. Resolve once; never search the dynamic loader per copy.
-fn native_json_api() -> Option<&'static NativeJsonApi> {
-    static API: std::sync::OnceLock<Option<NativeJsonApi>> = std::sync::OnceLock::new();
-    API.get_or_init(|| {
-        let safe = optional_symbol(c"plsm_view_json_native_safe");
-        let json = optional_symbol(c"plsm_value_to_json_stored");
-        if safe.is_null() || json.is_null() {
-            return None;
-        }
-        Some(NativeJsonApi {
-            safe: unsafe { std::mem::transmute::<*mut libc::c_void, NativeJsonSafe>(safe) },
-            json: unsafe { std::mem::transmute::<*mut libc::c_void, NativeJsonFormatter>(json) },
-        })
-    })
-    .as_ref()
-}
-
-#[cfg(unix)]
-pub(super) fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
-    unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }
-}
-#[cfg(windows)]
-pub(super) fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GetModuleHandleA(name: *const u8) -> *mut libc::c_void;
-        fn GetProcAddress(module: *mut libc::c_void, name: *const u8) -> *mut libc::c_void;
-    }
-    unsafe {
-        let module = GetModuleHandleA(c"plasmite2.dll".as_ptr().cast());
-        if module.is_null() {
-            ptr::null_mut()
-        } else {
-            GetProcAddress(module, name.as_ptr().cast())
-        }
-    }
-}
-#[cfg(not(any(unix, windows)))]
-pub(super) fn optional_symbol(_name: &std::ffi::CStr) -> *mut libc::c_void {
-    ptr::null_mut()
+    unsafe { plsm_view_retained_bytes(owner) }
 }
 
 struct DataProperty {

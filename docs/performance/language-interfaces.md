@@ -116,6 +116,21 @@ Run `bench_view_streams local LANE small 10000` for `raw`, `json`,
 `view_selected` and `view_full`, and `bench_owned_views 2000` for the
 typed-input and sparse-view lanes. These checks cover local Rust paths.
 
+### 2.0 review check
+
+Seven alternating release runs compared the review changes with `ea7ab55` on the same Apple Silicon Mac. `bench_view_streams` read or forwarded 30,000 small messages per run. `bench_owned_views` ran 2,000 operations per lane. The small-message lanes stayed within their prior timing ranges. Opening a cold view over a 64 KiB string improved after Plasmite learned to validate 32 consecutive ASCII bytes at a time.
+
+| Local path | Before, ns per message | After, ns per message |
+| --- | ---: | ---: |
+| Read encoded Lite3 | 853 | 865 |
+| Read decoded message | 1,155 | 1,216 |
+| Read one view field | 976 | 973 |
+| Decode the full view | 1,209 | 1,227 |
+| Forward a view | 5,433 | 5,239 |
+| Encode and feed typed input | 4,880 | 4,243 |
+| Encode and feed via JSON | 5,144 | 4,318 |
+| Open a cold view and read one field, 64 KiB string | 5,911 | 2,119 |
+
 ### Indexed starts and HTTP streaming
 
 The 2.0 performance fixes restore the sequence index for range starts and use

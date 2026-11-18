@@ -236,7 +236,7 @@ pub extern "C" fn plsm_builder_copy_value(
 pub extern "C" fn plsm_pool_feed_builder_view(
     pool: *mut plsm_pool,
     builder: *mut plsm_builder,
-    durability: u32,
+    options: *const crate::abi::plsm_feed_options,
     out: *mut *const plsm_message_view,
     err: *mut *mut plsm_error,
 ) -> i32 {
@@ -249,19 +249,10 @@ pub extern "C" fn plsm_pool_feed_builder_view(
     };
     finish(
         (|| {
-            let durability = match durability {
-                0 => crate::api::Durability::Fast,
-                1 => crate::api::Durability::Flush,
-                _ => return Err(usage("invalid durability")),
-            };
-            let mut view = unsafe { &mut *builder }.take_view()?;
-            let time = crate::api::now_ns()?;
-            view.seq = pool.pool.append_with_options(
-                view.bytes(),
-                crate::api::AppendOptions::new(time, durability),
-            )?;
-            view.time = time;
-            publish(view, out)
+            let feed = crate::abi::parse_feed(options)?;
+            let durability = feed.encoded_durability()?;
+            let view = unsafe { &mut *builder }.take_view()?;
+            publish(pool.pool.feed_prepared_view(view, durability)?, out)
         })(),
         err,
     )
@@ -487,7 +478,8 @@ mod tests {
                 temp.path().join("native.plasmite"),
                 PoolOptions::new(1024 * 1024),
             )
-            .unwrap(),
+            .unwrap()
+            .into(),
         }));
         let mut tag = b"sensor\0a".to_vec();
         let tags = Text {
@@ -548,7 +540,7 @@ mod tests {
         bytes[0] = b'X';
         let mut view = std::ptr::null();
         assert_eq!(
-            plsm_pool_feed_builder_view(pool, builder, 0, &mut view, &mut err),
+            plsm_pool_feed_builder_view(pool, builder, std::ptr::null(), &mut view, &mut err),
             0
         );
         assert_eq!(unsafe { plsm_view_seq(view) }, 1);

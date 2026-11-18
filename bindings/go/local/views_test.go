@@ -2,7 +2,6 @@ package local
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -12,7 +11,7 @@ import (
 func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "views")
-	original, err := pool.FeedJSON([]byte(`{"sensor":"north","metrics":{"power":7},"large":9223372036854775807,"zero":-0.0,"values":[1,null,"é"]}`), []string{"test"}, DurabilityFast)
+	original, err := pool.FeedJSON([]byte(`{"sensor":"north","metrics":{"power":7},"large":9223372036854775807,"zero":-0.0,"values":[1,null,"é"]}`), []string{"test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +52,7 @@ func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 		detached[i] = 0
 	}
 	pool.Close()
-	if _, err = pool.getView(receipt.Seq); !errors.Is(err, ErrClosed) {
+	if _, err = pool.getView(receipt.Seq); !isUsage(err) {
 		t.Fatalf("closed %v", err)
 	}
 	var decoded struct {
@@ -133,7 +132,7 @@ func TestManagedViewRetriesCapacityAndAllowsConcurrentReads(t *testing.T) {
 	}
 	group.Wait()
 	selector.Close()
-	if _, err = selector.Read(view); !errors.Is(err, ErrClosed) {
+	if _, err = selector.Read(view); !isUsage(err) {
 		t.Fatalf("closed selector %v", err)
 	}
 }
@@ -160,7 +159,7 @@ func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
 		`{"sensor":"north","metrics":{"power":1.5},"zero":1}`,
 		`{"sensor":"north","metrics":{"power":7},"zero":"bad"}`,
 	} {
-		receipt, err := pool.FeedJSONReceipt([]byte(text), nil, DurabilityFast)
+		receipt, err := pool.FeedJSONReceipt([]byte(text), nil)
 		if err != nil {
 			t.Fatal(err)
 		}

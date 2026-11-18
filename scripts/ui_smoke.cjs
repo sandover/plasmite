@@ -195,27 +195,34 @@ function historyBrowser() {
   const env = browser('pool', poolExports);
   env.page.quietRendering();
   env.page.state.messages = [env.page.fromRaw(raw(env.api, '9007199254740995'))];
-  env.page.state.info = { bounds: { oldest: 9007199254740990n } };
+  env.page.state.info = { incarnation: 'current', bounds: { oldest: 9007199254740990n } };
   return env;
 }
-const info = (oldest) => ({ ok: true, status: 200, text: async () => `{"pool":{"bounds":{"oldest":${oldest}}}}` });
+const info = (oldest, incarnation = 'current', newest = oldest) => ({ ok: true, status: 200,
+  text: async () => `{"pool":{"incarnation":"${incarnation}","bounds":{"oldest":${oldest},"newest":${newest}}}}` });
 const stream = (...chunks) => ({ ok: true, status: 200, body: { getReader() {
   return { async read() {
     if (!chunks.length) return { done: true };
     return { value: new TextEncoder().encode(chunks.shift()), done: false };
   } };
 } } });
+const jsonStream = (incarnation, ...chunks) => {
+  const response = stream(...chunks);
+  response.headers = new Headers({ 'plasmite-incarnation': incarnation });
+  response.body.cancel = async () => { response.cancelled = true; };
+  return response;
+};
 
 test('pool follow resumes at the next exact sequence after a split event and disconnect', async () => {
   const env = browser('pool', poolExports);
+  env.page.state.info = { incarnation: 'current' };
   env.page.state.nextSeq = 9007199254740993n;
   const requests = [];
   env.context.fetch = async (url) => {
     requests.push(new URL(url, env.context.location.origin));
-    if (requests.length === 1) return stream(
-      'event: message\r',
-      '\ndata: {"seq":900719925474',
-      '0993,"data":{"sample":1}}\r\n\r\n');
+    if (requests.length === 1) return jsonStream('current',
+      '{"seq":900719925474',
+      '0993,"data":{"sample":1}}\r\n');
     return { ok: false, status: 404 };
   };
   const following = env.page.followPool();
@@ -226,7 +233,7 @@ test('pool follow resumes at the next exact sequence after a split event and dis
   env.timers.delete(id);
   retry.fn();
   await following;
-  assert.deepEqual(requests.map(url => url.searchParams.get('since_seq')),
+  assert.deepEqual(requests.map(url => url.searchParams.get('since')),
     ['9007199254740993', '9007199254740994']);
   assert.match(env.nodes.get('empty').textContent, /No pool named/);
 });
@@ -312,13 +319,12 @@ test('history sends bounded exact parameters and inserts a finite earlier batch'
   env.context.fetch = async (url) => {
     if (url.endsWith('/info')) return info('9007199254740991');
     requested = new URL(url, 'http://localhost');
-    return stream('event: message\ndata: {"seq":9007199254740993,"data":1}\n\nevent: message\ndata: {"seq":9007199254740994,"data":2}\n\n');
+    return jsonStream('current', '{"seq":9007199254740993,"data":1}\n{"seq":9007199254740994,"data":2}\n{"type":"complete"}\n');
   };
   await env.page.loadEarlier();
-  assert.equal(requested.searchParams.get('since_seq'), '9007199254740993');
-  assert.equal(requested.searchParams.get('max'), '2');
-  assert.equal(requested.searchParams.get('timeout_ms'), '1000');
-  assert.equal(requested.searchParams.get('gap_policy'), 'error');
+  assert.equal(requested.pathname, '/v2/pools/test/fetch');
+  assert.equal(requested.searchParams.get('since'), '9007199254740993');
+  assert.equal(requested.searchParams.get('until'), '9007199254740994');
   assert.equal(env.page.state.messages.length, 3);
   assert.equal(env.nodes.get('earlier').disabled, false);
   assert.equal([...env.timers.values()].some((timer) => timer.delay === 5000), false);
@@ -341,7 +347,7 @@ test('history aborts a stalled server and exposes retry guidance', async () => {
 test('history surfaces stream errors and retains a partial page', async () => {
   const env = historyBrowser();
   env.context.fetch = async (url) => url.endsWith('/info') ? info('9007199254740991') :
-    stream('event: message\ndata: {"seq":9007199254740993,"data":1}\n\nevent: error\ndata: {"error":{"message":"retention gap"}}\n\n');
+    jsonStream('current', '{"seq":9007199254740993,"data":1}\n{"type":"error","error":{"message":"retention gap"}}\n');
   await env.page.loadEarlier();
   assert.equal(env.page.state.messages.length, 2);
   assert.match(env.nodes.get('ui-notice').textContent, /retention gap.*again/);
@@ -389,17 +395,17 @@ test('stream incarnation catches replacement after the info request', async () =
   env.page.state.info = { incarnation: 'old' };
   env.page.state.nextSeq = 101n;
   const requests = [];
+  const stale = jsonStream('new', '{"seq":101,"data":{}}\n');
   env.context.fetch = async url => {
+    if (url.endsWith('/info')) return info(1, 'new', 2);
     requests.push(new URL(url, env.context.location.origin));
-    if (requests.length === 1) return stream('event: pool\ndata: {"incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":101,"data":{}}\n\n');
-    return stream('event: pool\ndata: {"incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":1,"data":{}}\n\nevent: message\ndata: {"seq":2,"data":{}}\n\n');
+    if (requests.length === 1) return stale;
+    return jsonStream('new', '{"seq":1,"data":{}}\n{"seq":2,"data":{}}\n');
   };
   const running = env.page.followPool();
   await new Promise(setImmediate);
-  assert.equal(env.page.pending.length, 0, 'old request contributes no messages');
-  for (const timer of [...env.timers.values()]) if (timer.delay === 1000) timer.fn();
-  await new Promise(setImmediate);
-  assert.equal(requests[1].searchParams.get('since_seq'), '1');
+  assert.equal(stale.cancelled, true, 'old request contributes no messages');
+  assert.equal(requests[1].searchParams.get('since'), '1');
   assert.deepEqual(Array.from(env.page.pending, message => message.seq), [1n, 2n]);
   env.page.state.reader.abort();
   await running;
@@ -461,15 +467,15 @@ test('map stream-start identity resets an info-to-stream replacement before acce
   const requests = [];
   env.context.fetch = async url => {
     requests.push(new URL(url, env.context.location.origin));
-    if (requests.length === 1) return stream('event: pool\ndata: {"name":"test","incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":101,"data":{}}\n\n');
-    return stream('event: pool\ndata: {"name":"test","incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":1,"data":{}}\n\nevent: message\ndata: {"seq":2,"data":{}}\n\n');
+    if (requests.length === 1) return jsonStream('new', '{"seq":101,"data":{}}\n');
+    return jsonStream('new', '{"seq":1,"data":{}}\n{"seq":2,"data":{}}\n');
   };
   env.page.startReader('test');
   await new Promise(setImmediate);
   assert.equal(env.nodes.get('messages').children.length, 0);
-  for (const timer of [...env.timers.values()]) if (timer.delay === 1200) timer.fn();
+  env.page.showPools({ available: true, pools: [{ name: 'test', incarnation: 'new', bounds: { oldest: 1n, newest: 2n } }] });
   await new Promise(setImmediate);
-  assert.equal(requests[1].searchParams.get('since_seq'), '1');
+  assert.equal(requests[1].searchParams.get('since'), '1');
   assert.deepEqual(env.nodes.get('messages').children.map(row => row.dataset.seq), ['1', '2']);
   env.page.stopReader();
 });

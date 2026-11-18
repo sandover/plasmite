@@ -89,28 +89,7 @@ pub extern "C" fn plsm_view_from_lite3(
         err,
     )
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn plsm_internal_pool_get_view(
-    pool: *mut plsm_pool,
-    seq: u64,
-    out: *mut *const plsm_message_view,
-    err: *mut *mut plsm_error,
-) -> i32 {
-    let pool = match borrow_pool(pool, err) {
-        Ok(p) => p,
-        Err(e) => return e,
-    };
-    finish(
-        (|| {
-            let f = pool.pool.get(seq)?;
-            publish(
-                MessageView::from_owned(f.payload, f.seq, f.time, f.flags)?,
-                out,
-            )
-        })(),
-        err,
-    )
-}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plsm_view_retain(owner: *const plsm_message_view) {
     if !owner.is_null() {
@@ -316,50 +295,6 @@ pub unsafe extern "C" fn plsm_view_bytes(
     }
     bytes.as_ptr()
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn plsm_internal_pool_get_into(
-    pool: *mut plsm_pool,
-    seq: u64,
-    destination: *mut u8,
-    capacity: usize,
-    required: *mut usize,
-    timestamp_ns: *mut u64,
-    flags: *mut u32,
-    err: *mut *mut plsm_error,
-) -> i32 {
-    let pool = match borrow_pool(pool, err) {
-        Ok(p) => p,
-        Err(e) => return e,
-    };
-    finish(
-        (|| {
-            if required.is_null()
-                || timestamp_ns.is_null()
-                || flags.is_null()
-                || (capacity > 0 && destination.is_null())
-            {
-                return Err(usage());
-            }
-            if capacity > 0 && destination.align_offset(4) != 0 {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("destination must be four-byte aligned"));
-            }
-            let bytes = if capacity == 0 {
-                &mut []
-            } else {
-                unsafe { std::slice::from_raw_parts_mut(destination, capacity) }
-            };
-            let (len, time, frame_flags) = pool.pool.get_into(seq, bytes)?;
-            unsafe {
-                *required = len;
-                *timestamp_ns = time;
-                *flags = frame_flags;
-            }
-            Ok(())
-        })(),
-        err,
-    )
-}
 
 /// Paths parsed once for repeated coarse selection from immutable snapshots.
 pub struct PlsmSelector {
@@ -450,7 +385,7 @@ pub extern "C" fn plsm_pool_feed_json_view(
     pool: *mut plsm_pool,
     bytes: *const u8,
     len: usize,
-    options: *const crate::abi::v2::plsm_feed_options,
+    options: *const crate::abi::plsm_feed_options,
     out: *mut *const plsm_message_view,
     err: *mut *mut plsm_error,
 ) -> i32 {
@@ -463,7 +398,7 @@ pub extern "C" fn plsm_pool_feed_json_view(
     };
     finish(
         (|| {
-            let (durability, tags) = crate::abi::v2::feed_arguments(options)?;
+            let (durability, tags) = crate::abi::feed_arguments(options)?;
             let durability = match durability {
                 0 => crate::api::Durability::Fast,
                 1 => crate::api::Durability::Flush,
@@ -472,15 +407,8 @@ pub extern "C" fn plsm_pool_feed_json_view(
             let parsed = crate::core::lite3::ParsedJson::parse_view(unsafe {
                 std::slice::from_raw_parts(bytes, len)
             })?;
-            let mut view = parsed.encode_message_view(&tags.unwrap_or_default())?;
-            let time = crate::api::now_ns()?;
-            let seq = pool.pool.append_with_options(
-                view.bytes(),
-                crate::api::AppendOptions::new(time, durability),
-            )?;
-            view.seq = seq;
-            view.time = time;
-            publish(view, out)
+            let view = parsed.encode_message_view(&tags.unwrap_or_default())?;
+            publish(pool.pool.feed_prepared_view(view, durability)?, out)
         })(),
         err,
     )
@@ -574,7 +502,7 @@ mod tests {
 pub extern "C" fn plsm_pool_feed_view(
     pool: *mut plsm_pool,
     source: *const plsm_message_view,
-    durability: u32,
+    options: *const crate::abi::plsm_feed_options,
     out: *mut *const plsm_message_view,
     err: *mut *mut plsm_error,
 ) -> i32 {
@@ -588,17 +516,8 @@ pub extern "C" fn plsm_pool_feed_view(
     finish(
         (|| {
             let source = unsafe { &*source };
-            let durability = match durability {
-                0 => crate::api::Durability::Fast,
-                1 => crate::api::Durability::Flush,
-                _ => return Err(usage()),
-            };
-            let time = crate::api::now_ns()?;
-            let seq = pool.pool.append_with_options(
-                source.view.bytes(),
-                crate::api::AppendOptions::new(time, durability),
-            )?;
-            publish(source.view.with_identity(seq, time, source.view.flags), out)
+            let feed = crate::abi::parse_feed(options)?;
+            publish(pool.pool.feed_view(&source.view, feed)?, out)
         })(),
         err,
     )
@@ -645,7 +564,7 @@ mod forwarding_tests {
             0
         );
         assert_eq!(
-            plsm_pool_feed_view(pool, source, 0, &mut forwarded, &mut err),
+            plsm_pool_feed_view(pool, source, std::ptr::null(), &mut forwarded, &mut err),
             0
         );
         let mut old_len = 0;

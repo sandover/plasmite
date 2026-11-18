@@ -92,13 +92,10 @@ pub unsafe extern "C" fn plsm_go_append_sealed(
                 _ => return Err(usage()),
             };
             let payload = unsafe { bytes(data, len) }?;
-            let time = crate::api::now_ns()?;
-            let committed = pool
-                .pool
-                .append_with_options(payload, crate::api::AppendOptions::new(time, durability))?;
+            let receipt = pool.pool.append_prepared(payload, durability)?;
             unsafe {
-                seq.write(committed);
-                timestamp.write(time);
+                seq.write(receipt.seq);
+                timestamp.write(receipt.time);
             }
             Ok(())
         })(),

@@ -21,7 +21,7 @@ func AdoptSnapshot(snapshot nativeview.Snapshot) *MessageView {
 	}
 	data, meta := snapshot.Offsets()
 	seq, timestamp := snapshot.Identity()
-	return &MessageView{seq: seq, timestampNs: timestamp, valueSnapshot: valueSnapshot{encoded: snapshot.Bytes(), duplicates: duplicates}, dataNode: C.size_t(data), metaNode: C.size_t(meta)}
+	return &MessageView{seq: seq, timeNS: timestamp, valueSnapshot: valueSnapshot{encoded: snapshot.Bytes(), duplicates: duplicates}, dataNode: C.size_t(data), metaNode: C.size_t(meta)}
 }
 
 // forwardView shares immutable Go storage/proof and assigns destination identity.
@@ -38,6 +38,6 @@ func (p *Pool) forwardView(source *MessageView, durability Durability) (*Message
 	}
 	forwarded := *source
 	forwarded.seq = uint64(result.seq)
-	forwarded.timestampNs = uint64(result.timestamp)
+	forwarded.timeNS = uint64(result.timestamp)
 	return &forwarded, nil
 }

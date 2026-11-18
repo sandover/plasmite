@@ -109,8 +109,8 @@ class ThreadSafetyTests(unittest.TestCase):
 
     def test_stream_close_waits_for_native_next(self):
         cases = (
-            (self.pool.follow, "next_json", "plsm_stream_next", "plsm_stream_free"),
-            (self.pool.follow_lite3, "next", "plsm_lite3_stream_next", "plsm_lite3_stream_free"),
+            (self.pool.follow, "next_json", "plsm_stream_next_wait", "plsm_stream_free"),
+            (self.pool.follow_lite3, "next", "plsm_lite3_stream_next_wait", "plsm_lite3_stream_free"),
         )
         for open_follow, method, native_next, native_free in cases:
             with self.subTest(method=method):
@@ -118,7 +118,7 @@ class ThreadSafetyTests(unittest.TestCase):
                 self.addCleanup(stream.close)
                 result = self._assert_close_waits(
                     stream, getattr(stream, method), "plasmite._LIB." + native_next,
-                    native_free, lambda *_: 0,
+                    native_free, lambda *_: 3,
                 )
                 self.assertIsNone(result)
                 with self.assertRaises(plasmite.PlasmiteError):

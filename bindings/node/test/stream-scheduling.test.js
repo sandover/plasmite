@@ -114,7 +114,7 @@ test('returning an unused UDP iterator leaves another caller’s read alone', as
     isFinished: false,
     close() {},
   });
-  const pending = follow.nextEvent(5000);
+  const pending = follow.nextEvent(5);
   await follow.events().return();
   assert.equal(interrupts, 0);
   complete({ status: 0 });

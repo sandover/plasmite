@@ -42,7 +42,7 @@ from plasmite import (
     RetentionGapError,
     UdpClient,
     UdpFrame,
-    UdpGap,
+    UdpSkip,
     UdpProgress,
     parse_message,
 )
@@ -73,7 +73,7 @@ class BindingTests(unittest.TestCase):
             )
             try:
                 parse_message(pool._get_json(seq))
-            except NotFoundError:
+            except RetentionGapError:
                 return
         self.fail(f"pool did not overwrite sequence {seq}")
 
@@ -345,7 +345,7 @@ class BindingTests(unittest.TestCase):
             invalid_payload = "{}"
             with self.assertRaises(TypeError):
                 pool.feed_json(invalid_payload, [], Durability.FAST)
-            with self.assertRaises(ValueError):
+            with self.assertRaises(plasmite.UsageError):
                 pool._get_json(-1)
             pool.close()
             with self.assertRaises(PlasmiteError):
@@ -478,9 +478,9 @@ class BindingTests(unittest.TestCase):
             with client.create_pool("no-wrap", TEST_POOL_SIZE_BYTES) as pool:
                 message = pool.feed({"kind": "first"}, [])
                 self.assertEqual(message.seq, 1)
-                with self.assertRaisesRegex(ValueError, "seq must fit"):
+                with self.assertRaisesRegex(plasmite.UsageError, "since must fit"):
                     parse_message(pool._get_json(overflow))
-                with self.assertRaisesRegex(ValueError, "seq must fit"):
+                with self.assertRaisesRegex(plasmite.UsageError, "since must fit"):
                     pool._get_lite3(overflow)
 
                 for open_reader in (pool.follow, pool.follow_lite3):
@@ -489,8 +489,21 @@ class BindingTests(unittest.TestCase):
                             with self.assertRaisesRegex(plasmite.UsageError, f"{argument} must fit"):
                                 open_reader(**{argument: overflow})
 
-                with self.assertRaises(NotFoundError):
+                with self.assertRaises(plasmite.UsageError):
                     pool._get_json((1 << 64) - 1)
+
+    def test_feed_forwards_message_views_and_closed_handles_raise_usage(self):
+        with self._client_pool("forward") as (_, pool):
+            source = pool.feed_view({"n": 1}, tags=["tag"])
+            message = pool.feed(source)
+            self.assertEqual(message.data, {"n": 1})
+            self.assertEqual(message.tags, ["tag"])
+            self.assertGreater(pool.feed_receipt(source).seq, message.seq)
+            with self.assertRaises(plasmite.UsageError):
+                pool.feed(source, tags=[])
+            pool.close()
+            with self.assertRaises(plasmite.UsageError):
+                pool.feed({"n": 2})
 
     def test_error_subclasses_are_raised(self) -> None:
         with self._new_client() as client:
@@ -512,8 +525,8 @@ class BindingTests(unittest.TestCase):
 
             with client.create_pool("damaged", TEST_POOL_SIZE_BYTES) as pool:
                 with self.assertRaises(NotFoundError) as missing_message:
-                    parse_message(pool._get_json(42))
-                self.assertEqual(missing_message.exception.seq, 42)
+                    parse_message(pool._get_json(1))
+                self.assertEqual(missing_message.exception.seq, 1)
                 self.assertIsNone(missing_message.exception.path)
 
             with pool_path.open("r+b") as handle:
@@ -577,8 +590,8 @@ class BindingTests(unittest.TestCase):
                     with client.open_pool("sensors") as pool:
                         open_follow = pool.fetch_view if views else pool.fetch
                         with open_follow(last=4) as follow:
-                            events = [follow.next_event(timeout_ms=1000) for _ in range(7)]
-                            self.assertIsNone(follow.next_event(timeout_ms=0))
+                            events = [follow.next_event(wait=1) for _ in range(7)]
+                            self.assertIsNone(follow.next_event(wait=0))
                 frame_type = MessageView if views else UdpFrame
                 frames = [event for event in events if isinstance(event, frame_type)]
                 self.assertEqual([frame.seq for frame in frames], [base + 10, base + 12, base + 11, base + 12])
@@ -590,7 +603,7 @@ class BindingTests(unittest.TestCase):
                     else:
                         self.assertEqual(frame.payload, payload)
                         self.assertEqual(frame.message().data, {"value": 17})
-                skips = [event for event in events if isinstance(event, UdpGap)]
+                skips = [event for event in events if isinstance(event, UdpSkip)]
                 self.assertEqual([(event.first, event.last, event.reason) for event in skips], [(base + 11, base + 11, "pressure")])
                 progress = [event for event in events if isinstance(event, UdpProgress)]
                 self.assertEqual([event.next_seq for event in progress], [base + 13, base + 13])
@@ -673,7 +686,7 @@ class BindingTests(unittest.TestCase):
                                 udp_pool.fetch(since=large_start)
 
                             cancel_follow = udp_pool.follow()
-                            self.assertIsNotNone(cancel_follow.next_event(timeout_ms=0))
+                            self.assertIsNotNone(cancel_follow.next_event(wait=0))
                             received = []
                             waiter = threading.Thread(
                                 target=lambda: received.append(cancel_follow.next_event())
@@ -696,7 +709,7 @@ class BindingTests(unittest.TestCase):
 def _next_udp_frame(test: unittest.TestCase, follow) -> UdpFrame:
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        event = follow.next_event(timeout_ms=100)
+        event = follow.next_event(wait=0.1)
         if isinstance(event, UdpFrame):
             return event
     test.fail("UDP follower did not receive a frame")

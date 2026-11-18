@@ -17,11 +17,11 @@ use std::path::PathBuf;
 
 COMMANDS
   Send and read
-    feed POOL [MESSAGE | --file PATH]    Append objects or messages (stdin when omitted)
-    follow POOL [--last N | --since POSITION]
-                [--no-follow] [--replay SPEED]
-                [--tag TAG] [--where EXPR] [--one] [--timeout DURATION]
-    fetch POOL [SEQ]                    Read retained messages and exit
+    feed POOL [MESSAGE]                 Append an object or read messages from stdin
+    follow POOL [--since POSITION | --last N] [--tag TAG] [--one]
+                                        Stream new messages by default
+    fetch POOL [SEQ | --since POSITION | --last N]
+                                        Read retained messages and exit
     duplex POOL                         Send and receive in one session
 
   Manage pools
@@ -59,8 +59,11 @@ OPTIONS
 "#,
     long_about = None,
     propagate_version = true,
-    before_help = r#"A pool is a persistent, bounded stream that multiple processes can write and read.
-Messages are JSON: `feed` appends, `follow` streams, and `fetch` reads one by sequence.
+    before_help = r#"A pool is a pipe that remembers. It keeps a fixed amount of history and drops
+the oldest messages as it fills. Feed adds a message, follow listens for new
+messages, and fetch reads retained history or one sequence. Use --since to
+start at oldest, a sequence, a time, or a duration. Use --last to start N
+messages back.
 
 FIRST LOCAL WORKFLOW
   $ plasmite pool create chat
@@ -78,7 +81,7 @@ FIRST LOCAL WORKFLOW
 OPTIONS AND HELP
   Global options work before or after commands.
   One --dir selects pools and server-side keys, including mcp; conflicting repeats fail.
-  $ plasmite follow chat --dir ./pools --tail 10
+  $ plasmite follow chat --dir ./pools --last 10
   $ plasmite <command> --help
 
 GUIDES
@@ -288,7 +291,7 @@ OUTPUT
   Local and remote reads share these formats. Errors go to stderr."#
     )]
     Fetch {
-        #[arg(help = "Pool ref: local name/path or HTTP(S) pool URL")]
+        #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
         #[arg(help = "Fetch this exact sequence", conflicts_with_all = ["since", "last", "tags"])]
         seq: Option<u64>,
@@ -359,17 +362,15 @@ LOCAL AND REMOTE
 Terminal and piped stdin accept the same JSON, marked YAML, and framed Lite3
 messages as feed. Duplex assigns no meaning to fields inside data.
 
-Input EOF closes sending; reception continues until cancellation, an output
-failure, or --timeout. Choose --timeout for a bounded session."#,
+Input EOF closes sending. Reception continues until you stop the command or
+close its output pipe."#,
         after_help = r#"EXAMPLES
   $ plasmite duplex events --create
-  $ printf '{"ping":true}\n' | plasmite duplex events --timeout 5s
 
 INPUT AND OUTPUT
   JSON, marked YAML, and framed Lite3 use the same rules as feed.
   stdout streams received complete messages, including your own appends.
   Input EOF closes sending while reception continues.
-  --timeout exits 124 after a period without output.
   UDP refs do not support --create."#
     )]
     Duplex {
@@ -379,11 +380,6 @@ INPUT AND OUTPUT
         create: bool,
         #[arg(long = "last", short = 'n', help = "Print the last N messages first")]
         last: Option<u64>,
-        #[arg(
-            long,
-            help = "Exit 124 if no output within duration (e.g. 500ms, 5s, 1m)"
-        )]
-        timeout: Option<String>,
         #[arg(
             long,
             help = "Start at a sequence, oldest, an RFC 3339 time, or a duration",
@@ -531,7 +527,7 @@ TARGET AND OUTPUT
   Readable in a terminal; compact JSON in a pipe; --format json emits one report."#
     )]
     Info {
-        #[arg(help = "Pool ref: local name/path or HTTP(S) pool URL")]
+        #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         name: String,
     },
     #[command(

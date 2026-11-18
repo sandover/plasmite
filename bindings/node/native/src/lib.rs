@@ -81,7 +81,6 @@ struct plsm_udp_event_t {
     end_seq: u64,
     has_end: u8,
     terminal: u8,
-    retention_gap: u8,
     reserved: u8,
     payload: plsm_buf_t,
 }
@@ -131,22 +130,12 @@ struct TextSpan {
 }
 
 fn text_spans(tags: &[String]) -> Vec<TextSpan> {
-    tags.iter().map(|tag| TextSpan { data: tag.as_ptr(), len: tag.len() }).collect()
-}
-
-#[cfg(unix)]
-fn stream_views_available() -> bool {
-    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *AVAILABLE.get_or_init(|| {
-        views::available()
-            && [c"plsm_udp_pool_read", c"plsm_udp_follow_next_view"].iter().all(|name| {
-                !unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }.is_null()
-            })
-    })
-}
-#[cfg(not(unix))]
-fn stream_views_available() -> bool {
-    views::available()
+    tags.iter()
+        .map(|tag| TextSpan {
+            data: tag.as_ptr(),
+            len: tag.len(),
+        })
+        .collect()
 }
 
 #[napi_derive::module_exports]
@@ -201,16 +190,53 @@ unsafe extern "C" {
         out_pool: *mut *mut plsm_pool_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_pool_list(client: *mut plsm_client_t, out: *mut plsm_buf_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_info(pool: *mut plsm_pool_t, out: *mut plsm_buf_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_delete(client: *mut plsm_client_t, pool_ref: *const c_char, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_feed_json(pool: *mut plsm_pool_t, json: *const u8, len: usize, options: *const plsm_feed_options_t, out: *mut plsm_buf_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_follow(pool: *mut plsm_pool_t, options: *const plsm_read_options_t, out: *mut *mut plsm_stream_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_fetch(pool: *mut plsm_pool_t, options: *const plsm_read_options_t, out: *mut *mut plsm_stream_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_follow_lite3(pool: *mut plsm_pool_t, options: *const plsm_read_options_t, out: *mut *mut plsm_lite3_stream_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_fetch_lite3(pool: *mut plsm_pool_t, options: *const plsm_read_options_t, out: *mut *mut plsm_lite3_stream_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_follow_view(pool: *mut plsm_pool_t, options: *const plsm_read_options_t, out: *mut *mut plsm_stream_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_pool_fetch_view(pool: *mut plsm_pool_t, options: *const plsm_read_options_t, out: *mut *mut plsm_stream_t, err: *mut *mut plsm_error_t) -> c_int;
+    fn plsm_pool_list(
+        client: *mut plsm_client_t,
+        out: *mut plsm_buf_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_info(
+        pool: *mut plsm_pool_t,
+        out: *mut plsm_buf_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_delete(
+        client: *mut plsm_client_t,
+        pool_ref: *const c_char,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_feed_json(
+        pool: *mut plsm_pool_t,
+        json: *const u8,
+        len: usize,
+        options: *const plsm_feed_options_t,
+        out: *mut plsm_buf_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_follow(
+        pool: *mut plsm_pool_t,
+        options: *const plsm_read_options_t,
+        out: *mut *mut plsm_stream_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_fetch(
+        pool: *mut plsm_pool_t,
+        options: *const plsm_read_options_t,
+        out: *mut *mut plsm_stream_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_follow_lite3(
+        pool: *mut plsm_pool_t,
+        options: *const plsm_read_options_t,
+        out: *mut *mut plsm_lite3_stream_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_fetch_lite3(
+        pool: *mut plsm_pool_t,
+        options: *const plsm_read_options_t,
+        out: *mut *mut plsm_lite3_stream_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
     fn plsm_pool_free(pool: *mut plsm_pool_t);
 
     fn plsm_pool_feed_lite3(
@@ -237,25 +263,6 @@ unsafe extern "C" {
         out: *mut plsm_feed_receipt_t,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_internal_pool_get_json(
-        pool: *mut plsm_pool_t,
-        seq: u64,
-        out_message: *mut plsm_buf_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
-
-    fn plsm_internal_pool_get_lite3(
-        pool: *mut plsm_pool_t,
-        seq: u64,
-        out_frame: *mut plsm_lite3_frame_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
-
-    fn plsm_lite3_stream_next(
-        stream: *mut plsm_lite3_stream_t,
-        out_frame: *mut plsm_lite3_frame_t,
-        out_err: *mut *mut plsm_error_t,
-    ) -> c_int;
 
     fn plsm_stream_next_wait(
         stream: *mut plsm_stream_t,
@@ -271,7 +278,6 @@ unsafe extern "C" {
     ) -> c_int;
     fn plsm_stream_cancel(stream: *mut plsm_stream_t);
     fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream_t);
-    fn plsm_stream_next(stream: *mut plsm_stream_t, out: *mut plsm_buf_t, error: *mut *mut plsm_error_t) -> i32;
     fn plsm_stream_free(stream: *mut plsm_stream_t);
     fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream_t);
 
@@ -295,12 +301,24 @@ unsafe extern "C" {
         pool: *mut plsm_udp_pool_t,
         payload: *const u8,
         payload_len: usize,
+        options: *const plsm_feed_options_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_udp_pool_read(pool: *mut plsm_udp_pool_t, options: *const plsm_read_options_t, live: u32,
-        views: u32, out: *mut *mut plsm_udp_follow_t, error: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_udp_pool_feed_json(pool: *mut plsm_udp_pool_t, bytes: *const u8, len: usize,
-        options: *const plsm_feed_options_t, error: *mut *mut plsm_error_t) -> c_int;
+    fn plsm_udp_pool_read(
+        pool: *mut plsm_udp_pool_t,
+        options: *const plsm_read_options_t,
+        live: u32,
+        views: u32,
+        out: *mut *mut plsm_udp_follow_t,
+        error: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_udp_pool_feed_json(
+        pool: *mut plsm_udp_pool_t,
+        bytes: *const u8,
+        len: usize,
+        options: *const plsm_feed_options_t,
+        error: *mut *mut plsm_error_t,
+    ) -> c_int;
     fn plsm_udp_follow_next(
         follow: *mut plsm_udp_follow_t,
         timeout_ms: u64,
@@ -390,7 +408,15 @@ impl Client {
             .map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
-        let rc = unsafe { plsm_pool_open(self.ptr, pool_ref.as_ptr(), u32::from(create.unwrap_or(false)), &mut out, &mut err) };
+        let rc = unsafe {
+            plsm_pool_open(
+                self.ptr,
+                pool_ref.as_ptr(),
+                u32::from(create.unwrap_or(false)),
+                &mut out,
+                &mut err,
+            )
+        };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -404,7 +430,10 @@ impl Client {
 
     #[napi]
     pub fn list_pools_json(&self, env: Env) -> Result<Buffer> {
-        let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
+        let mut out = plsm_buf_t {
+            data: ptr::null_mut(),
+            len: 0,
+        };
         let mut err = ptr::null_mut();
         if unsafe { plsm_pool_list(self.ptr, &mut out, &mut err) } != 0 {
             return Err(take_error(env, err)?);
@@ -511,13 +540,6 @@ impl Pool {
         env: Env,
         durability: Durability,
     ) -> Result<input::NativeAppendTarget> {
-        if !views::available() {
-            return Err(pool_error(
-                env,
-                "Usage",
-                "loaded libplasmite lacks owned-view support",
-            ));
-        }
         let handle = self
             .handle
             .as_ref()
@@ -529,7 +551,10 @@ impl Pool {
     #[napi]
     pub fn info_json(&self, env: Env) -> Result<Buffer> {
         let _operation = self.operation(env)?;
-        let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
+        let mut out = plsm_buf_t {
+            data: ptr::null_mut(),
+            len: 0,
+        };
         let mut err = ptr::null_mut();
         let pool = self.handle.as_ref().expect("open pool").ptr;
         if unsafe { plsm_pool_info(pool, &mut out, &mut err) } != 0 {
@@ -539,28 +564,36 @@ impl Pool {
     }
 
     #[napi]
-    pub fn feed_json(&self, env: Env, payload: Buffer, tags: Vec<String>,
-                     durability: Durability) -> Result<Buffer> {
-        let _operation = self.operation(env)?;
-        let c_tags = text_spans(&tags);
-        let options = plsm_feed_options_t {
-            struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
-            durability: durability as u32,
-            tags: c_tags.as_ptr(),
-            tags_len: tags.len(),
-        };
-        let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
-        let mut err = ptr::null_mut();
-        let pool = self.handle.as_ref().expect("open pool").ptr;
-        if unsafe { plsm_pool_feed_json(pool, payload.as_ptr(), payload.len(), &options, &mut out, &mut err) } != 0 {
-            return Err(take_error(env, err)?);
-        }
-        Ok(copy_json_buf(out))
+    pub fn feed_json(
+        &self,
+        env: Env,
+        payload: Buffer,
+        tags: Vec<String>,
+        durability: Durability,
+    ) -> Result<AsyncTask<MessageFeedTask>> {
+        Ok(AsyncTask::new(MessageFeedTask(EncodedFeed {
+            handle: self
+                .handle
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| pool_error(env, "Usage", "pool is closed"))?,
+            payload: payload.to_vec(),
+            tags: tags,
+            durability,
+            lite3: false,
+        })))
     }
 
     #[napi]
-    pub fn open_read(&self, env: Env, finite: bool, kind: u32,
-                     value: BigInt, tags: Vec<String>, view: Option<bool>) -> Result<Stream> {
+    pub fn open_read(
+        &self,
+        env: Env,
+        finite: bool,
+        kind: u32,
+        value: BigInt,
+        tags: Vec<String>,
+        view: Option<bool>,
+    ) -> Result<Stream> {
         let _operation = self.operation(env)?;
         let c_tags = text_spans(&tags);
         let options = plsm_read_options_t {
@@ -573,23 +606,34 @@ impl Pool {
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let view = view.unwrap_or(false);
-        let open = match (finite, view) {
-            (true, true) => plsm_pool_fetch_view,
-            (true, false) => plsm_pool_fetch,
-            (false, true) => plsm_pool_follow_view,
-            (false, false) => plsm_pool_follow,
+        let open = if finite {
+            plsm_pool_fetch
+        } else {
+            plsm_pool_follow
         };
         let pool = self.handle.as_ref().expect("open pool").ptr;
         if unsafe { open(pool, &options, &mut out, &mut err) } != 0 {
             return Err(take_error(env, err)?);
         }
-        let pointer = if view { StreamPointer::View(out) } else { StreamPointer::Json(out) };
-        Ok(Stream { state: stream_state(pointer) })
+        let pointer = if view {
+            StreamPointer::View(out)
+        } else {
+            StreamPointer::Json(out)
+        };
+        Ok(Stream {
+            state: stream_state(pointer),
+        })
     }
 
     #[napi]
-    pub fn open_lite3_read(&self, env: Env, finite: bool, kind: u32,
-                           value: BigInt, tags: Vec<String>) -> Result<Lite3Stream> {
+    pub fn open_lite3_read(
+        &self,
+        env: Env,
+        finite: bool,
+        kind: u32,
+        value: BigInt,
+        tags: Vec<String>,
+    ) -> Result<Lite3Stream> {
         let _operation = self.operation(env)?;
         let spans = text_spans(&tags);
         let options = plsm_read_options_t {
@@ -601,30 +645,38 @@ impl Pool {
         };
         let mut out = ptr::null_mut();
         let mut error = ptr::null_mut();
-        let open = if finite { plsm_pool_fetch_lite3 } else { plsm_pool_follow_lite3 };
+        let open = if finite {
+            plsm_pool_fetch_lite3
+        } else {
+            plsm_pool_follow_lite3
+        };
         let pool = self.handle.as_ref().expect("open pool").ptr;
         if unsafe { open(pool, &options, &mut out, &mut error) } != 0 {
             return Err(take_error(env, error)?);
         }
-        Ok(Lite3Stream { state: stream_state(StreamPointer::Lite3(out)) })
+        Ok(Lite3Stream {
+            state: stream_state(StreamPointer::Lite3(out)),
+        })
     }
 
     #[napi]
-    pub fn feed_lite3(&self, env: Env, payload: Buffer, durability: Durability) -> Result<Buffer> {
-        let _operation = self.operation(env)?;
-        let options = plsm_feed_options_t {
-            struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
-            durability: durability as u32,
-            tags: ptr::null(),
-            tags_len: 0,
-        };
-        let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
-        let mut err = ptr::null_mut();
-        let pool = self.handle.as_ref().expect("open pool").ptr;
-        if unsafe { plsm_pool_feed_lite3(pool, payload.as_ptr(), payload.len(), &options, &mut out, &mut err) } != 0 {
-            return Err(take_error(env, err)?);
-        }
-        Ok(copy_json_buf(out))
+    pub fn feed_lite3(
+        &self,
+        env: Env,
+        payload: Buffer,
+        durability: Durability,
+    ) -> Result<AsyncTask<MessageFeedTask>> {
+        Ok(AsyncTask::new(MessageFeedTask(EncodedFeed {
+            handle: self
+                .handle
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| pool_error(env, "Usage", "pool is closed"))?,
+            payload: payload.to_vec(),
+            tags: Vec::new(),
+            durability,
+            lite3: true,
+        })))
     }
 
     #[napi]
@@ -634,31 +686,18 @@ impl Pool {
         payload: Buffer,
         tags: Vec<String>,
         durability: Durability,
-    ) -> Result<FeedReceipt> {
-        let _operation = self.operation(env)?;
-        let c_tags = text_spans(&tags);
-        let options = plsm_feed_options_t {
-            struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
-            durability: durability as u32,
-            tags: c_tags.as_ptr(),
-            tags_len: tags.len(),
-        };
-        let mut out = plsm_feed_receipt_t::default();
-        let mut err = ptr::null_mut();
-        let rc = unsafe {
-            plsm_pool_feed_json_receipt(
-                self.handle.as_ref().expect("open pool").ptr,
-                payload.as_ptr(),
-                payload.len(),
-                &options,
-                &mut out,
-                &mut err,
-            )
-        };
-        if rc != 0 {
-            return Err(take_error(env, err)?);
-        }
-        Ok(out.into())
+    ) -> Result<AsyncTask<ReceiptFeedTask>> {
+        Ok(AsyncTask::new(ReceiptFeedTask(EncodedFeed {
+            handle: self
+                .handle
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| pool_error(env, "Usage", "pool is closed"))?,
+            payload: payload.to_vec(),
+            tags: tags,
+            durability,
+            lite3: false,
+        })))
     }
 
     #[napi]
@@ -667,92 +706,22 @@ impl Pool {
         env: Env,
         payload: Buffer,
         durability: Durability,
-    ) -> Result<FeedReceipt> {
-        let _operation = self.operation(env)?;
-        let options = plsm_feed_options_t {
-            struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
-            durability: durability as u32,
-            tags: ptr::null(),
-            tags_len: 0,
-        };
-        let mut out = plsm_feed_receipt_t::default();
-        let mut err = ptr::null_mut();
-        let rc = unsafe {
-            plsm_pool_feed_lite3_receipt(
-                self.handle.as_ref().expect("open pool").ptr,
-                payload.as_ptr(),
-                payload.len(),
-                &options,
-                &mut out,
-                &mut err,
-            )
-        };
-        if rc != 0 {
-            return Err(take_error(env, err)?);
-        }
-        Ok(out.into())
-    }
-
-    #[napi]
-    pub fn get_json(&self, env: Env, seq: Either<u32, BigInt>) -> Result<Buffer> {
-        let _operation = self.operation(env)?;
-        let seq = to_u64(seq, "seq")?;
-        let mut out = plsm_buf_t {
-            data: ptr::null_mut(),
-            len: 0,
-        };
-        let mut err = ptr::null_mut();
-        let rc = unsafe {
-            plsm_internal_pool_get_json(
-                self.handle.as_ref().expect("open pool").ptr,
-                seq,
-                &mut out,
-                &mut err,
-            )
-        };
-        if rc != 0 {
-            return Err(take_error(env, err)?);
-        }
-        Ok(copy_json_buf(out))
-    }
-
-    #[napi]
-    pub fn get_lite3(&self, env: Env, seq: Either<u32, BigInt>) -> Result<Lite3Frame> {
-        let _operation = self.operation(env)?;
-        let seq = to_u64(seq, "seq")?;
-        let mut out = plsm_lite3_frame_t {
-            seq: 0,
-            time: 0,
-            flags: 0,
-            payload: plsm_buf_t {
-                data: ptr::null_mut(),
-                len: 0,
-            },
-        };
-        let mut err = ptr::null_mut();
-        let rc = unsafe {
-            plsm_internal_pool_get_lite3(
-                self.handle.as_ref().expect("open pool").ptr,
-                seq,
-                &mut out,
-                &mut err,
-            )
-        };
-        if rc != 0 {
-            return Err(take_error(env, err)?);
-        }
-        take_frame(env, out)
+    ) -> Result<AsyncTask<ReceiptFeedTask>> {
+        Ok(AsyncTask::new(ReceiptFeedTask(EncodedFeed {
+            handle: self
+                .handle
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| pool_error(env, "Usage", "pool is closed"))?,
+            payload: payload.to_vec(),
+            tags: Vec::new(),
+            durability,
+            lite3: true,
+        })))
     }
 
     #[napi]
     pub fn get_view(&self, env: Env, seq: Either<u32, BigInt>) -> Result<AsyncTask<GetViewTask>> {
-        if !views::available() {
-            return Err(pool_error(
-                env,
-                "Usage",
-                "loaded libplasmite lacks owned-view support; install matching native assets or rebuild libplasmite",
-            ));
-        }
         Ok(AsyncTask::new(GetViewTask {
             handle: self
                 .handle
@@ -765,6 +734,121 @@ impl Pool {
     #[napi]
     pub fn close(&mut self) {
         self.handle.take();
+    }
+}
+
+struct EncodedFeed {
+    handle: Arc<PoolHandle>,
+    payload: Vec<u8>,
+    tags: Vec<String>,
+    durability: Durability,
+    lite3: bool,
+}
+
+pub struct FeedFailure(usize);
+impl Drop for FeedFailure {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            unsafe { plsm_error_free(self.0 as *mut plsm_error_t) };
+        }
+    }
+}
+impl FeedFailure {
+    fn into_error(mut self, env: Env) -> Result<Error> {
+        let ptr = std::mem::replace(&mut self.0, 0) as *mut plsm_error_t;
+        take_error(env, ptr)
+    }
+}
+
+type FeedCall<T> = unsafe extern "C" fn(
+    *mut plsm_pool_t,
+    *const u8,
+    usize,
+    *const plsm_feed_options_t,
+    *mut T,
+    *mut *mut plsm_error_t,
+) -> c_int;
+
+impl EncodedFeed {
+    fn run<T>(
+        &self,
+        mut out: T,
+        json: FeedCall<T>,
+        lite3: FeedCall<T>,
+    ) -> Result<std::result::Result<T, FeedFailure>> {
+        let _operation = self
+            .handle
+            .operation
+            .lock()
+            .map_err(|_| Error::from_reason("pool operation lock poisoned"))?;
+        let tags = text_spans(&self.tags);
+        let options = plsm_feed_options_t {
+            struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
+            durability: self.durability as u32,
+            tags: tags.as_ptr(),
+            tags_len: tags.len(),
+        };
+        let mut error = ptr::null_mut();
+        let feed = if self.lite3 { lite3 } else { json };
+        let status = unsafe {
+            feed(
+                self.handle.ptr,
+                self.payload.as_ptr(),
+                self.payload.len(),
+                &options,
+                &mut out,
+                &mut error,
+            )
+        };
+        Ok(if status == 0 {
+            Ok(out)
+        } else {
+            Err(FeedFailure(error as usize))
+        })
+    }
+}
+
+pub struct MessageFeedTask(EncodedFeed);
+impl Task for MessageFeedTask {
+    type Output = std::result::Result<Buffer, FeedFailure>;
+    type JsValue = Buffer;
+    fn compute(&mut self) -> Result<Self::Output> {
+        let out = plsm_buf_t {
+            data: ptr::null_mut(),
+            len: 0,
+        };
+        Ok(self
+            .0
+            .run(out, plsm_pool_feed_json, plsm_pool_feed_lite3)?
+            .map(copy_json_buf))
+    }
+    fn resolve(&mut self, env: Env, out: Self::Output) -> Result<Buffer> {
+        match out {
+            Ok(out) => Ok(out),
+            Err(error) => Err(error.into_error(env)?),
+        }
+    }
+}
+
+pub struct ReceiptFeedTask(EncodedFeed);
+impl Task for ReceiptFeedTask {
+    type Output = std::result::Result<FeedReceipt, FeedFailure>;
+    type JsValue = FeedReceipt;
+    fn compute(&mut self) -> Result<Self::Output> {
+        Ok(self
+            .0
+            .run(
+                plsm_feed_receipt_t::default(),
+                plsm_pool_feed_json_receipt,
+                plsm_pool_feed_lite3_receipt,
+            )?
+            .map(Into::into))
+    }
+    fn resolve(&mut self, env: Env, out: Self::Output) -> Result<FeedReceipt> {
+        match out {
+            Ok(out) => Ok(out),
+            Err(error) => Err(error.into_error(env)?),
+        }
     }
 }
 
@@ -926,9 +1010,9 @@ impl Stream {
             len: 0,
         };
         let mut err = ptr::null_mut();
-        match unsafe { plsm_stream_next(ptr, &mut out, &mut err) } {
+        match unsafe { plsm_stream_next_wait(ptr, u64::MAX, &mut out, &mut err) } {
             1 => Ok(Some(copy_json_buf(out))),
-            0 => Ok(None),
+            2 | 3 => Ok(None),
             _ => Err(take_error(env, err)?),
         }
     }
@@ -980,9 +1064,9 @@ impl Lite3Stream {
         };
         let mut out = empty_lite3_frame();
         let mut err = ptr::null_mut();
-        match unsafe { plsm_lite3_stream_next(ptr, &mut out, &mut err) } {
+        match unsafe { plsm_lite3_stream_next_wait(ptr, u64::MAX, &mut out, &mut err) } {
             1 => take_frame(env, out).map(Some),
-            0 => Ok(None),
+            2 | 3 => Ok(None),
             _ => Err(take_error(env, err)?),
         }
     }
@@ -1385,8 +1469,9 @@ impl UdpPool {
     pub fn feed_lite3(&self, env: Env, payload: Buffer) -> Result<()> {
         let pool = self.pool_ptr()?;
         let mut err = ptr::null_mut();
-        let rc =
-            unsafe { plsm_udp_pool_feed_lite3(pool, payload.as_ptr(), payload.len(), &mut err) };
+        let rc = unsafe {
+            plsm_udp_pool_feed_lite3(pool, payload.as_ptr(), payload.len(), ptr::null(), &mut err)
+        };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -1394,8 +1479,17 @@ impl UdpPool {
     }
 
     #[napi]
-    pub fn feed_json(&self, env: Env, payload: Buffer, tags: Vec<String>, durability: Durability) -> Result<()> {
-        let handle = self.handle.as_ref().ok_or_else(|| pool_error(env, "Usage", "UDP pool is closed"))?;
+    pub fn feed_json(
+        &self,
+        env: Env,
+        payload: Buffer,
+        tags: Vec<String>,
+        durability: Durability,
+    ) -> Result<()> {
+        let handle = self
+            .handle
+            .as_ref()
+            .ok_or_else(|| pool_error(env, "Usage", "UDP pool is closed"))?;
         let c_tags = text_spans(&tags);
         let options = plsm_feed_options_t {
             struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
@@ -1404,7 +1498,16 @@ impl UdpPool {
             tags_len: tags.len(),
         };
         let mut err = ptr::null_mut();
-        if unsafe { plsm_udp_pool_feed_json(handle.ptr, payload.as_ptr(), payload.len(), &options, &mut err) } != 0 {
+        if unsafe {
+            plsm_udp_pool_feed_json(
+                handle.ptr,
+                payload.as_ptr(),
+                payload.len(),
+                &options,
+                &mut err,
+            )
+        } != 0
+        {
             return Err(take_error(env, err)?);
         }
         Ok(())
@@ -1413,7 +1516,6 @@ impl UdpPool {
     #[napi(ts_return_type = "Promise<UdpFollow>")]
     pub fn follow(
         &self,
-        env: Env,
         start_kind: u32,
         start_value: Either<u32, BigInt>,
         live: bool,
@@ -1421,13 +1523,6 @@ impl UdpPool {
         tags: Vec<String>,
     ) -> Result<AsyncTask<UdpFollowTask>> {
         let start_value = to_u64(start_value, "start_value")?;
-        if owned && !stream_views_available() {
-            return Err(pool_error(
-                env,
-                "Usage",
-                "loaded libplasmite lacks owned stream support",
-            ));
-        }
         Ok(AsyncTask::new(UdpFollowTask {
             owned,
             pool: self
@@ -1492,8 +1587,14 @@ impl Task for UdpFollowTask {
             tags_len: self.tags.len(),
         };
         let status = unsafe {
-            plsm_udp_pool_read(self.pool.ptr, &options, u32::from(self.live),
-                u32::from(self.owned), &mut follow, &mut err)
+            plsm_udp_pool_read(
+                self.pool.ptr,
+                &options,
+                u32::from(self.live),
+                u32::from(self.owned),
+                &mut follow,
+                &mut err,
+            )
         };
         Ok(UdpFollowOpenResult {
             status,
@@ -1541,8 +1642,6 @@ pub struct UdpEvent {
     #[napi(js_name = "endSeq")]
     pub end_seq: Option<BigInt>,
     pub terminal: Option<bool>,
-    #[napi(js_name = "retentionGap")]
-    pub retention_gap: Option<bool>,
 }
 
 #[napi(object)]
@@ -1705,7 +1804,6 @@ fn udp_metadata(event: &plsm_udp_event_t) -> Result<UdpEvent> {
         next_seq: None,
         end_seq: None,
         terminal: None,
-        retention_gap: None,
     };
     match event.kind {
         1 => {
@@ -1714,7 +1812,7 @@ fn udp_metadata(event: &plsm_udp_event_t) -> Result<UdpEvent> {
             parsed.time = Some(BigInt::from(event.time));
         }
         2 => {
-            parsed.kind = "gap".to_string();
+            parsed.kind = "skip".to_string();
             parsed.first = Some(BigInt::from(event.first));
             parsed.last = Some(BigInt::from(event.last));
             parsed.reason = Some(
@@ -1733,7 +1831,6 @@ fn udp_metadata(event: &plsm_udp_event_t) -> Result<UdpEvent> {
             parsed.next_seq = Some(BigInt::from(event.next_seq));
             parsed.end_seq = (event.has_end != 0).then(|| BigInt::from(event.end_seq));
             parsed.terminal = Some(event.terminal != 0);
-            parsed.retention_gap = Some(event.retention_gap != 0);
         }
         _ => return Err(Error::new(Status::GenericFailure, "unknown UDP event kind")),
     }
@@ -1899,7 +1996,6 @@ fn error_kind_label(kind: i32) -> &'static str {
     }
 }
 
-
 unsafe fn cstring_to_string(ptr: *mut c_char) -> String {
     if ptr.is_null() {
         return String::new();
@@ -1950,8 +2046,25 @@ impl Task for GetViewTask {
             .map_err(|_| Error::from_reason("pool operation lock poisoned"))?;
         let mut owner = ptr::null();
         let mut error = ptr::null_mut();
-        let rc =
-            unsafe { views::plsm_internal_pool_get_view(self.handle.ptr, self.seq, &mut owner, &mut error) };
+        let read = plsm_read_options_t {
+            struct_size: std::mem::size_of::<plsm_read_options_t>() as u32,
+            start_kind: 2,
+            start_value: self.seq,
+            tags: ptr::null(),
+            tags_len: 0,
+        };
+        let mut stream = ptr::null_mut();
+        let rc = unsafe { plsm_pool_fetch(self.handle.ptr, &read, &mut stream, &mut error) };
+        let rc = if rc == 0 {
+            let mut count = 0;
+            let status = unsafe {
+                plsm_view_stream_next(stream, 0, 1, usize::MAX, &mut owner, &mut count, &mut error)
+            };
+            unsafe { plsm_stream_free(stream) };
+            if status == 1 { 0 } else { -1 }
+        } else {
+            rc
+        };
         Ok(GetViewOutput {
             owner: if rc == 0 {
                 Some(views::Owned::new(owner))
@@ -1962,6 +2075,9 @@ impl Task for GetViewTask {
         })
     }
     fn resolve(&mut self, env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        if output.owner.is_none() && output.error == 0 {
+            return Err(pool_error(env, "NotFound", "message not found"));
+        }
         resolve_owned_view(env, output)
     }
 }

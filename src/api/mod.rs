@@ -28,17 +28,13 @@ pub use message::{
     Feed, FeedInput, FeedReceipt, Follow, Lite3Follow, Message, Meta, Read, ReadPoll, Since,
     ViewFollow,
 };
-#[cfg(test)]
-pub(crate) use message::{FollowOptions, GapPolicy};
-pub(crate) use message::{
-    PoolApiExt, TailOutcome, TailState, format_ts, message_from_udp_payload, now_ns,
-    select_lite3_frame,
-};
 #[doc(hidden)]
 pub use message::{ReadStatus, message_json_from_frame};
+pub(crate) use message::{
+    TailOutcome, TailState, format_ts, frame_matches_tags, message_from_udp_payload,
+    select_lite3_frame, select_view,
+};
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Read, RemotePool, RemoteRead};
-#[cfg(test)]
-pub(crate) use udp::UdpStart as FollowStart;
 pub use udp::{
     UdpClient, UdpEvent, UdpFollow, UdpFrame, UdpPool, UdpSkipReason, UdpStart, UdpStreamEvent,
     UdpViewEvent, UdpViewFollow,
@@ -47,3 +43,6 @@ pub use validation::{
     ValidationIssue, ValidationMessageStats, ValidationObservation, ValidationReport,
     ValidationStatus,
 };
+
+#[cfg(test)]
+pub(crate) use message::PoolApiExt;

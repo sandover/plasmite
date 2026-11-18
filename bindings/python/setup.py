@@ -139,7 +139,7 @@ header = next(
         directory
         for directory in header_directories
         if (directory / "plasmite.h").is_file()
-        and "plsm_pool_fetch_view" in (directory / "plasmite.h").read_text()
+        and "plsm_pool_fetch" in (directory / "plasmite.h").read_text()
     ),
     None,
 )

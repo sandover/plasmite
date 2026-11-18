@@ -592,7 +592,12 @@ fn remote_json_tail_can_fail_closed_on_retention_gaps() -> TestResult<()> {
         .expect_err("expected remote retention gap");
     assert_eq!(err.kind(), ErrorKind::RetentionGap);
     assert_eq!(err.seq(), Some(first.seq));
-    assert!(failing.next_message()?.is_none());
+    let repeated = failing
+        .next_message()
+        .expect_err("the failure remains visible");
+    assert_eq!(repeated.kind(), ErrorKind::RetentionGap);
+    assert_eq!(repeated.missing(), err.missing());
+    assert_eq!(repeated.next_seq(), err.next_seq());
     Ok(())
 }
 
@@ -846,7 +851,7 @@ fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
 }
 
 #[test]
-fn local_ui_events_stream_sends_sse() -> TestResult<()> {
+fn browser_read_uses_v2_and_receives_pool_incarnation() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
@@ -857,18 +862,24 @@ fn local_ui_events_stream_sends_sse() -> TestResult<()> {
     let created = pool.feed(&json!({"kind": "ui", "ok": true}), Feed::default())?;
 
     let response = ureq::get(&format!(
-        "{}/v0/ui/pools/ui-events/events?since_seq={}&max=1",
+        "{}/v2/pools/ui-events/fetch?since={}&until=1",
         server.local_url, created.seq
     ))
     .call()
     .expect("local sse request");
     assert_eq!(response.status(), 200);
-    assert_eq!(response.header("content-type"), Some("text/event-stream"));
+    assert_eq!(response.header("content-type"), Some("application/jsonl"));
+    assert!(response.header("plasmite-incarnation").is_some());
     let body = response.into_string()?;
-    assert!(body.contains("event: pool"));
-    assert!(body.contains("\"incarnation\":"));
-    assert!(body.contains("event: message"));
-    assert!(body.contains("\"seq\":1"));
+    let mut lines = body.lines();
+    assert_eq!(
+        serde_json::from_str::<Value>(lines.next().unwrap())?["seq"],
+        1
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(lines.next().unwrap())?["type"],
+        "complete"
+    );
     Ok(())
 }
 
@@ -890,18 +901,12 @@ fn local_ui_tail_reads_reported_oldest_after_small_pool_wrap() -> TestResult<()>
     assert!(oldest > 1, "the pool must wrap and overwrite messages");
 
     let response = ureq::get(&format!(
-        "{}/v0/ui/pools/wrapped/events?gap_policy=error&since_seq={oldest}&max=1",
+        "{}/v2/pools/wrapped/fetch?since={oldest}&until={oldest}",
         server.local_url
     ))
     .call()?;
     let body = response.into_string()?;
-    assert!(body.contains("event: message"), "{body}");
-    let data = body
-        .split("event: message\n")
-        .nth(1)
-        .and_then(|event| event.lines().find_map(|line| line.strip_prefix("data: ")))
-        .expect("message data");
-    let message: Value = serde_json::from_str(data)?;
+    let message: Value = serde_json::from_str(body.lines().next().unwrap())?;
     assert_eq!(message["seq"], oldest);
     Ok(())
 }
@@ -1218,7 +1223,6 @@ fn remote_mcp_origin_header_validation() -> TestResult<()> {
 
 #[test]
 fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()> {
-    use std::io::Read;
     let temp = tempfile::tempdir()?;
     let server = TestServer::start_with_args_and_scheme(
         temp.path(),
@@ -1240,27 +1244,75 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
     assert!(began.elapsed() >= Duration::from_millis(400));
     assert!(began.elapsed() < Duration::from_secs(2));
 
-    for wait in [None, Some("20")] {
-        let query = wait
-            .map(|ms| format!("?timeout_ms={ms}"))
-            .unwrap_or_default();
-        let url = format!("{}/v0/ui/pools/bounded/events{query}", server.local_url);
-        let began = Instant::now();
-        let mut bytes = Vec::new();
-        ureq::get(&url)
-            .timeout(Duration::from_secs(3))
-            .call()?
-            .into_reader()
-            .read_to_end(&mut bytes)?;
-        let body = String::from_utf8(bytes)?;
-        assert!(!body.contains("event: message"), "{body}");
-        assert!(!body.contains("event: error"), "{body}");
-        if wait.is_some() {
-            assert!(began.elapsed() < Duration::from_millis(300));
-        } else {
-            assert!(began.elapsed() >= Duration::from_millis(400));
-        }
+    let pool = client.open_pool(&PoolRef::name("bounded"), false)?;
+    let mut follow = pool.follow(ReadOptions::new())?;
+    sleep(Duration::from_millis(650));
+    let saved = pool.feed(&json!({"after": "cutoff"}), Feed::new())?;
+    assert_eq!(follow.next_message()?, Some(saved));
+
+    Ok(())
+}
+
+#[test]
+fn real_fetch_continues_after_cutoff_with_its_original_end() -> TestResult<()> {
+    use plasmite::api::LocalClient;
+
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::start_with_args_and_scheme(
+        temp.path(),
+        &["--max-tail-timeout-ms", "300"],
+        "http",
+    );
+    let mut writer = LocalClient::new().with_pool_dir(temp.path()).create_pool(
+        &PoolRef::name("history"),
+        PoolOptions::new(24 * 1024 * 1024),
+    )?;
+    let payload = json!({"padding": "x".repeat(64 * 1024)});
+    let count = 192;
+    for _ in 0..count {
+        writer.feed(&payload, Feed::new())?;
     }
+    let url = format!("{}/v2/pools/history/fetch", server.local_url);
+    let request = |url: &str| -> TestResult<ureq::Response> {
+        Ok(ureq::get(url).timeout(Duration::from_secs(5)).call()?)
+    };
+    let read = |response: ureq::Response, next: &mut u64| -> TestResult<Value> {
+        let mut terminal = None;
+        for line in BufReader::new(response.into_reader()).lines() {
+            let record: Value = serde_json::from_str(&line?)?;
+            assert!(terminal.is_none(), "record after stream ended");
+            if let Some(seq) = record["seq"].as_u64() {
+                assert_eq!(seq, *next);
+                *next += 1;
+            } else {
+                terminal = Some(record);
+            }
+        }
+        Ok(terminal.expect("one terminal record"))
+    };
+
+    let response = request(&url)?;
+    // Let the initial response hit the socket's backpressure before draining it.
+    sleep(Duration::from_millis(450));
+    let mut next = 1;
+    let mut terminal = read(response, &mut next)?;
+    assert_eq!(
+        terminal,
+        json!({"type":"cutoff", "next_seq":next, "until":count})
+    );
+    assert!(next > 1 && next <= count);
+    writer.feed(&json!({"after":"opening boundary"}), Feed::new())?;
+    while next <= count {
+        let start = next;
+        terminal = read(
+            request(&format!("{url}?since={start}&until={count}"))?,
+            &mut next,
+        )?;
+        assert!(next > start);
+    }
+    assert_eq!(next, count + 1);
+    assert_eq!(terminal, json!({"type":"complete"}));
+
     Ok(())
 }
 
@@ -1324,7 +1376,12 @@ fn v2_binary_read_ends_with_a_structured_retention_gap() -> TestResult<()> {
     assert_eq!(error.kind(), ErrorKind::RetentionGap);
     assert_eq!(error.missing(), Some(1));
     assert_eq!(error.next_seq(), Some(oldest));
-    assert!(reader.next_frame()?.is_none());
+    let repeated = reader
+        .next_frame()
+        .expect_err("the failure remains visible");
+    assert_eq!(repeated.kind(), ErrorKind::RetentionGap);
+    assert_eq!(repeated.missing(), Some(1));
+    assert_eq!(repeated.next_seq(), Some(oldest));
     Ok(())
 }
 

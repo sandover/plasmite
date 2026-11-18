@@ -17,6 +17,11 @@ All notable changes to this project will be documented in this file.
 - Native packages use versioned shared-library filenames. The on-disk pool
   format remains compatible with 1.x.
 
+- Remove `tap` and the CLI flags `--no-follow`, `--tail`, `--timeout`, `--replay`, `--where`, `--file`, `--create-size`, `--retry`, `--retry-delay`, `--quiet-drops`, `--no-notify`, `--me`, and `--echo-self`. Use `--last` for retained history and ordinary shell pipes to capture command output.
+- Rename MCP tools `plasmite_read` and `plasmite_wait` to `plasmite_fetch` and `plasmite_follow`. Use `since` and `next_seq` to resume and handle gaps as structured errors.
+- Use `PLS2` for framed Lite3 files. Existing pool files keep their format.
+- UDP follows deliver late and duplicate datagrams in arrival order. A server-confirmed retention gap names the first missing and first retained sequences. Positional UDP fetch only returns the requested sequence.
+
 ### Immutable views and direct native input
 
 - Add owned Lite3 message views across Rust, C, Python, JavaScript and Go.
@@ -109,20 +114,6 @@ format migration.
   behavioral tests, including moved tags and inconsistent metadata. Keep the
   existing build/publication separation and artifact checks.
 
-### Simpler message workflows (next major release)
-
-- Make duplex a generic two-way stream. Terminal and pipe input use feed's parser;
-  remove --me, --echo-self, built-in chat data, and sender suppression. Input EOF
-  closes sending while reception continues. Establish reception before sending.
-- Keep timed playback in CLI follow --replay and remove the separate Rust, Go,
-  Python and Node replay APIs. SDK applications control timing over ordinary streams.
-- Clamp HTTP tail waits to the server maximum and remove CLI error-text probing.
-- Replace reconstructed retry commands with concise guidance tied to the pool path.
-
-The command/API changes await a major release. Package versions remain unchanged.
-See the [migration guide](docs/record/upgrading-2.0.md) for removed symbols,
-EOF behavior, client/server compatibility, and playback examples.
-
 ### Security maintenance
 
 Check Lite3 reader node bounds and alignment before making compiler alignment
@@ -133,36 +124,6 @@ Linux sanitizer checks now cover both bugs and run at `-O0` and `-O2`.
 Update the test-only `rustix` dependency to 1.1.6 for RUSTSEC-2026-0486.
 The production dependency tree does not include it.
 
-### Breaking UDP follow behavior (next major release)
-
-UDP follow now delivers matching messages in arrival order, including late
-messages and duplicates. Consumers choose whether to reorder or discard them.
-Sequence jumps and progress no longer create inferred gaps or suppress DATA;
-gap events report explicit server skips. The client preserves exact skip
-ranges and reasons and reports retention flags without inventing a range.
-
-Finite reads finish on terminal progress after draining accepted events.
-Packets still in flight may go unread, and exit 0 gives no assurance of complete
-delivery. Observed oversized/pressure skips still exit 1; confirmed retention
-gaps exit 9. Local and HTTP tails retain their ordering contracts. The wire
-format and public layouts remain unchanged. This reverses documented 1.x
-client behavior and requires a major release under the compatibility policy.
-
-Finite UDP completion now releases its reader worker and pool mapping. A bounded
-completion record keeps only the metadata and original file identity needed to
-answer renewals until close or expiry. Both receive phases share packet and event
-handling. Public `Gap` names remain compatibility labels for server skips;
-`Unknown` remains reserved and clients reject it as a wire skip reason.
-
-## [1.3.0] - 2026-11-10
-
-**Delete `--data` from existing `plasmite feed` commands.** `feed` recognizes
-ordinary JSON and YAML objects automatically. It copies an object with exactly
-`seq`, `time`, `meta`, and `data`, where `meta` contains only `tags`, as a
-Plasmite message. If a script used `--data` to store that exact shape as
-application data, wrap the object in an outer field before feeding it.
-This CLI change is a one-time exception to the major-version policy.
-[Upgrade guide](https://github.com/sandover/plasmite/blob/v1.3.0/docs/record/upgrading-1.2.md#create-messages)
 
 ### Linux installs and Python wheels
 

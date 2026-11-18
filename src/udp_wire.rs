@@ -77,8 +77,6 @@ pub struct Progress {
     pub end_seq: Option<u64>,
     pub lease_ms: u64,
     pub terminal: bool,
-    #[serde(default)]
-    pub retention_gap: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

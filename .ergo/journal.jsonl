@@ -1116,3 +1116,27 @@
 {"version":1,"task_id":"HNEFLL","kind":"created","at":"2026-11-18T17:23:03.511536Z"}
 {"version":1,"task_id":"WVTZQO","kind":"created","at":"2026-11-18T17:23:03.51154Z"}
 {"version":1,"task_id":"CB5GMA","kind":"created","at":"2026-11-18T17:23:03.511544Z"}
+{"version":1,"task_id":"K4YNA7","kind":"claim","at":"2026-11-18T17:28:12.901486Z","agent":"codex@mac"}
+{"version":1,"task_id":"QT4TZR","kind":"claim","at":"2026-11-18T17:28:12.938912Z","agent":"codex@mac"}
+{"version":1,"task_id":"WDHKKQ","kind":"claim","at":"2026-11-18T17:28:12.976175Z","agent":"codex@mac"}
+{"version":1,"task_id":"K4YNA7","kind":"done","at":"2026-11-18T18:25:00.382436Z","agent":"codex@mac","text":"Make terminal read errors repeat, support unlimited C waits, and validate C feed arguments. ABI smoke and adversarial checks pass."}
+{"version":1,"task_id":"QT4TZR","kind":"done","at":"2026-11-18T18:25:00.482581Z","agent":"codex@mac","text":"Keep messages collected before a read failure and have MCP pool resources use the same fetch shape. Rust MCP and HTTPS integration tests pass."}
+{"version":1,"task_id":"WDHKKQ","kind":"done","at":"2026-11-18T18:25:00.567111Z","agent":"codex@mac","text":"Send one gap with both sequence fields. Verify dropped datagrams, a stale cursor, CLI resume, and exact UDP fetch."}
+{"version":1,"task_id":"HNEFLL","kind":"claim","at":"2026-11-18T18:25:00.681338Z","agent":"codex@mac"}
+{"version":1,"task_id":"WVTZQO","kind":"claim","at":"2026-11-18T18:25:00.775259Z","agent":"codex@mac"}
+{"version":1,"task_id":"HNEFLL","kind":"done","at":"2026-11-18T18:25:00.896372Z","agent":"codex@mac","text":"Remove duplex timeout, preserve follow --one, and align CLI notices. Complete input accepts RFC 3339 times and positive source sequences."}
+{"version":1,"task_id":"WVTZQO","kind":"done","at":"2026-11-18T18:25:01.116913Z","agent":"codex@mac","text":"Use one HTTP stream transport and server read worker. Verify cutoff continuation, revocation, quiet close, old servers, and browser replacement."}
+{"version":1,"task_id":"VJTFS6","kind":"claim","at":"2026-11-18T18:32:29.9766Z","agent":"codex@mac"}
+{"version":1,"task_id":"VJTFS6","kind":"done","at":"2026-11-18T18:32:30.022718Z","agent":"codex@mac","text":"Remove legacy readers and duplicate C entries. Unify the feed path. Rust and C conformance pass, and recorded local read and feed benchmarks hold."}
+{"version":1,"task_id":"PK2WTN","kind":"claim","at":"2026-11-18T18:32:30.065256Z","agent":"codex@mac"}
+{"version":1,"task_id":"PK2WTN","kind":"done","at":"2026-11-18T18:32:30.108227Z","agent":"codex@mac","text":"Forward messages and views with original tags. Unify Go feed options and Usage errors. Go and Python suites pass."}
+{"version":1,"task_id":"ZIU2PH","kind":"claim","at":"2026-11-18T18:32:30.153069Z","agent":"codex@mac"}
+{"version":1,"task_id":"ZIU2PH","kind":"done","at":"2026-11-18T18:32:30.197253Z","agent":"codex@mac","text":"Use seconds for Python and Node waits, coordinate cancellation, and make Node feeds return promises. Binding suites and type checks pass."}
+{"version":1,"task_id":"TKAGXH","kind":"claim","at":"2026-11-18T18:32:30.238946Z","agent":"codex@mac"}
+{"version":1,"task_id":"TKAGXH","kind":"done","at":"2026-11-18T18:32:30.281976Z","agent":"codex@mac","text":"Load only the ABI 2 library name. Reject a wrong major in Python, Go and Node. Retain the standard-library shim for supported Go versions."}
+{"version":1,"task_id":"PU3I2X","kind":"claim","at":"2026-11-18T18:32:30.326132Z","agent":"codex@mac"}
+{"version":1,"task_id":"PU3I2X","kind":"done","at":"2026-11-18T18:32:30.36747Z","agent":"codex@mac","text":"Open and create HTTPS pools with the same calls as local pools. Shared HTTPS smoke passes in Python, Go and Node."}
+{"version":1,"task_id":"CB5GMA","kind":"claim","at":"2026-11-18T18:32:30.408527Z","agent":"codex@mac"}
+{"version":1,"task_id":"CB5GMA","kind":"done","at":"2026-11-18T18:32:30.449968Z","agent":"codex@mac","text":"Update the CLI and migration guides, changelog, specs and install examples for 2.0. Preserve historical examples in dated material."}
+{"version":1,"task_id":"VJTFS6","kind":"result","at":"2026-11-18T18:38:41.140714Z","text":"32-byte ASCII validation cut a 64 KiB cold view from 5.9 to 2.1 µs. Small-message timing ranges overlap."}
+{"version":1,"task_id":"TKAGXH","kind":"result","at":"2026-11-18T18:38:41.186655Z","text":"Final npm tarballs passed on Debian arm64 and Windows x64. Both load Plasmite by its ABI 2 library name."}

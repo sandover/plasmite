@@ -6,8 +6,10 @@ package local
 import "C"
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"runtime"
 	"strings"
 	"sync"
@@ -19,8 +21,8 @@ import (
 // JSON, Decode and scalar/string extraction create independent requested values.
 // Ordinary messages need no Close.
 type MessageView struct {
-	seq         uint64
-	timestampNs uint64
+	seq    uint64
+	timeNS uint64
 	valueSnapshot
 	dataNode C.size_t
 	metaNode C.size_t
@@ -42,17 +44,17 @@ func (v valueSnapshot) proofPointer() *C.size_t {
 	return &v.duplicates[0]
 }
 
-// getView copies the record into aligned Go storage and validates it once.
-// It blocks under the same pool lock as Get and does not imply cancellation.
 func (p *Pool) getView(seq uint64) (*MessageView, error) {
-	view, err := p.copyView(seq)
+	stream, err := p.FetchView(Since(seq))
 	if err != nil {
 		return nil, err
 	}
-	if err := view.validate(); err != nil {
-		return nil, err
+	defer stream.Close()
+	view, err := stream.Next(context.Background())
+	if err == io.EOF {
+		return nil, &Error{Kind: ErrorNotFound, Message: "message not found", Seq: &seq}
 	}
-	return view, nil
+	return view, err
 }
 func (view *MessageView) validate() error {
 	if len(view.encoded) == 0 {
@@ -89,46 +91,10 @@ func (view *MessageView) validate() error {
 	}
 	return nil
 }
-func (p *Pool) copyView(seq uint64) (*MessageView, error) { return p.copyViewCapacity(seq, 256) }
-func (p *Pool) copyViewCapacity(seq uint64, initialWords int) (*MessageView, error) {
-	if p == nil {
-		return nil, closedError("pool")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
-	words := make([]uint32, initialWords)
-	var result C.plsm_go_get_result_t
-	for {
-		var destination *C.uint8_t
-		if len(words) > 0 {
-			destination = (*C.uint8_t)(unsafe.Pointer(&words[0]))
-		}
-		result = C.plsm_go_get_into(p.ptr, C.uint64_t(seq), destination, C.size_t(len(words)*4))
-		runtime.KeepAlive(words)
-		if result.status != 0 {
-			return nil, fromCError(result.error)
-		}
-		if uint64(result.len) <= uint64(len(words))*4 {
-			break
-		}
-		if uint64(result.len) > uint64(^uint(0)>>1)-3 {
-			return nil, invalidArgumentError("record is too large")
-		}
-		words = make([]uint32, (int(result.len)+3)/4)
-	}
-	if result.len == 0 {
-		return nil, &Error{Kind: ErrorCorrupt, Message: "empty encoded view"}
-	}
-	view := &MessageView{seq: seq, timestampNs: uint64(result.timestamp), valueSnapshot: valueSnapshot{encoded: unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), int(result.len))}}
-	return view, nil
-}
 
 // Time constructs the UTC time only when requested.
 func (v *MessageView) Seq() uint64  { return v.seq }
-func (v *MessageView) Time() uint64 { return v.timestampNs }
+func (v *MessageView) Time() uint64 { return v.timeNS }
 
 // Lite3 returns a mutable copy of the complete encoded snapshot.
 func (v *MessageView) Lite3() []byte { return append([]byte(nil), v.bytes()...) }
@@ -157,7 +123,7 @@ func (v *MessageView) JSON() ([]byte, error) {
 	if v == nil || len(v.encoded) == 0 {
 		return nil, invalidArgumentError("missing view")
 	}
-	result := C.plsm_go_message_result(v.pointer(), C.size_t(len(v.encoded)), v.proofPointer(), C.size_t(len(v.duplicates)), v.dataNode, C.uint64_t(v.seq), C.uint64_t(v.timestampNs))
+	result := C.plsm_go_message_result(v.pointer(), C.size_t(len(v.encoded)), v.proofPointer(), C.size_t(len(v.duplicates)), v.dataNode, C.uint64_t(v.seq), C.uint64_t(v.timeNS))
 	runtime.KeepAlive(v)
 	if result.status != 0 {
 		return nil, fromCError(result.error)

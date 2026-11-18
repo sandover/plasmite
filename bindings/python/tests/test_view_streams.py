@@ -94,7 +94,7 @@ class ViewStreams(unittest.TestCase):
             writer.start()
             try:
                 # With no fill wait, this returns the one record without waiting for15 more.
-                result = stream.next_batch(16, 1024 * 1024, 1000)
+                result = stream.next_batch(16, 1024 * 1024, 1)
                 self.assertEqual([m.data["x"] for m in result], [7])
             finally:
                 writer.join()
@@ -120,7 +120,7 @@ class ViewStreams(unittest.TestCase):
                     writer.start()
                 messages = []
                 while len(messages) < 100:
-                    batch = stream.next_batch(4, 4096, timeout_ms=5000)
+                    batch = stream.next_batch(4, 4096, wait=5)
                     self.assertTrue(batch, "writer made no progress")
                     messages.extend(batch)
                 self.assertEqual(
@@ -154,7 +154,7 @@ class ViewStreams(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     stream.next_batch(**args)
         with self.pool.follow_view(since="oldest") as stream:
-            self.assertEqual(stream.next_batch(4, 1000, timeout_ms=0), [])
+            self.assertEqual(stream.next_batch(4, 1000, wait=0), [])
         with self.pool.follow_view(since="oldest") as stream:
             stream.cancel()
             with self.assertRaises(StopIteration):
@@ -217,7 +217,7 @@ class ViewStreams(unittest.TestCase):
                     stream.close()
                     return 1
 
-            with self.assertRaisesRegex(plasmite.PlasmiteError, "closed"):
+            with self.assertRaises(StopIteration):
                 stream.next_batch(Count(1), 1000, 0)
 
 

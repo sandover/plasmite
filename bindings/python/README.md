@@ -96,6 +96,19 @@ stops at the last sequence present when the reader opens. Pass `since` or
 Use `create_pool` for a custom size. The module functions `open_pool`,
 `create_pool`, `list_pools`, and `delete_pool` use the default directory.
 
+## HTTPS pools
+
+After saving a connection with `plasmite access connect https://pools.example.net:9743`, open the pool by its URL.
+
+```python
+with plasmite.open_pool("https://pools.example.net:9743/events", create=True) as pool:
+    pool.feed({"ready": True}, tags=["status"])
+    with pool.fetch(last=1) as reader:
+        print(next(reader).data)
+```
+
+`create_pool(ref, size_bytes)` also accepts an HTTPS reference.
+
 ## Immutable message views
 
 Use `feed_view`, `fetch_view`, and `follow_view` to keep encoded data across
@@ -129,7 +142,7 @@ expose readonly memoryviews; `to_native` makes owned `bytes`.
 A view owns one independent snapshot. Children, slices, iterators and buffers
 keep that snapshot alive after you close the pool or overwrite its ring slots.
 A small retained child retains the entire message. `memoryview(view)` includes
-stored meta/data bytes; `seq` and `timestamp_ns` remain separate identity fields.
+stored meta/data bytes; `seq` and `time` remain separate identity fields.
 Use `view_from_lite3(payload, seq=0, time=0)` to validate and snapshot
 external encoded bytes. Mutable inputs trigger a defensive copy.
 
@@ -173,7 +186,7 @@ with pool.follow_view(tags=["sensor"], since=1) as stream:
 ```
 
 `next_batch` waits for the first accepted message, then takes available records
-without waiting to fill the batch. `timeout_ms=0` polls and returns `[]` when no
+without waiting to fill the batch. `wait=0` polls and returns `[]` when no
 record is ready. A finite timeout also returns `[]` when its wait expires;
 completion or cancellation raises `StopIteration`. A retention gap raises
 `RetentionGapError` with the missing and first retained sequences.
@@ -242,7 +255,7 @@ with UdpClient("udp://127.0.0.1:9701") as client:
 ```
 
 Use `last=count`, `since=at(timestamp_ns)`, or `since=seq` to select retained
-history. Pass a finite `timeout_ms` to `next_event` to bound a wait. `close()` and
+history. Use `next(wait)` with a duration in seconds or a `timedelta` to bound a wait. `close()` and
 `cancel()` interrupt an active wait within 50 milliseconds.
 
 If a reader detects a retention gap, it raises `RetentionGapError` with the
@@ -278,18 +291,9 @@ threads without racing its native handle or freeing it during a call. Independen
 handles can operate concurrently. Message values are owned snapshots and can
 outlive the pool.
 
-Each opened stream owns an independent handle. `tail()` releases handle locks
-between reads, including while yielding messages. Consume each generator from
-one thread at a time.
+Each reader owns its handle and releases locks after each read. Use one thread per reader and a separate thread for feeding when needed. `next(wait)` accepts a duration in seconds or a `timedelta`. It returns `None` when the wait expires and raises `StopIteration` when the reader finishes or closes. Use `next(0)` to poll. `next_batch(max_count, max_bytes, wait)` uses the same wait and returns a list.
 
-A stream's `cancel()` interrupts a read while it waits for messages; `close()`
-cancels first, then waits for the active call and its result copy before freeing
-the handle. `next_wait(timeout_ms)` returns `(status, value)`: 0 means wait expired,
-1 carries a message/frame, 2 means finished, and 3 means cancelled. A zero budget
-polls once; wait expiry retains position. The original open-time `timeout_ms`
-still bounds the stream's lifetime. High-level `tail(cancel=event)` accepts a
-`threading.Event` and checks it during bounded waits. Cancellation cannot interrupt
-an operating-system file lock already in progress.
+Pass `cancel=threading.Event()` to a reader on any transport, or call `close()` from another thread. Cancellation interrupts waiting for messages. An active file lock can finish first.
 
 For playback timing, use ordinary streams and an application scheduler; see the
 [2.0 upgrade guide](../../docs/record/upgrading-2.0.md#applications-control-playback-timing).
@@ -297,14 +301,13 @@ For playback timing, use ordinary streams and an application scheduler; see the
 ## Owned UDP receiving
 
 ```python
-with udp_pool.follow_views(options) as events:
+with udp_pool.follow_view(since="oldest") as events:
     for event in events:
         if isinstance(event, plasmite.MessageView):
             print(event.seq, event.data["temperature"])
 ```
 
-DATA arrives as an immutable message view; gaps and progress use the existing
-event classes. A retained message stays readable after the follow closes.
+DATA arrives as an immutable message view; skips and progress have separate event classes. A retained message stays readable after the follow closes.
 Field access reads Lite3 directly; `plasmite.to_native(event.data)` creates an
 independent native value. UDP keeps arrival order, including duplicate and late
 packets. The new methods require a matching native library.

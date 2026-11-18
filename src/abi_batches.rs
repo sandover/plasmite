@@ -1,7 +1,6 @@
 //! Explicit bounded acquisition of independent message owners.
 use super::*;
 use crate::abi_views::{plsm_message_view, publish};
-use crate::view::MessageView;
 
 #[repr(C)]
 pub struct ViewStreamText {
@@ -61,29 +60,46 @@ pub extern "C" fn plsm_view_stream_next(
         let mut state = stream.state.lock().map_err(|_| {
             Error::new(ErrorKind::Internal).with_message("stream state is unavailable")
         })?;
-        let wait = (timeout_ms != u64::MAX).then(|| Duration::from_millis(timeout_ms));
-        let select = |frame: crate::api::FrameRef, tags: &[String]| {
-            if !stream_frame_matches_tags(&frame, tags)? {
-                return Ok(None);
+        let wait = stream_wait(timeout_ms);
+        let select = crate::api::select_view;
+        if max_count == 0 || max_bytes == 0 {
+            return Err(Error::new(ErrorKind::Usage).with_message("batch bounds must be positive"));
+        }
+        let batch = match &mut *state {
+            StreamState::Local { pool, state } if max_count == 1 => {
+                // No allocation for companions on an ordinary pull.
+                match state.next_wait_bounded(pool, wait, max_bytes, select)? {
+                    TailOutcome::Item(message) => {
+                        publish(message, out)?;
+                        unsafe {
+                            *count = 1;
+                        }
+                        TailOutcome::Item(Vec::new())
+                    }
+                    TailOutcome::WaitExpired => TailOutcome::WaitExpired,
+                    TailOutcome::Finished => TailOutcome::Finished,
+                    TailOutcome::Cancelled => TailOutcome::Cancelled,
+                }
             }
-            MessageView::from_owned(frame.payload, frame.seq, frame.time, frame.flags).map(Some)
-        };
-        // The ordinary iterator never allocates a companion/checkpoint collection.
-        if max_count == 1 {
-            return match state.next_wait_bounded(&stream.pool, wait, max_bytes, select)? {
+            StreamState::Local { pool, state } => {
+                state.next_batch_wait(pool, wait, max_count, max_bytes, select)?
+            }
+            StreamState::Remote(reader) => match reader.next(wait, max_bytes, select)? {
+                // A remote pull owns one complete frame. The caller may ask again
+                // while the network supplies later records.
                 TailOutcome::Item(message) => {
                     publish(message, out)?;
                     unsafe {
                         *count = 1;
                     }
-                    Ok(TailOutcome::Item(Vec::new()))
+                    TailOutcome::Item(Vec::new())
                 }
-                TailOutcome::WaitExpired => Ok(TailOutcome::WaitExpired),
-                TailOutcome::Finished => Ok(TailOutcome::Finished),
-                TailOutcome::Cancelled => Ok(TailOutcome::Cancelled),
-            };
-        }
-        state.next_batch_wait(&stream.pool, wait, max_count, max_bytes, select)
+                TailOutcome::WaitExpired => TailOutcome::WaitExpired,
+                TailOutcome::Finished => TailOutcome::Finished,
+                TailOutcome::Cancelled => TailOutcome::Cancelled,
+            },
+        };
+        Ok(batch)
     })();
     match result {
         Ok(TailOutcome::Item(messages)) => {

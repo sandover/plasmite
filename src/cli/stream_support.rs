@@ -6,23 +6,19 @@ use plasmite::notice::Notice;
 use serde_json::{Map, json};
 use std::time::Duration;
 
-use super::output_support::{emit_lite3, emit_message, emit_notice, notice_time_now};
+use super::output_support::{emit_error, emit_lite3, emit_message, emit_notice, notice_time_now};
 use super::support::message_from_lite3;
 
-pub(super) enum FollowSignal {
-    Opened,
-    Message,
-}
-
-/// Only poll a pipe. Regular files and terminals never have a downstream reader.
-pub(super) fn stdout_is_pipe() -> bool {
+// Redirected output can have a downstream reader, including a socketpair.
+fn watches_stdout() -> bool {
     #[cfg(unix)]
     {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         // SAFETY: fstat writes one stat to the supplied buffer on success.
         unsafe {
             libc::fstat(libc::STDOUT_FILENO, stat.as_mut_ptr()) == 0
-                && stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFIFO
+                && stat.assume_init().st_mode & libc::S_IFMT != libc::S_IFREG
+                && libc::isatty(libc::STDOUT_FILENO) == 0
         }
     }
     #[cfg(not(unix))]
@@ -31,7 +27,7 @@ pub(super) fn stdout_is_pipe() -> bool {
     }
 }
 
-fn stdout_pipe_closed() -> bool {
+fn stdout_closed() -> bool {
     #[cfg(unix)]
     {
         let mut output = libc::pollfd {
@@ -52,27 +48,10 @@ fn report_read_gap(
     args: &super::stream::FollowArgs,
     context: &super::context::CliContext,
 ) -> Result<plasmite::api::Read, Error> {
-    let (Some(missing), Some(next_seq)) = (error.missing(), error.next_seq()) else {
+    let (Some(_), Some(next_seq)) = (error.missing(), error.next_seq()) else {
         return Err(error);
     };
-    if let Some(time) = notice_time_now() {
-        emit_notice(
-            &Notice {
-                kind: "drop".into(),
-                time,
-                cmd: "follow".into(),
-                pool: args.pool.clone(),
-                message: format!("dropped {} messages", next_seq - missing),
-                details: Map::from_iter([
-                    ("last_seen_seq".into(), json!(missing.saturating_sub(1))),
-                    ("next_seen_seq".into(), json!(next_seq)),
-                    ("dropped_count".into(), json!(next_seq - missing)),
-                ]),
-            },
-            context.color_mode(),
-            context.output_mode(),
-        );
-    }
+    emit_error(&error, context.color_mode(), context.output_mode());
     Ok(plasmite::api::Read::since(plasmite::api::Since::Seq(next_seq)).tags(args.tags.clone()))
 }
 
@@ -95,23 +74,30 @@ pub(super) fn follow_local(
     args: &super::stream::FollowArgs,
     read: plasmite::api::Read,
     context: &super::context::CliContext,
-    signal: &mut dyn FnMut(FollowSignal),
+    signal: &mut dyn FnMut(),
 ) -> Result<RunOutcome, Error> {
     use plasmite::api::ReadPoll;
     let mut options = read.tags(args.tags.clone());
-    let watch = stdout_is_pipe();
+    let watch = watches_stdout();
     loop {
         let result = (|| {
             let mut reader = pool.follow_lite3(options)?;
-            signal(FollowSignal::Opened);
+            signal();
             loop {
-                if watch && stdout_pipe_closed() {
+                if watch && stdout_closed() {
                     return Ok(());
                 }
-                match reader.poll(Duration::from_millis(50))? {
+                let status = if watch {
+                    reader.poll(Duration::from_millis(50))?
+                } else {
+                    match reader.next_frame()? {
+                        Some(frame) => ReadPoll::Message(frame),
+                        None => ReadPoll::Complete,
+                    }
+                };
+                match status {
                     ReadPoll::Message(frame) => {
                         emit_frame(frame.seq, frame.time, &frame.payload, context)?;
-                        signal(FollowSignal::Message);
                         if args.one {
                             return Ok(());
                         }
@@ -138,7 +124,7 @@ pub(super) fn report_udp_skip(
 ) {
     emit_notice(
         &Notice {
-            kind: "udp-gap".into(),
+            kind: "udp-skip".into(),
             time: notice_time_now().unwrap_or_default(),
             cmd: command.into(),
             pool: pool.into(),
@@ -159,28 +145,32 @@ pub(super) fn follow_udp(
     args: &super::stream::FollowArgs,
     read: plasmite::api::Read,
     context: &super::context::CliContext,
-    signal: &mut dyn FnMut(FollowSignal),
+    signal: &mut dyn FnMut(),
 ) -> Result<RunOutcome, Error> {
     let mut options = read.tags(args.tags.clone());
-    let watch = stdout_is_pipe();
+    let watch = watches_stdout();
     loop {
         let result = (|| {
             let mut reader = pool.follow(options)?;
-            signal(FollowSignal::Opened);
+            signal();
             loop {
-                if watch && stdout_pipe_closed() {
+                if watch && stdout_closed() {
                     return Ok(());
                 }
-                if let Some(event) = reader.next_event_timeout(Duration::from_millis(50))? {
+                let event = if watch {
+                    reader.next_event_timeout(Duration::from_millis(50))?
+                } else {
+                    reader.next_event()?
+                };
+                if let Some(event) = event {
                     match event {
                         UdpEvent::Frame(frame) => {
                             emit_frame(frame.seq, frame.time, &frame.payload, context)?;
-                            signal(FollowSignal::Message);
                             if args.one {
                                 return Ok(());
                             }
                         }
-                        UdpEvent::Gap {
+                        UdpEvent::Skip {
                             first,
                             last,
                             reason,
@@ -206,26 +196,52 @@ pub(super) fn follow_remote(
     args: &super::stream::FollowArgs,
     read: plasmite::api::Read,
     context: &super::context::CliContext,
-    signal: &mut dyn FnMut(FollowSignal),
+    signal: &mut dyn FnMut(),
 ) -> Result<RunOutcome, Error> {
-    let mut options = read.tags(args.tags.clone());
-    loop {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    std::thread::scope(|scope| {
+        let watcher = watches_stdout().then(|| {
+            scope.spawn(|| {
+                while !cancel.load(Ordering::Acquire) {
+                    if stdout_closed() {
+                        cancel.store(true, Ordering::Release);
+                        break;
+                    }
+                    std::thread::park_timeout(Duration::from_millis(50));
+                }
+            })
+        });
         let result = (|| {
-            let reader = pool.follow_lite3(options)?;
-            signal(FollowSignal::Opened);
-            for frame in reader {
-                let frame = frame?;
-                emit_frame(frame.seq, frame.time, &frame.payload, context)?;
-                signal(FollowSignal::Message);
-                if args.one {
-                    break;
+            let mut options = read.tags(args.tags.clone());
+            loop {
+                if watcher.is_some() {
+                    options = options.cancel(cancel.clone());
+                }
+                let result = (|| {
+                    let reader = pool.follow_lite3(options)?;
+                    signal();
+                    for frame in reader {
+                        let frame = frame?;
+                        emit_frame(frame.seq, frame.time, &frame.payload, context)?;
+                        if args.one {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => return Ok(RunOutcome::with_code(0)),
+                    Err(error) => options = report_read_gap(error, args, context)?,
                 }
             }
-            Ok(())
         })();
-        match result {
-            Ok(()) => return Ok(RunOutcome::with_code(0)),
-            Err(error) => options = report_read_gap(error, args, context)?,
+        cancel.store(true, Ordering::Release);
+        if let Some(watcher) = watcher {
+            watcher.thread().unpark();
         }
-    }
+        result
+    })
 }

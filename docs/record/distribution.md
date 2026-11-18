@@ -109,9 +109,7 @@ extracted SDK, point `PLASMITE_LIB_DIR` at its `lib` directory and add its
 `bin` directory to PATH before running Python or its console command. A
 Linux ARM SDK supplies the CLI and C library, but no npm native addon.
 
-For changes from earlier versions, see the [1.0 upgrade guide](upgrading-1.0.md).
-The published 1.0 packages and SDK archives include the secure access-key
-workflow. Update older installations before using the new access commands.
+Read the [2.0 upgrade guide](upgrading-2.0.md) before replacing a 1.x installation.
 
 The `GitHub release tarball` row applies to official macOS and Linux x86_64
 archives. The Linux ARM archives are a separate GitHub SDK preview and do not
@@ -128,13 +126,7 @@ ARM64 requires ARMv8-A; ARMv7 requires Armv7-A with VFPv3-D16 and Thumb-2.
 ARMv6 is unsupported. Physical Pi installation and reboot qualification remain
 pending; the published archives retain the preview tier.
 
-Download the matching [1.3.0 release](https://github.com/sandover/plasmite/releases/tag/v1.3.0)
-archive and [sha256sums.txt](https://github.com/sandover/plasmite/releases/download/v1.3.0/sha256sums.txt):
-
-| Userland | Published archive |
-| --- | --- |
-| 64-bit ARM | [plasmite_1.3.0_linux_arm64.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.3.0/plasmite_1.3.0_linux_arm64.tar.gz) |
-| 32-bit ARMv7 hard-float | [plasmite_1.3.0_linux_armv7.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.3.0/plasmite_1.3.0_linux_armv7.tar.gz) |
+Choose a 2.0 SDK archive and its checksum file from the [release page](https://github.com/sandover/plasmite/releases). The archive name ends in `linux_arm64.tar.gz` or `linux_armv7.tar.gz`.
 
 On the Linux ARM machine, run these commands in Bash. They select the archive
 by userland width and stop on download or checksum failure before extraction:
@@ -147,7 +139,7 @@ case "$(getconf LONG_BIT)" in
   *) echo "unsupported userland width" >&2; exit 1 ;;
 esac
 getconf GNU_LIBC_VERSION # Requires glibc 2.35 or newer.
-version=1.3.0
+version=2.0.0
 archive="plasmite_${version}_${platform}.tar.gz"
 release_url="https://github.com/sandover/plasmite/releases/download/v${version}"
 mkdir -p "$HOME/arm-sdk-${version}"
@@ -166,11 +158,11 @@ plasmite --version
 Each archive extracts `bin/`, `include/`, and `lib/` directly into `sdk_dir`;
 Rust is not required. Add that `bin` path to your shell's startup file for
 future sessions. For C consumers, export
-`PKG_CONFIG_PATH="$HOME/.local/share/plasmite/1.3.0/lib/pkgconfig"` and use
+`PKG_CONFIG_PATH="$HOME/.local/share/plasmite/${version}/lib/pkgconfig"` and use
 `pkg-config --cflags --libs plasmite`. To run a dynamically linked C consumer,
-also export `LD_LIBRARY_PATH="$HOME/.local/share/plasmite/1.3.0/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
+also export `LD_LIBRARY_PATH="$HOME/.local/share/plasmite/${version}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
 Python's Linux source installation can
-use `PLASMITE_LIB_DIR="$HOME/.local/share/plasmite/1.0.0/lib"` with the same
+use `PLASMITE_LIB_DIR="$HOME/.local/share/plasmite/${version}/lib"` with the same
 `bin` path on `PATH`; the archive does not add an npm addon or an ARM wheel.
 
 Run a foreground server as the operating-system account that owns the pool

@@ -198,6 +198,7 @@ if ! compgen -G "${ROOT_DIR}/target/debug/libplasmite.{dylib,so}" >/dev/null; th
   echo "building libplasmite (cdylib)..."
   (cd "${ROOT_DIR}" && cargo build -q --lib)
 fi
+bash "${ROOT_DIR}/scripts/stage_versioned_library.sh" "${ROOT_DIR}/target/debug"
 
 rm -rf "${WORK_DIR}"
 mkdir -p "${POOL_DIR}"

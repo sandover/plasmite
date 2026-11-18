@@ -20,28 +20,18 @@ Commands with remote support accept `https://host:port/pool`. This shorthand
 names a pool; do not append remote API paths. The loopback-only HTTP listener
 is for credential-free use on the server machine.
 
-`feed`, `follow`, and `duplex` also accept `udp://HOST:PORT/POOL`. Give an
-explicit port and one pool name. UDP sends confirm only that the local operating
-system accepted the datagram. The
-[UDP receive policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
-follow to deliver matching messages in arrival order, including late messages
-and duplicates, and report only explicit server skips. Sequence/progress jumps
-never justify dropping a packet or inferring a gap. This source change awaits
-a major release. A finite follow ends on terminal progress and can leave DATA
-in flight. It never repairs data or switches to HTTP. The maximum datagram size
-is 65,507 bytes, including routing and application framing. Other commands
-reject UDP URLs.
+`feed`, `fetch`, `follow`, and `duplex` accept `udp://HOST:PORT/POOL`. Give an explicit port and one pool name. UDP feed confirms local socket admission. UDP reads deliver datagrams in arrival order, including late messages and duplicates. A fetch ends at terminal progress and can leave messages in flight. Only an explicit server announcement reports loss. The maximum datagram size is 65,507 bytes, including routing and framing. [UDP receive policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
 
-| Command | Local name/path | Remote URL |
-| --- | --- | --- |
-| `pool create/delete` | yes | no |
-| `pool info` | yes | yes |
-| `pool list [SERVER]` | yes | yes (server origin) |
-| `feed` | yes | yes |
-| `fetch` | yes | yes |
-| `follow` | yes | yes |
-| `duplex` | yes | yes |
-| `doctor` | yes | no |
+| Command | Local name/path | HTTP(S) URL | UDP URL |
+| --- | --- | --- | --- |
+| `pool create/delete` | yes | no | no |
+| `pool info` | yes | yes | no |
+| `pool list [SERVER]` | yes | yes (server origin) | no |
+| `feed` | yes | yes | yes |
+| `fetch` | yes | yes | yes |
+| `follow` | yes | yes | yes |
+| `duplex` | yes | yes | yes |
+| `doctor` | yes | no | no |
 
 ## Serving and startup
 
@@ -215,28 +205,16 @@ plasmite feed events --tag sensor '{"temperature":21}'
 jq -c '.[]' readings.json | plasmite feed events
 ```
 
-Pass a positional argument or redirect input to stdin. Both follow the same message rule. Only objects
-with exactly `seq`, `time`, `meta`, and `data`, where `meta` has exactly `tags`,
-are recognized as complete messages. That shape is reserved, even when intended
-as application data. Source `seq` must be an unsigned integer, `time` an RFC 3339
-string, `meta.tags` a list of strings, and `data` an object. Invalid reserved
-messages fail. Partial envelopes, extra fields, and a field named `data` alone
-remain application data.
+Pass a positional argument or redirect input to stdin. A complete message has exactly four fields, `seq`, `time`, `meta`, and `data`, with only `tags` inside `meta`. Source `seq` must be a positive unsigned integer, `time` can be any valid RFC 3339 timestamp, `meta.tags` must list strings, and `data` must be an object. Invalid messages with that exact shape produce `Usage`. Objects with partial envelopes or extra fields count as application data.
 
-`--tag` adds tags to application objects; complete messages supply their own
-tags and reject `--tag`. Non-object application data is rejected. `--data` has
-been removed; delete it from existing commands. There is no override for the
-reserved message shape.
-
+`--tag` adds tags to application objects. Complete messages supply their own tags and reject `--tag`. Non-object application data produces `Usage`.
 
 Use `feed --create` to create a missing pool at the default size. To choose
 a size, run `pool create --size SIZE` first.
 
 ## Formats
 
-Global `--format pretty|json|yaml|lite3|lite3-raw` chooses output before or
-after a command. With no flag, a terminal gets readable output and a pipe
-or file gets compact JSON. `--format` controls output only.
+Global `--format pretty|json|yaml|lite3|lite3-raw` chooses output before or after a command. With no flag, a terminal gets readable output and a pipe or file gets compact JSON. `--format` controls output only.
 
 | Format | Output and input |
 | --- | --- |
@@ -246,15 +224,9 @@ or file gets compact JSON. `--format` controls output only.
 | `lite3` | A binary stream with a versioned prefix and a length for each message |
 | `lite3-raw` | One raw attachment through EOF; fetch output only |
 
-`feed` detects JSON, marked YAML, and framed Lite3 from their syntax as soon
-as the first message arrives. It never guesses a message's meaning from
-application keys. `--input-format auto|json|yaml|lines|lite3|lite3-raw` selects an
-explicit input encoding. Explicit YAML also accepts one unmarked document
-through EOF. YAML input accepts JSON-compatible values and rejects custom
-tags, aliases, non-string keys, and non-finite numbers.
+`feed` detects JSON, marked YAML, and framed Lite3 from their syntax as soon as the first message arrives. It never guesses a message's meaning from application keys. `--input-format auto|json|yaml|lines|lite3|lite3-raw` selects an explicit input encoding. Explicit YAML also accepts one unmarked document through EOF. YAML input accepts JSON-compatible values and rejects custom tags, aliases, non-string keys, and non-finite numbers.
 
-Use `--input-format lines` to store each UTF-8 line as `{"line":"..."}`.
-It keeps blank lines and the last line even if it lacks a newline.
+Use `--input-format lines` to store each UTF-8 line as `{"line":"..."}`. It keeps blank lines and the last line even if it lacks a newline.
 
 ```bash
 plasmite follow source --format yaml | plasmite feed destination
@@ -263,40 +235,19 @@ plasmite fetch source 1 --format lite3-raw > heartbeat.lite3
 plasmite feed destination --input-format lite3-raw < heartbeat.lite3
 ```
 
-Framed Lite3 starts with the four bytes `PLS2`. Each record starts with
-`M` and a four-byte body length. The body holds an eight-byte sequence,
-an eight-byte timestamp in nanoseconds and the original Lite3 payload.
-Integers use big-endian byte order. Raw attachments have no prefix or
-record header. Copying preserves the original Lite3 payload bytes.
+Framed Lite3 starts with the four bytes `PLS2`. Each record starts with `M` and a four-byte body length. The body holds an eight-byte sequence, an eight-byte timestamp in nanoseconds and the original Lite3 payload. Integers use big-endian byte order. Raw attachments have no prefix or record header. Copying preserves the original Lite3 payload bytes.
 
-Each Lite3 payload may occupy at most 256 MiB and must fit the destination
-pool. The text reader permits encoding overhead rather than imposing the
-old 1 MiB record limit. Remote servers keep their configured request-body
-limit (1 MiB by default); use `serve --max-body-bytes` when larger messages
-need remote delivery. Truncated or malformed input stops the command and
-returns nonzero. Earlier successful appends remain. Empty input streams
-succeed without appending anything.
+Each Lite3 payload may occupy at most 256 MiB and must fit the destination pool. The text reader permits encoding overhead rather than imposing the old 1 MiB record limit. Remote servers keep their configured request-body limit (1 MiB by default); use `serve --max-body-bytes` when larger messages need remote delivery. Truncated or malformed input stops the command and returns nonzero. Earlier successful appends remain. Empty input streams succeed without appending anything.
 
-Reports use the same JSON/YAML formatting rule but remain reports.
-Binary formats require message commands; raw output requires `fetch`.
-Help and completion remain text. `mcp` keeps JSON-RPC. `duplex` accepts the same messages as `feed` on terminal
-and piped stdin and streams received complete messages, including its own appends.
-Input EOF closes sending while reception continues. Choose `--timeout` for a
-bounded receive session; use `feed` for finite copying. See the
-[2.0 upgrade guide](record/upgrading-2.0.md) for migration.
+Reports use the same JSON/YAML formatting rule but remain reports. Binary formats require message commands; raw output requires `fetch`. Help and completion remain text. `mcp` keeps JSON-RPC. `duplex` accepts the same messages as `feed` on terminal and piped stdin and streams received complete messages, including its own appends. Input EOF closes sending while reception continues. Stop the process or close stdout to end the receive session. Use `feed` for finite copying. See the [2.0 upgrade guide](record/upgrading-2.0.md) for migration.
 
-Bash and Zsh preserve binary pipes. PowerShell 7.4 and later preserves
-native binary redirection; earlier versions need `cmd.exe` redirection.
+Bash and Zsh preserve binary pipes. PowerShell 7.4 and later preserves native binary redirection; earlier versions need `cmd.exe` redirection.
 
 ## Reading history
 
-`follow POOL` waits for new messages. Use `--last N` to read N retained
-messages before waiting for new ones. `--since` accepts `oldest`, an inclusive
-sequence, an RFC 3339 time or a duration such as `5m`. Use `--one` to wait
-for one matching message and exit in any shell.
+`follow POOL` waits for new messages. Use `--last N` to read N retained messages before waiting for new ones. `--since` accepts `oldest`, an inclusive sequence, an RFC 3339 time or a duration such as `5m`. Use `--one` to wait for one matching message and exit in any shell.
 
-`fetch POOL` reads retained history and exits. It takes the same start and
-tag options. Supply a sequence as a positional argument to fetch one message.
+`fetch POOL` reads retained history and exits. It takes the same start and tag options. Supply a sequence as a positional argument to fetch one message.
 
 ```console
 plasmite fetch events
@@ -304,16 +255,11 @@ plasmite fetch https://pools.example.net:9743/events --since 5m --format json
 plasmite follow events --since 101 --tag gfx --one
 ```
 
-UDP follows use their separate
-[arrival-order delivery policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices).
+UDP follows use their separate [arrival-order delivery policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices).
 
-A fetch stops at the last sequence that existed when the read opened.
-`--last` counts retained messages before filtering. Repeat `--tag` to require
-every specified tag. Use `jq` after Plasmite to filter on data fields.
+A fetch stops at the last sequence that existed when the read opened. `--last` counts retained messages before filtering. Repeat `--tag` to require every specified tag. Use `jq` after Plasmite to filter on data fields.
 
-If the pool overwrites a live reader's next message, `follow` reports the lost
-range on stderr and continues at the first sequence still retained. `fetch`
-reports a `RetentionGap` and exits nonzero.
+If the pool overwrites a live reader's next message, `follow` reports the lost range on stderr and continues at the first sequence still retained. `fetch` reports a `RetentionGap` and exits nonzero.
 
 ## Errors and exits
 
@@ -323,7 +269,6 @@ text in a terminal, compact JSON in a pipe or file, or marked YAML with
 General exit codes are mapped by error kind; these command workflows
 also have specific meanings:
 
-- `follow` and `duplex` return 124 on timeout.
 - `feed` stops on invalid input; earlier successful appends remain stored.
 - `pool delete` is nonzero if any requested deletion fails.
 - `doctor` is nonzero if any inspected pool is corrupt.

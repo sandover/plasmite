@@ -83,7 +83,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             pool,
             create,
             last,
-            timeout,
             since,
             ..
         } => stream::duplex(
@@ -91,7 +90,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 pool,
                 create,
                 last,
-                timeout,
                 since,
             },
             &context,

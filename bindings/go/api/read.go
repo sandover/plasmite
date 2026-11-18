@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -87,12 +88,6 @@ func Tags(tags ...string) ReadOption {
 
 func readSince(value any) (ReadKind, uint64, error) {
 	switch value := value.(type) {
-	case uint64:
-		return ReadSequence, value, nil
-	case int:
-		if value > 0 {
-			return ReadSequence, uint64(value), nil
-		}
 	case Instant:
 		return ReadTime, uint64(value), nil
 	case time.Time:
@@ -111,6 +106,18 @@ func readSince(value any) (ReadKind, uint64, error) {
 		}
 		if instant, err := time.Parse(time.RFC3339Nano, value); err == nil {
 			return ReadTime, unixNanoseconds(instant), nil
+		}
+	default:
+		integer := reflect.ValueOf(value)
+		switch integer.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			if integer.Int() > 0 {
+				return ReadSequence, uint64(integer.Int()), nil
+			}
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			if integer.Uint() > 0 {
+				return ReadSequence, integer.Uint(), nil
+			}
 		}
 	}
 	return ReadDefault, 0, &Error{Kind: ErrorUsage,

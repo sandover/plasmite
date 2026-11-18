@@ -72,8 +72,16 @@ pub(crate) fn record_payload(record: InputRecord, tags: &[String]) -> Result<Vec
                         )
                         .with_source(err)
                 })?;
-                // Identity belongs to the source pool. The append assigns its own identity.
-                let _ = message.seq;
+                if message.seq == 0 {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("source message seq must be positive"));
+                }
+                // The time crate also accepts arbitrary date/time separators.
+                if !matches!(message.time.as_bytes().get(10), Some(b'T' | b't')) {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("invalid source message time")
+                        .with_hint("Use an RFC 3339 timestamp."));
+                }
                 time::OffsetDateTime::parse(
                     &message.time,
                     &time::format_description::well_known::Rfc3339,
@@ -248,14 +256,29 @@ mod tests {
     fn only_full_output_shape_is_reserved_and_validated() {
         let message = json!({"seq": 7, "time": "2026-10-14T00:00:00Z",
             "meta": {"tags": ["source"]}, "data": {"x": 1}});
-        assert!(record_payload(InputRecord::Json(message.clone()), &[]).is_ok());
+        for time in [
+            "2026-10-14T00:00:00Z",
+            "2026-10-14T05:30:00+05:30",
+            "2026-10-14t00:00:00.123456789012z",
+            "2016-12-31T23:59:60Z",
+        ] {
+            let mut value = message.clone();
+            value["time"] = json!(time);
+            assert!(
+                record_payload(InputRecord::Json(value), &[]).is_ok(),
+                "{time}"
+            );
+        }
         assert!(record_payload(InputRecord::Json(message.clone()), &["outer".into()]).is_err());
         for (field, invalid) in [
             ("seq", Value::Null),
+            ("seq", json!(0)),
             ("seq", json!(-1)),
             ("seq", json!(1.5)),
             ("time", Value::Null),
             ("time", json!("bad")),
+            ("time", json!("2026-10-14X00:00:00Z")),
+            ("time", json!("2026-10-14T00:00:00")),
             ("meta", json!({"tags": null})),
             ("meta", json!({"tags": [1]})),
             ("data", json!([])),

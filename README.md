@@ -41,7 +41,7 @@ Follow [Share your first pool](docs/record/serving.md#share-your-first-pool).
     <td valign="bottom">
     <br/>
       <br/><b>Bob starts watching</b><br/>
-      <code>pls --dir ./pools follow channel --last 1 --one</code>
+      <code>pls --dir ./pools follow channel --last 1</code>
       <br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
       <code>{ "data": {"from": "A", "msg": "hello world"}, ... }</code>
@@ -220,9 +220,7 @@ Tarballs for Linux and macOS are on [GitHub Releases](https://github.com/sandove
 
 Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See the [distribution docs](docs/record/distribution.md) for the full install matrix.
 
-Updating an earlier installation? Read the [1.2 upgrade guide](docs/record/upgrading-1.2.md)
-for message input defaults and output formats, and the
-[1.0 upgrade guide](docs/record/upgrading-1.0.md) for secure-sharing migration.
+Updating an earlier installation? Read the [2.0 upgrade guide](docs/record/upgrading-2.0.md). For older changes, see the [1.2 upgrade guide](docs/record/upgrading-1.2.md) and the [1.0 upgrade guide](docs/record/upgrading-1.0.md).
 
 ## Command Overview
 
@@ -314,7 +312,7 @@ for local, HTTP, and MCP costs and verified Codex CLI and Claude Code access.
 
 ## More
 
-**Specs**: [CLI](spec/v0/SPEC.md) | [API](spec/api/v0/SPEC.md) | [Remote protocol](spec/remote/v0/SPEC.md)
+**Spec**: [Plasmite 2.0 contract](spec/v2/SPEC.md)
 
 **Bindings**: [Go](bindings/go/README.md) | [Python](bindings/python/README.md) | [Node](bindings/node/README.md)
 

@@ -44,7 +44,7 @@ int main(int argc,char **argv) {
             for(int64_t j=1;j<=3;j++) put(builder,array,NULL,(plsm_view_value_t){.kind=3,.integer=j});
             put(builder,root,"note",(plsm_view_value_t){.kind=5,.bytes=(const uint8_t *)note,.len=length});
             if(wide) for(size_t j=0;j<200;j++) put(builder,root,keys[j],(plsm_view_value_t){.kind=3,.integer=(int64_t)j});
-            check(plsm_pool_feed_builder_view(pool,builder,0,&view,&error));plsm_builder_free(builder);
+            check(plsm_pool_feed_builder_view(pool,builder,NULL,&view,&error));plsm_builder_free(builder);
         } else {
             size_t used=(size_t)snprintf(json,length+16384,"{\"count\":%zu,\"power\":1.25,\"ok\":true,\"extra\":null,\"samples\":[1,2,3],\"note\":\"%s\"",i,note);
             if(wide) for(size_t j=0;j<200;j++) used+=(size_t)snprintf(json+used,length+16384-used,",\"%s\":%zu",keys[j],j);

@@ -120,6 +120,11 @@ impl RemoteClient {
         Ok(Self::using_saved_connections(base_url))
     }
 
+    pub(crate) fn for_pool_uri(uri: &str) -> ApiResult<Self> {
+        let resolved = parse_pool_uri(uri)?;
+        Self::new(resolved.base_url.to_string())
+    }
+
     /// Create an in-memory native client from an access key without saving it.
     pub fn with_access_key(base_url: impl Into<String>, access_key: &str) -> ApiResult<Self> {
         let base_url = super::access::secure_destination(&base_url.into())?;
@@ -328,12 +333,24 @@ impl RemoteClient {
         }
     }
 
-    fn open(&self, method: &str, url: &Url) -> ApiResult<ureq::Request> {
+    fn key_for_request(
+        &self,
+        url: &Url,
+    ) -> ApiResult<Option<std::borrow::Cow<'_, super::access::AccessKey>>> {
         let key = self.access_key()?;
         if key.is_some() && self.inner.base_url.scheme() != "https" {
             return Err(Error::new(ErrorKind::Corrupt)
                 .with_message("saved native connections must use HTTPS"));
         }
+        Ok(if url.origin() == self.inner.base_url.origin() {
+            key
+        } else {
+            None
+        })
+    }
+
+    fn open(&self, method: &str, url: &Url) -> ApiResult<ureq::Request> {
+        let key = self.key_for_request(url)?;
         let agent = if matches!(&self.inner.credentials, CredentialSource::Saved) {
             if let Some(key) = key.as_ref() {
                 let fingerprint = *key.spki_fingerprint();

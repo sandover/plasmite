@@ -49,14 +49,14 @@ type CopyValue = unsafe extern "C" fn(
 type Commit = unsafe extern "C" fn(
     *mut plsm_pool_t,
     *mut Builder,
-    u32,
+    *const plsm_feed_options_t,
     *mut *const views::Owner,
     *mut *mut plsm_error_t,
 ) -> i32;
 type Forward = unsafe extern "C" fn(
     *mut plsm_pool_t,
     *const views::Owner,
-    u32,
+    *const plsm_feed_options_t,
     *mut *const views::Owner,
     *mut *mut plsm_error_t,
 ) -> i32;
@@ -78,29 +78,68 @@ struct Api {
     forward: Forward,
     json: Json,
 }
-fn api() -> Option<&'static Api> {
-    static API: std::sync::OnceLock<Option<Api>> = std::sync::OnceLock::new();
-    API.get_or_init(|| {
-        macro_rules! load {
-            ($name:expr, $kind:ty) => {{
-                let symbol = views::optional_symbol($name);
-                if symbol.is_null() {
-                    return None;
-                }
-                unsafe { std::mem::transmute::<*mut libc::c_void, $kind>(symbol) }
-            }};
-        }
-        Some(Api {
-            new: load!(c"plsm_builder_new", New),
-            put: load!(c"plsm_builder_put", Put),
-            copy: load!(c"plsm_builder_copy_value", CopyValue),
-            commit: load!(c"plsm_pool_feed_builder_view", Commit),
-            free: load!(c"plsm_builder_free", Free),
-            forward: load!(c"plsm_pool_feed_view", Forward),
-            json: load!(c"plsm_pool_feed_json_view", Json),
-        })
-    })
-    .as_ref()
+#[cfg_attr(windows, link(name = "plasmite2", kind = "raw-dylib"))]
+unsafe extern "C" {
+    fn plsm_builder_new(
+        arg0: *const Text,
+        arg1: usize,
+        arg2: *mut *mut Builder,
+        arg3: *mut usize,
+        arg4: *mut *mut plsm_error_t,
+    ) -> i32;
+    fn plsm_builder_put(
+        arg0: *mut Builder,
+        arg1: usize,
+        arg2: *const u8,
+        arg3: usize,
+        arg4: *const Input,
+        arg5: *mut usize,
+        arg6: *mut *mut plsm_error_t,
+    ) -> i32;
+    fn plsm_builder_copy_value(
+        arg0: *mut Builder,
+        arg1: usize,
+        arg2: *const u8,
+        arg3: usize,
+        arg4: views::ValueRef,
+        arg5: *mut *mut plsm_error_t,
+    ) -> i32;
+    fn plsm_pool_feed_builder_view(
+        arg0: *mut plsm_pool_t,
+        arg1: *mut Builder,
+        arg2: *const plsm_feed_options_t,
+        arg3: *mut *const views::Owner,
+        arg4: *mut *mut plsm_error_t,
+    ) -> i32;
+    fn plsm_builder_free(arg0: *mut Builder);
+    fn plsm_pool_feed_view(
+        arg0: *mut plsm_pool_t,
+        arg1: *const views::Owner,
+        arg2: *const plsm_feed_options_t,
+        arg3: *mut *const views::Owner,
+        arg4: *mut *mut plsm_error_t,
+    ) -> i32;
+    fn plsm_pool_feed_json_view(
+        arg0: *mut plsm_pool_t,
+        arg1: *const u8,
+        arg2: usize,
+        arg3: *const plsm_feed_options_t,
+        arg4: *mut *const views::Owner,
+        arg5: *mut *mut plsm_error_t,
+    ) -> i32;
+}
+
+fn api() -> &'static Api {
+    static API: Api = Api {
+        new: plsm_builder_new,
+        put: plsm_builder_put,
+        copy: plsm_builder_copy_value,
+        commit: plsm_pool_feed_builder_view,
+        free: plsm_builder_free,
+        forward: plsm_pool_feed_view,
+        json: plsm_pool_feed_json_view,
+    };
+    &API
 }
 struct OwnedBuilder {
     pointer: *mut Builder,
@@ -265,13 +304,7 @@ impl NativeAppendTarget {
             .handle
             .take()
             .ok_or_else(|| pool_error(env, "Usage", "append target was already consumed"))?;
-        let api = api().ok_or_else(|| {
-            pool_error(
-                env,
-                "Usage",
-                "loaded libplasmite lacks native input support; install matching native assets",
-            )
-        })?;
+        let api = api();
         Ok((handle, api))
     }
 }
@@ -290,8 +323,7 @@ impl NativeAppendTarget {
                 "append target is not ready for capture",
             ));
         }
-        let api =
-            api().ok_or_else(|| pool_error(env, "Usage", "native input support is unavailable"))?;
+        let api = api();
         let spans: Vec<_> = tags
             .iter()
             .map(|tag| Text {
@@ -564,6 +596,12 @@ impl Task for AppendTask {
         };
         let mut owner = ptr::null();
         let mut error = ptr::null_mut();
+        let feed_options = plsm_feed_options_t {
+            struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
+            durability: self.durability,
+            tags: ptr::null(),
+            tags_len: 0,
+        };
         let rc = match &self.input {
             AppendInput::Encoded(builder) => {
                 let _operation = lock()?;
@@ -571,7 +609,7 @@ impl Task for AppendTask {
                     (builder.api.commit)(
                         self.handle.ptr,
                         builder.pointer,
-                        self.durability,
+                        &feed_options,
                         &mut owner,
                         &mut error,
                     )
@@ -582,7 +620,7 @@ impl Task for AppendTask {
                 node,
                 tags,
             } => {
-                let api = api().expect("prepared input ABI");
+                let api = api();
                 let tags = tags
                     .iter()
                     .map(|s| Text {
@@ -619,7 +657,7 @@ impl Task for AppendTask {
                             (api.commit)(
                                 self.handle.ptr,
                                 builder.pointer,
-                                self.durability,
+                                &feed_options,
                                 &mut owner,
                                 &mut error,
                             )
@@ -641,7 +679,7 @@ impl Task for AppendTask {
                 };
                 let _operation = lock()?;
                 unsafe {
-                    (api().expect("prepared input ABI").json)(
+                    (api().json)(
                         self.handle.ptr,
                         text.as_ptr(),
                         text.len(),
@@ -654,10 +692,10 @@ impl Task for AppendTask {
             AppendInput::Forwarded(Some(source)) => {
                 let _operation = lock()?;
                 unsafe {
-                    (api().expect("prepared input ABI").forward)(
+                    (api().forward)(
                         self.handle.ptr,
                         source.pointer(),
-                        self.durability,
+                        &feed_options,
                         &mut owner,
                         &mut error,
                     )

@@ -52,7 +52,7 @@ impl PoolRef {
             PoolRef::Name(name) => resolve_name(name, pool_dir),
             PoolRef::Path(path) => Ok(path.clone()),
             PoolRef::Uri(_) => Err(Error::new(ErrorKind::Usage)
-                .with_message("remote pool refs are not supported in v0")),
+                .with_message("a LocalClient requires a local pool reference")),
         }
     }
 }
@@ -87,7 +87,7 @@ impl LocalClient {
         match pool_ref {
             PoolRef::Path(path) => Ok(path.clone()),
             PoolRef::Uri(_) => Err(Error::new(ErrorKind::Usage)
-                .with_message("remote pool refs are not supported in v0")),
+                .with_message("a LocalClient requires a local pool reference")),
             PoolRef::Name(_) => pool_ref.resolve_local_path(self.pool_dir()?),
         }
     }

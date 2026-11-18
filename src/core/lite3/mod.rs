@@ -370,7 +370,7 @@ impl<'a> Lite3DocRef<'a> {
         }
     }
 
-    fn validate_shape(&self) -> Result<usize, Error> {
+    fn validate_shape(&self, data_kind: ErrorKind) -> Result<usize, Error> {
         let root_type =
             unsafe { sys::plasmite_lite3_get_root_type(self.bytes.as_ptr(), self.bytes.len()) };
         if root_type != sys::LITE3_TYPE_OBJECT {
@@ -382,13 +382,6 @@ impl<'a> Lite3DocRef<'a> {
         };
         if meta_type != sys::LITE3_TYPE_OBJECT {
             return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
-        }
-
-        let data_type = unsafe {
-            sys::plasmite_lite3_get_type(self.bytes.as_ptr(), self.bytes.len(), 0, c"data".as_ptr())
-        };
-        if data_type != sys::LITE3_TYPE_OBJECT {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("data is not object"));
         }
 
         let meta_ofs = match get_key_offset(self.bytes, "meta") {
@@ -419,17 +412,30 @@ impl<'a> Lite3DocRef<'a> {
 
         // Outer fields can be valid while nested data cannot produce a readable
         // message. Check that data before any append can commit its bytes.
-        self.key_offset("data")
+        self.message_data_offset(data_kind)
+    }
+
+    pub(crate) fn message_data_offset(&self, data_kind: ErrorKind) -> Result<usize, Error> {
+        let offset = self
+            .key_offset("data")
+            .map_err(|err| err.with_message("missing data"))?;
+        match self.bytes.get(offset) {
+            Some(&sys::LITE3_TYPE_OBJECT) => Ok(offset),
+            Some(&kind) if kind < sys::LITE3_TYPE_INVALID => {
+                Err(Error::new(data_kind).with_message("data is not object"))
+            }
+            _ => Err(Error::new(ErrorKind::Corrupt).with_message("invalid data")),
+        }
     }
 
     pub fn validate(&self) -> Result<(), Error> {
-        let data = self.validate_shape()?;
+        let data = self.validate_shape(ErrorKind::Corrupt)?;
         self.validate_readability_at(data)
     }
 
     /// Establish readability for an immutable view, including the whole envelope.
     pub(crate) fn validate_view(&self) -> Result<(), Error> {
-        self.validate_shape()?;
+        self.validate_shape(ErrorKind::Corrupt)?;
         match unsafe { sys::plasmite_lite3_verify_json(self.bytes.as_ptr(), self.bytes.len(), 0) } {
             0 | 1 => Ok(()),
             _ => Err(Error::new(ErrorKind::Corrupt).with_message("invalid lite3 message view")),
@@ -468,6 +474,12 @@ pub fn encode_message(meta_tags: &[String], data: &Value) -> Result<Lite3Buf, Er
 
 pub fn validate_bytes(buf: &[u8]) -> Result<(), Error> {
     Lite3DocRef::new(buf).validate()
+}
+
+pub(crate) fn validate_feed_bytes(buf: &[u8]) -> Result<(), Error> {
+    let doc = Lite3DocRef::new(buf);
+    let data = doc.validate_shape(ErrorKind::Usage)?;
+    doc.validate_readability_at(data)
 }
 
 fn c_key(key: &str) -> Result<CString, Error> {
@@ -778,6 +790,32 @@ mod tests {
                     "{prefix:x?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn long_ascii_runs_still_validate_multibyte_boundaries() {
+        for offset in [7, 8, 31, 32, 39, 40, 63, 64, 95, 96] {
+            let text = format!("{}🜁{}", "x".repeat(offset), "y".repeat(128 - offset));
+            let encoded = encode_message(&[], &json!({"text": text})).unwrap();
+            let mut bytes = encoded.as_slice().to_vec();
+            let data = Lite3DocRef::new(&bytes).key_offset("data").unwrap();
+            assert!(
+                Lite3DocRef::new(&bytes)
+                    .validate_readability_at(data)
+                    .is_ok()
+            );
+            let marker = "🜁".as_bytes();
+            let start = bytes
+                .windows(marker.len())
+                .position(|p| p == marker)
+                .unwrap();
+            bytes[start + 1] = 0xff;
+            assert!(
+                Lite3DocRef::new(&bytes)
+                    .validate_readability_at(data)
+                    .is_err()
+            );
         }
     }
 

@@ -77,11 +77,11 @@ Cookie contains `expires_ms` (server monotonic time) and `mac` (base64url,
 without padding, HMAC-SHA256). CHALLENGE contains `cookie`.
 
 PROGRESS contains unsigned `start_seq`, `next_seq`, optional `end_seq`,
-`lease_ms`, boolean `terminal`, and boolean `retention_gap`. The start and
+`lease_ms`, and boolean `terminal`. The start and
 finite upper bound never change. Next sequence names records already attempted,
 not merely the current pool newest sequence. SKIP contains inclusive unsigned
 `first`, `last`, and `reason` (`oversized`, `retention`, or `pressure`). ERROR
-contains stable `kind` and `message`; disclose no local paths or secrets.
+contains stable `kind` and `message`. A `RetentionGap` error also contains unsigned `missing` and `next_seq`, with `0 < missing < next_seq`. Never include local paths or secrets.
 
 ## Subscription lifecycle
 
@@ -114,7 +114,7 @@ retry (one-second spacing, five-second deadline). Writes/DATA never retry.
 
 Renew every ten seconds using SUBSCRIBE without selection. Only an existing
 matching endpoint/ID extends a thirty-second lease. The server returns progress
-even for a quiet pool or completed finite stream. Client silence for thirty
+for a quiet pool and repeats terminal progress or a retained terminal error when the subscription has ended. Client silence for thirty
 seconds ends with Io. Drop/CLOSE sends one best-effort stop; lost close expires.
 No automatic reconnect or reuse of IDs across starts. Restart invalidates all
 subscriptions. Pool deletion/replacement ends with NotFound; no stream may
@@ -145,20 +145,11 @@ replay. No per-message acknowledgement or confirmation of complete delivery.
   it already accepted. DATA still in flight may go unread; completion gives
   no assurance of complete delivery. Add no grace period or repair exchange.
 
-Explicit oversized/pressure skips produce structured `udp-gap` notices and
-finite exit 1. Confirmed server retention gaps, including `retention_gap` in
-PROGRESS, produce finite exit 9. If only the retention flag arrives, report
-retention without inventing a sequence range. Live follows report server skips
-and continue.
-`--quiet-drops` suppresses notices without changing the exit result. A finite
-follow with terminal progress and no observed server skip/error exits 0, even
-if the network lost DATA or SKIP packets. Follow timeout retains its
-no-matching-output meaning (exit 124). An unavailable peer eventually produces
-Io. Unsupported remote follow options retain Usage errors.
+Explicit oversized/pressure skips produce structured `udp-skip` notices and cause a range fetch to exit 1. When the pool drops part of the selected range, the server sends a terminal `RetentionGap` error and repeats it in response to renewals. The reader reports it once and closes. CLI `fetch` exits 9. CLI `follow` reports the gap and opens a new subscription at `next_seq`.
 
-Public `Gap` event names and the CLI notice kind `udp-gap` are compatibility
-names for explicit server skips. The public/ABI `Unknown` reason remains reserved;
-SKIP packets must name `oversized`, `retention`, or `pressure`.
+A finite read with terminal progress and no observed server skip or error can still miss datagrams. A positional `fetch POOL SEQ` only succeeds if it receives that sequence. An unavailable peer eventually produces `Io`.
+
+The public `Skip` event describes a server skip. The public and C `Unknown` reason remains reserved. A `retention` SKIP conveys a retention error with `missing = first` and `next_seq = last + 1`.
 
 ## Resource and shutdown rules
 
