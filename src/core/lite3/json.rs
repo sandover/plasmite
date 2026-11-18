@@ -1,7 +1,9 @@
-//! Serialize a validated immutable Lite3 view without building an owned data tree.
+//! Convert validated Lite3 and parsed JSON values to JSON text or an owned tree.
 use super::{Lite3DocRef, ParsedJson, sys};
 use crate::core::error::{Error, ErrorKind};
+use base64::Engine as _;
 use serde::ser::{Error as _, Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde_json::{Map, Number, Value};
 
 #[derive(Clone, Copy)]
 enum Source<'a> {
@@ -42,6 +44,120 @@ impl<'a> JsonValue<'a> {
             offset: unsafe { sys::plasmite_json_root(doc.ptr.as_ptr()) },
         }
     }
+    /// Check the subtree and its counts before using them to allocate an owned value.
+    pub(crate) fn decode(doc: Lite3DocRef<'a>, offset: usize) -> Result<Value, Error> {
+        if unsafe {
+            sys::plasmite_lite3_verify_json_counts(doc.bytes().as_ptr(), doc.bytes().len(), offset)
+        } < 0
+        {
+            return Err(corrupt("failed to decode lite3"));
+        }
+        unsafe { Self::from_validated(doc, offset) }.to_owned_value()
+    }
+
+    fn to_owned_value(&self) -> Result<Value, Error> {
+        let Source::Lite3(doc) = self.source else {
+            unreachable!("direct decoding starts from Lite3");
+        };
+        let bytes = &doc.bytes()[self.offset..];
+        let kind = bytes[0];
+        // The checked walk guarantees the scalar span. Lite3 stores a
+        // one-byte type followed by the native-endian scalar payload.
+        Ok(match kind {
+            sys::LITE3_TYPE_NULL => Value::Null,
+            sys::LITE3_TYPE_BOOL => match bytes[1] {
+                0 => Value::Bool(false),
+                1 => Value::Bool(true),
+                _ => return Err(corrupt("invalid JSON boolean")),
+            },
+            sys::LITE3_TYPE_I64 => value_i64(bytes),
+            sys::LITE3_TYPE_F64 => Value::Number(
+                Number::from_f64(f64::from_ne_bytes(number_bytes(bytes)))
+                    .ok_or_else(|| corrupt("invalid JSON number"))?,
+            ),
+            sys::LITE3_TYPE_STRING => {
+                let value = self.view();
+                let bytes =
+                    unsafe { std::slice::from_raw_parts(value.text.cast::<u8>(), value.text_len) };
+                // The validation pass checked these immutable bytes.
+                Value::String(unsafe { std::str::from_utf8_unchecked(bytes) }.to_owned())
+            }
+            sys::LITE3_TYPE_BYTES => {
+                let value = self.view();
+                let bytes =
+                    unsafe { std::slice::from_raw_parts(value.text.cast::<u8>(), value.text_len) };
+                Value::String(base64::engine::general_purpose::STANDARD.encode(bytes))
+            }
+            sys::LITE3_TYPE_ARRAY => {
+                let entries = self.entries()?;
+                let mut array = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    let bytes = &doc.bytes()[entry.offset..];
+                    let child = if bytes[0] == sys::LITE3_TYPE_I64 {
+                        value_i64(bytes)
+                    } else {
+                        self.child(entry.offset).to_owned_value()?
+                    };
+                    array.push(child);
+                }
+                Value::Array(array)
+            }
+            sys::LITE3_TYPE_OBJECT => {
+                let mut object = Map::new();
+                for entry in self.entries()? {
+                    // Insertion in stored order gives duplicate names the same
+                    // last-wins behavior as parsing the exported JSON text.
+                    object.insert(
+                        entry_key(&entry).to_owned(),
+                        self.child(entry.offset).to_owned_value()?,
+                    );
+                }
+                Value::Object(object)
+            }
+            _ => return Err(corrupt("invalid JSON value")),
+        })
+    }
+
+    fn child(&self, offset: usize) -> Self {
+        Self {
+            source: self.source,
+            offset,
+        }
+    }
+
+    fn entries(&self) -> Result<Vec<sys::Entry>, Error> {
+        let count = match self.source {
+            Source::Lite3(doc) => doc.count_at(self.offset)? as usize,
+            Source::Parsed(_) => unsafe { sys::plasmite_json_count(self.offset) },
+        };
+        let bound = match self.source {
+            Source::Lite3(doc) => doc.bytes().len(),
+            Source::Parsed(doc) => doc.values,
+        };
+        if count > bound {
+            return Err(corrupt("invalid collection count"));
+        }
+        let mut entries = vec![sys::Entry::default(); count];
+        let ret = unsafe {
+            match self.source {
+                Source::Lite3(doc) => sys::plasmite_lite3_entries(
+                    doc.bytes().as_ptr(),
+                    doc.bytes().len(),
+                    self.offset,
+                    entries.as_mut_ptr(),
+                    count,
+                ),
+                Source::Parsed(_) => {
+                    sys::plasmite_json_entries(self.offset, entries.as_mut_ptr(), count)
+                }
+            }
+        };
+        if ret < 0 {
+            return Err(corrupt("invalid collection"));
+        }
+        Ok(entries)
+    }
+
     fn view(&self) -> sys::ValueView {
         let mut value = sys::ValueView::default();
         unsafe {
@@ -84,67 +200,27 @@ impl Serialize for JsonValue<'_> {
                 serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(text) })
             }
             sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY => {
-                let count = match self.source {
-                    Source::Lite3(doc) => {
-                        doc.count_at(self.offset).map_err(S::Error::custom)? as usize
-                    }
-                    Source::Parsed(_) => unsafe { sys::plasmite_json_count(self.offset) },
-                };
-                let bound = match self.source {
-                    Source::Lite3(doc) => doc.bytes().len(),
-                    Source::Parsed(doc) => doc.values,
-                };
-                if count > bound {
-                    return Err(S::Error::custom("invalid collection count"));
-                }
-                let mut entries = vec![sys::Entry::default(); count];
-                let ret = unsafe {
-                    match self.source {
-                        Source::Lite3(doc) => sys::plasmite_lite3_entries(
-                            doc.bytes().as_ptr(),
-                            doc.bytes().len(),
-                            self.offset,
-                            entries.as_mut_ptr(),
-                            count,
-                        ),
-                        Source::Parsed(_) => {
-                            sys::plasmite_json_entries(self.offset, entries.as_mut_ptr(), count)
-                        }
-                    }
-                };
-                if ret < 0 {
-                    return Err(S::Error::custom("invalid collection"));
-                }
-                let child = |offset| Self {
-                    source: self.source,
-                    offset,
-                };
+                let mut entries = self.entries().map_err(S::Error::custom)?;
+                let count = entries.len();
                 if value.kind == sys::LITE3_TYPE_ARRAY {
                     let mut array = serializer.serialize_seq(Some(count))?;
                     for entry in entries {
-                        array.serialize_element(&child(entry.offset))?;
+                        array.serialize_element(&self.child(entry.offset))?;
                     }
                     array.end()
                 } else {
-                    let key = |entry: &sys::Entry| {
-                        let bytes = unsafe {
-                            std::slice::from_raw_parts(entry.key.cast::<u8>(), entry.key_len)
-                        };
-                        // Full validation checked UTF-8 and the terminated key.
-                        unsafe { std::str::from_utf8_unchecked(bytes) }
-                    };
                     // Stable sort retains native iteration order for duplicate
                     // keys; serde's Value parser keeps the last occurrence.
-                    entries.sort_by(|a, b| key(a).cmp(key(b)));
+                    entries.sort_by(|a, b| entry_key(a).cmp(entry_key(b)));
                     let mut object = serializer.serialize_map(None)?;
                     for (index, entry) in entries.iter().enumerate() {
                         if entries
                             .get(index + 1)
-                            .is_some_and(|next| key(entry) == key(next))
+                            .is_some_and(|next| entry_key(entry) == entry_key(next))
                         {
                             continue;
                         }
-                        object.serialize_entry(key(entry), &child(entry.offset))?;
+                        object.serialize_entry(entry_key(entry), &self.child(entry.offset))?;
                     }
                     object.end()
                 }
@@ -152,6 +228,24 @@ impl Serialize for JsonValue<'_> {
             _ => Err(S::Error::custom("invalid JSON value")),
         }
     }
+}
+
+fn corrupt(message: &'static str) -> Error {
+    Error::new(ErrorKind::Corrupt).with_message(message)
+}
+
+fn number_bytes(bytes: &[u8]) -> [u8; 8] {
+    bytes[1..9].try_into().expect("checked Lite3 number")
+}
+
+fn value_i64(bytes: &[u8]) -> Value {
+    Value::Number(i64::from_ne_bytes(number_bytes(bytes)).into())
+}
+
+fn entry_key(entry: &sys::Entry) -> &str {
+    let bytes = unsafe { std::slice::from_raw_parts(entry.key.cast::<u8>(), entry.key_len) };
+    // Both sources hold checked, immutable UTF-8 keys during traversal.
+    unsafe { std::str::from_utf8_unchecked(bytes) }
 }
 
 #[cfg(test)]

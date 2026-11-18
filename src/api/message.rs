@@ -1296,10 +1296,16 @@ std::thread_local! {
 fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
     let doc = Lite3DocRef::new(payload);
     let meta = decode_meta(doc)?;
-    let json = data_json(doc)?;
+    let offset = doc
+        .key_offset("data")
+        .map_err(|err| err.with_message("missing data"))?;
+    // Keep the exporter as the fallback for stored documents outside the direct
+    // reader's checks or whose collection counts cannot drive direct traversal.
+    let data = crate::core::lite3::JsonValue::decode(doc, offset).or_else(|_| {
+        serde_json::from_str(&doc.to_json_at(offset, false)?).map_err(payload_json_error)
+    })?;
     #[cfg(test)]
     DATA_TREE_DECODES.with(|count| count.set(count.get() + 1));
-    let data = serde_json::from_str(&json).map_err(payload_json_error)?;
     Ok((meta, data))
 }
 
@@ -1356,6 +1362,7 @@ fn validate_data(doc: Lite3DocRef<'_>) -> Result<(), Error> {
     doc.validate_readability_at(ofs)
 }
 
+#[cfg(test)]
 fn data_json(doc: Lite3DocRef<'_>) -> Result<String, Error> {
     let data_ofs = doc
         .key_offset("data")
@@ -1828,14 +1835,94 @@ mod tests {
     }
 
     #[test]
-    fn decode_payload_avoids_full_doc_json() {
+    fn direct_decode_matches_json_export_and_reparse() {
+        use super::{data_json, payload_json_error};
+        use crate::core::lite3::{Lite3Buf, Lite3DocRef, sys};
+        use serde_json::Value;
+
+        fn compare(bytes: &[u8]) {
+            let legacy = data_json(Lite3DocRef::new(bytes))
+                .and_then(|json| serde_json::from_str::<Value>(&json).map_err(payload_json_error));
+            let direct = decode_payload(bytes).map(|(_, data)| data);
+            match (legacy, direct) {
+                (Ok(left), Ok(right)) => assert_eq!(
+                    serde_json::to_vec(&left).unwrap(),
+                    serde_json::to_vec(&right).unwrap()
+                ),
+                (Err(left), Err(right)) => assert_eq!(left.kind(), right.kind()),
+                pair => panic!("decode mismatch: {pair:?}"),
+            }
+        }
+
+        for data in [
+            json!([]),
+            json!({}),
+            json!({"case": [null, true, i64::MIN, i64::MAX, -0.0f64, 1.0f64]}),
+            json!({"float": [2.027716612057172e155, f64::MIN_POSITIVE, f64::MAX]}),
+            json!({"caption": "Unicode 温度 and NUL\0 and quote\"", "array": (0..1000).collect::<Vec<_>>()}),
+            json!({"text": "a".repeat(32768)}),
+            json!(42),
+        ] {
+            let input = json!({"meta":{"tags":["room"]},"data":data}).to_string();
+            let bytes = Lite3Buf::from_json_str(&input).unwrap();
+            compare(bytes.as_slice());
+        }
+        let encoded = encode_message(&[], &json!({"string":"utf8-probe-你好"})).unwrap();
+        let data = encoded.as_doc().key_offset("data").unwrap();
+        let string = encoded.as_doc().key_offset_at(data, "string").unwrap();
+        let mut binary = encoded.as_slice().to_vec();
+        binary[string] = sys::LITE3_TYPE_BYTES;
+        compare(&binary);
+        let mut invalid = encoded.as_slice().to_vec();
+        let i = invalid
+            .windows(10)
+            .position(|bytes| bytes == b"utf8-probe")
+            .unwrap();
+        invalid[i] = 0xff;
+        compare(&invalid);
+
+        // The legacy exporter walks the tree even if its declared count is
+        // wrong. Preserve the result without allocating from that count.
+        let mut bad_count = encoded.as_slice().to_vec();
+        let count_offset = data + 32;
+        let word = u32::from_le_bytes(
+            bad_count[count_offset..count_offset + 4]
+                .try_into()
+                .unwrap(),
+        );
+        bad_count[count_offset..count_offset + 4]
+            .copy_from_slice(&(word | (1 << 20)).to_le_bytes());
+        reset_json_counters();
+        let decoded = decode_payload(&bad_count).unwrap();
+        assert_eq!(decoded.1, json!({"string":"utf8-probe-你好"}));
+        assert_eq!(json_counter_snapshot(), (0, 1));
+        compare(&bad_count);
+
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("v1.3.plasmite");
+        std::fs::write(
+            &path,
+            include_bytes!("../../tests/fixtures/pool-v1.3.0.plasmite"),
+        )
+        .unwrap();
+        let pool = Pool::open(&path).unwrap();
+        let mut total = 0;
+        for result in pool.fetch_lite3(super::Read::new()).unwrap() {
+            compare(&result.unwrap().payload);
+            total += 1;
+        }
+        assert!(total > 0);
+    }
+
+    #[test]
+    fn decode_payload_avoids_json_text() {
         let data = json!({"x": 1});
         let payload = encode_message(&["tag".to_string()], &data).expect("encode");
         reset_json_counters();
         let _ = decode_payload(payload.as_slice()).expect("decode");
         let (full, partial) = json_counter_snapshot();
         assert_eq!(full, 0);
-        assert_eq!(partial, 1);
+        assert_eq!(partial, 0);
     }
 
     #[test]

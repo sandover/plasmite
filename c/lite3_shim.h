@@ -18,6 +18,7 @@ extern "C" {
 
 /* Check JSON readability without export; 1 reports native bytes needing base64. */
 int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs);
+int plasmite_lite3_verify_json_counts(const unsigned char *buf, size_t len, size_t ofs);
 
 /* Private borrowed views. First verify the immutable tree with verify_json >= 0;
  * offsets must come from that root or its entries. Pointers borrow buf.

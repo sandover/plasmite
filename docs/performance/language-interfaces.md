@@ -152,6 +152,31 @@ record from a consistent opening snapshot. With 64 quiet cancellable HTTP
 readers, the client used two native threads and 6.9 MiB of resident memory,
 down from 65 threads and 13.2 MiB. All readers still close on cancellation.
 
+### Direct decoding and view validation
+
+Local Rust message reads build the owned result from checked Lite3 values.
+They keep the previous exporter as a fallback when the direct path cannot
+read a legacy document. View validation remembers the checked node at each
+tree depth during the walk and still checks every key and value.
+
+Seven interleaved release-build runs against `4c0938b` gave these medians
+using `bench_view_streams local`. Both builds ran on the same Apple Silicon
+Mac. The x64 binaries ran through Rosetta. Times are µs per message and include
+reading the record from the pool.
+
+| Workload | ARM64 before → after | x64 before → after |
+| --- | ---: | ---: |
+| Decode a message with 32 KB of text | 10.00 → 3.53 | 11.89 → 4.65 |
+| Decode a wide object | 18.17 → 14.65 | 40.97 → 35.45 |
+| Decode a 1,000-element integer array | 24.06 → 14.06 | 34.81 → 22.00 |
+| Open a wide view and read one field | 4.71 → 4.04 | 7.59 → 6.41 |
+
+Use the `json` lane with the `long`, `wide`, and `array` fixtures and
+`view_selected` with `wide`. The raw array control and small selected views
+had overlapping timing ranges. Compatibility checks compare decoded values
+and errors with the previous JSON round trip, including the stored 1.3.0
+fixture, exact floats, native bytes, and a legacy count mismatch.
+
 ## Integration checks
 
 The pre-2.0 owned-view checkpoint passed `just check` and

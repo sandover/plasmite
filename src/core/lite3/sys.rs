@@ -101,6 +101,11 @@ unsafe extern "C" {
     ) -> c_int;
     pub(crate) fn plasmite_lite3_value_view(buf: *const u8, ofs: usize, out: *mut ValueView);
     pub fn plasmite_lite3_verify_json(buf: *const c_uchar, len: usize, ofs: usize) -> c_int;
+    pub(crate) fn plasmite_lite3_verify_json_counts(
+        buf: *const c_uchar,
+        len: usize,
+        ofs: usize,
+    ) -> c_int;
     pub fn plasmite_lite3_json_parse(
         json: *const c_char,
         len: usize,
