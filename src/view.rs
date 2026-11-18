@@ -276,7 +276,7 @@ impl<'a> ValueRef<'a> {
         self.offset
     }
     pub fn kind(self) -> u8 {
-        self.owner.node(self.offset).kind
+        self.owner.bytes()[self.offset]
     }
     pub fn get(self, key: &str) -> Result<Option<Self>, Error> {
         if self.kind() != sys::LITE3_TYPE_OBJECT {
@@ -378,11 +378,17 @@ impl<'a> ValueRef<'a> {
             .collect())
     }
     pub fn integer(self) -> Option<i64> {
-        matches!(self.kind(), sys::LITE3_TYPE_I64 | sys::LITE3_TYPE_BOOL)
-            .then(|| self.owner.node(self.offset).integer)
+        let bytes = &self.owner.bytes()[self.offset..];
+        match bytes[0] {
+            sys::LITE3_TYPE_I64 => Some(i64::from_ne_bytes(bytes[1..9].try_into().unwrap())),
+            sys::LITE3_TYPE_BOOL => Some(i64::from(bytes[1] != 0)),
+            _ => None,
+        }
     }
     pub fn real(self) -> Option<f64> {
-        (self.kind() == sys::LITE3_TYPE_F64).then(|| self.owner.node(self.offset).real)
+        let bytes = &self.owner.bytes()[self.offset..];
+        (bytes[0] == sys::LITE3_TYPE_F64)
+            .then(|| f64::from_ne_bytes(bytes[1..9].try_into().unwrap()))
     }
     pub fn text(self) -> Option<&'a str> {
         (self.kind() == sys::LITE3_TYPE_STRING)

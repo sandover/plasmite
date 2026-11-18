@@ -27,6 +27,20 @@ impl<'a> JsonValue<'a> {
             _ => Err(Error::new(ErrorKind::Corrupt).with_message("failed to decode lite3")),
         }
     }
+    pub(crate) fn for_stream(doc: Lite3DocRef<'a>, offset: usize) -> Result<Self, Error> {
+        match unsafe {
+            sys::plasmite_lite3_verify_json(doc.bytes().as_ptr(), doc.bytes().len(), offset)
+        } {
+            0 => {}
+            // The raw-stream path also calls the exporter on native bytes.
+            1 => {
+                doc.to_json_at(offset, false)?;
+            }
+            _ => return Err(corrupt("failed to decode lite3")),
+        }
+        Ok(unsafe { Self::from_validated(doc, offset) })
+    }
+
     /// Format a node whose immutable owner established whole-frame readability.
     ///
     /// # Safety

@@ -24,8 +24,6 @@ pub use crate::core::pool::{
 };
 pub use crate::core::ring_layout::{FrameSpan, RingLayout};
 pub use client::{DEFAULT_POOL_SIZE, LocalClient, PoolRef};
-#[doc(hidden)]
-pub use message::message_json_from_frame;
 pub use message::{
     Feed, FeedInput, FeedReceipt, Follow, Lite3Follow, Message, Meta, Read, ReadPoll, Since,
     ViewFollow,
@@ -36,6 +34,8 @@ pub(crate) use message::{
     PoolApiExt, TailOutcome, TailState, format_ts, message_from_udp_payload, now_ns,
     select_lite3_frame,
 };
+#[doc(hidden)]
+pub use message::{ReadStatus, message_json_from_frame};
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Read, RemotePool, RemoteRead};
 #[cfg(test)]
 pub(crate) use udp::UdpStart as FollowStart;

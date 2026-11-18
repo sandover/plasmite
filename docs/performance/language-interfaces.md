@@ -177,6 +177,35 @@ had overlapping timing ranges. Compatibility checks compare decoded values
 and errors with the previous JSON round trip, including the stored 1.3.0
 fixture, exact floats, native bytes, and a legacy count mismatch.
 
+### Direct writes, HTTP JSON and view field reads
+
+Rust `Pool::feed` writes native values with the private Lite3 builder. It
+matches the legacy encoder's generation counter by discounting buffer growth
+retries when it seals the message. Values outside the private writer's
+domain still use the legacy encoder. HTTP JSON reads check the payload once,
+then format directly from that checked snapshot. Validated views read scalar
+fields from their stored bytes.
+
+These medians compare optimized builds against `a2a2e8c` on the same Apple
+Silicon Mac. The x64 builds ran through Rosetta.
+
+| Workload | Before → after |
+| --- | ---: |
+| Feed a message with 32 KB of text, ARM64 | 21.25 → 6.48 µs |
+| Feed a 1,000-integer message, ARM64 | 61.52 → 36.01 µs |
+| Feed a message with 32 KB of text, x64 | 26.43 → 10.39 µs |
+| Feed a 1,000-integer message, x64 | 88.71 → 53.10 µs |
+| Fetch 2,400 wide messages as HTTP JSON over loopback | 38.24 → 31.30 ms |
+| Fetch 2,000 integer-array messages as HTTP JSON over loopback | 53.68 → 42.18 ms |
+| Sum 1,000 integers from an open view, ARM64 | 10.26 → 8.70 µs |
+
+Feed timing includes the append and complete receipt for 3,000 writes per
+run. The view result uses the `view_array_cursor` lane of
+`bench_owned_views`. The HTTP runs verify the full response, including its
+ending, against the baseline. Feed and HTTP results use seven measured runs per
+build. The view result uses six. Small writes and HTTP reads with a tag that
+matches no records had overlapping timing ranges.
+
 ## Integration checks
 
 The pre-2.0 owned-view checkpoint passed `just check` and

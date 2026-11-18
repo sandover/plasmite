@@ -4,7 +4,7 @@ use super::*;
 use crate::interface_wire::{
     LITE3_CONTROL_RECORD, LITE3_MESSAGE_ID_LEN, LITE3_MESSAGE_RECORD, encode_lite3_record_header,
 };
-use plasmite::api::{Read, ReadPoll, Since};
+use plasmite::api::{Read, ReadStatus, Since};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -269,25 +269,27 @@ impl ReadWorker {
                 self.cutoff(reader.position());
                 return;
             }
-            match reader.poll(wait.min(Duration::from_millis(50))) {
-                Ok(ReadPoll::Message(frame)) => match self.frame(frame) {
-                    Ok(bytes) if !self.revoked() => {
-                        if self.send.try_send(bytes).is_err() {
-                            return;
-                        }
+            let wait = wait.min(Duration::from_millis(50));
+            let record = if self.binary {
+                reader.poll(wait).map(|poll| poll.map(encode_binary_frame))
+            } else {
+                reader.poll_json(wait)
+            };
+            match record {
+                Ok(ReadStatus::Message(mut bytes)) => {
+                    if !self.binary {
+                        bytes.push(b'\n');
                     }
-                    Ok(_) => {}
-                    Err(error) => {
-                        self.error(&error);
+                    if !self.revoked() && self.send.try_send(bytes.into()).is_err() {
                         return;
                     }
-                },
-                Ok(ReadPoll::Waiting) => {}
-                Ok(ReadPoll::Complete) => {
+                }
+                Ok(ReadStatus::Waiting) => {}
+                Ok(ReadStatus::Complete) => {
                     self.control(json!({"type":"complete"}));
                     return;
                 }
-                Ok(ReadPoll::Cancelled) => return,
+                Ok(ReadStatus::Cancelled) => return,
                 Err(error) => {
                     self.error(&error);
                     return;
@@ -300,22 +302,6 @@ impl ReadWorker {
         self.revoked
             .as_ref()
             .is_some_and(|revoked| revoked.load(Ordering::Acquire))
-    }
-
-    fn frame(&self, frame: plasmite::api::FrameRef) -> Result<Bytes, Error> {
-        if !self.binary {
-            let mut bytes = plasmite::api::message_json_from_frame(&frame)?;
-            bytes.push(b'\n');
-            return Ok(bytes.into());
-        }
-        let length = u32::try_from(frame.payload.len() + LITE3_MESSAGE_ID_LEN)
-            .expect("a stored frame fits a record length");
-        let mut bytes = Vec::with_capacity(length as usize + 5);
-        bytes.extend_from_slice(&encode_lite3_record_header(LITE3_MESSAGE_RECORD, length));
-        bytes.extend_from_slice(&frame.seq.to_be_bytes());
-        bytes.extend_from_slice(&frame.time.to_be_bytes());
-        bytes.extend_from_slice(&frame.payload);
-        Ok(bytes.into())
     }
 
     fn cutoff(&self, position: (Option<u64>, Option<u64>)) {
@@ -338,6 +324,17 @@ impl ReadWorker {
     fn control(&self, record: Value) {
         let _ = self.send.try_send(encode_control(self.binary, record));
     }
+}
+
+fn encode_binary_frame(frame: plasmite::api::FrameRef) -> Vec<u8> {
+    let length = u32::try_from(frame.payload.len() + LITE3_MESSAGE_ID_LEN)
+        .expect("a stored frame fits a record length");
+    let mut bytes = Vec::with_capacity(length as usize + 5);
+    bytes.extend_from_slice(&encode_lite3_record_header(LITE3_MESSAGE_RECORD, length));
+    bytes.extend_from_slice(&frame.seq.to_be_bytes());
+    bytes.extend_from_slice(&frame.time.to_be_bytes());
+    bytes.extend_from_slice(&frame.payload);
+    bytes
 }
 
 fn encode_control(binary: bool, record: Value) -> Bytes {

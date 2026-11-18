@@ -17,6 +17,20 @@ impl MessageView {
     }
     /// Encode native data once. Storage assigns sequence/time when appending.
     pub fn encode<T: Serialize + ?Sized>(data: &T, tags: &[&str]) -> Result<Self, Error> {
+        // The writer checks shape, depth, and numbers. Text is UTF-8 and the
+        // native setters preserve unique keys.
+        unsafe { Self::build(data, tags)?.finish_proven() }
+    }
+
+    pub(crate) fn encode_legacy_value(
+        data: &serde_json::Value,
+        tags: &[&str],
+    ) -> Result<Self, Error> {
+        // Use the same checked writer with the legacy generation convention.
+        unsafe { Self::build(data, tags)?.finish_legacy() }
+    }
+
+    fn build<T: Serialize + ?Sized>(data: &T, tags: &[&str]) -> Result<Builder, Error> {
         let mut builder = Builder::new_without_data(tags)?;
         data.serialize(Writer {
             builder: &mut builder,
@@ -25,9 +39,7 @@ impl MessageView {
             depth: 1,
         })
         .map_err(|e| Error::new(ErrorKind::Usage).with_message(e.to_string()))?;
-        // Writer enforces the root shape and depth before insertion; Rust text
-        // is UTF-8, numbers are checked, and native setters keep unique keys.
-        unsafe { builder.finish_proven() }
+        Ok(builder)
     }
 }
 impl Serialize for ValueRef<'_> {

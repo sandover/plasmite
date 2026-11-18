@@ -947,15 +947,30 @@ impl Lite3Follow<'_> {
     /// Poll the reader without moving its end boundary or imposing a stream timeout.
     #[doc(hidden)]
     pub fn poll(&mut self, wait: Duration) -> Result<ReadPoll, Error> {
-        let result = self
-            .0
-            .state
-            .next_wait(self.0.pool, Some(wait), select_lite3_frame);
+        Ok(match self.poll_selected(wait, select_lite3_frame)? {
+            ReadStatus::Message(frame) => ReadPoll::Message(frame),
+            ReadStatus::Waiting => ReadPoll::Waiting,
+            ReadStatus::Complete => ReadPoll::Complete,
+            ReadStatus::Cancelled => ReadPoll::Cancelled,
+        })
+    }
+
+    #[doc(hidden)]
+    pub fn poll_json(&mut self, wait: Duration) -> Result<ReadStatus<Vec<u8>>, Error> {
+        self.poll_selected(wait, |frame, required| frame_json(&frame, Some(required)))
+    }
+
+    fn poll_selected<T>(
+        &mut self,
+        wait: Duration,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<ReadStatus<T>, Error> {
+        let result = self.0.state.next_wait(self.0.pool, Some(wait), select);
         match result {
-            Ok(TailOutcome::Item(frame)) => Ok(ReadPoll::Message(frame)),
-            Ok(TailOutcome::WaitExpired) => Ok(ReadPoll::Waiting),
-            Ok(TailOutcome::Finished) => Ok(ReadPoll::Complete),
-            Ok(TailOutcome::Cancelled) => Ok(ReadPoll::Cancelled),
+            Ok(TailOutcome::Item(frame)) => Ok(ReadStatus::Message(frame)),
+            Ok(TailOutcome::WaitExpired) => Ok(ReadStatus::Waiting),
+            Ok(TailOutcome::Finished) => Ok(ReadStatus::Complete),
+            Ok(TailOutcome::Cancelled) => Ok(ReadStatus::Cancelled),
             Err(err) => {
                 self.0.state.terminated = true;
                 Err(err)
@@ -976,6 +991,26 @@ pub enum ReadPoll {
     Waiting,
     Complete,
     Cancelled,
+}
+
+#[doc(hidden)]
+pub enum ReadStatus<T> {
+    Message(T),
+    Waiting,
+    Complete,
+    Cancelled,
+}
+
+impl ReadPoll {
+    #[doc(hidden)]
+    pub fn map<T>(self, f: impl FnOnce(FrameRef) -> T) -> ReadStatus<T> {
+        match self {
+            Self::Message(frame) => ReadStatus::Message(f(frame)),
+            Self::Waiting => ReadStatus::Waiting,
+            Self::Complete => ReadStatus::Complete,
+            Self::Cancelled => ReadStatus::Cancelled,
+        }
+    }
 }
 
 pub(crate) fn select_lite3_frame(
@@ -1206,8 +1241,16 @@ impl PoolApiExt for Pool {
         tags: &[String],
         options: AppendOptions,
     ) -> Result<Message, Error> {
-        let payload = crate::core::lite3::encode_message(tags, data)?;
-        let seq = self.append_with_options(payload.as_slice(), options)?;
+        let labels: Vec<_> = tags.iter().map(String::as_str).collect();
+        let seq = match crate::view::MessageView::encode_legacy_value(data, &labels) {
+            Ok(view) => self.append_with_options(view.bytes(), options)?,
+            Err(_) => {
+                // The older JSON encoder also accepts values outside the
+                // native view writer's domain, including large unsigned ints.
+                let payload = crate::core::lite3::encode_message(tags, data)?;
+                self.append_with_options(payload.as_slice(), options)?
+            }
+        };
         Ok(Message {
             seq,
             time: options.timestamp_ns,
@@ -1262,6 +1305,10 @@ pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
 /// Produce the existing wire envelope while borrowing data from this owned frame.
 #[doc(hidden)]
 pub fn message_json_from_frame(frame: &FrameRef) -> Result<Vec<u8>, Error> {
+    frame_json(frame, None).map(|bytes| bytes.expect("unfiltered JSON"))
+}
+
+fn frame_json(frame: &FrameRef, required: Option<&[String]>) -> Result<Option<Vec<u8>>, Error> {
     let doc = Lite3DocRef::new(&frame.payload);
     let (tags_offset, count) = meta_tags(doc)?;
     let mut tags = Vec::with_capacity(count as usize);
@@ -1271,10 +1318,20 @@ pub fn message_json_from_frame(frame: &FrameRef) -> Result<Vec<u8>, Error> {
     let offset = doc
         .key_offset("data")
         .map_err(|err| err.with_message("missing data"))?;
-    let data = crate::core::lite3::JsonValue::new(doc, offset)?;
+    let data = if let Some(required) = required {
+        let data = crate::core::lite3::JsonValue::for_stream(doc, offset)?;
+        if !required.iter().all(|tag| tags.contains(&tag.as_str())) {
+            return Ok(None);
+        }
+        data
+    } else {
+        crate::core::lite3::JsonValue::new(doc, offset)?
+    };
     let wire =
         crate::interface_wire::MessageWire::new(frame.seq, format_ts(frame.time)?, tags, data);
-    serde_json::to_vec(&wire).map_err(payload_json_error)
+    serde_json::to_vec(&wire)
+        .map(Some)
+        .map_err(payload_json_error)
 }
 
 pub(crate) fn message_from_udp_payload(
@@ -1923,6 +1980,76 @@ mod tests {
         let (full, partial) = json_counter_snapshot();
         assert_eq!(full, 0);
         assert_eq!(partial, 0);
+    }
+
+    #[test]
+    fn native_feed_preserves_legacy_encoded_bytes() {
+        let dir = tempdir().unwrap();
+        let mut pool =
+            Pool::create(dir.path().join("feed.plasmite"), PoolOptions::new(262144)).unwrap();
+        let tags = vec!["room".to_owned(), "温度\0sensor".to_owned()];
+        let labels: Vec<_> = tags.iter().map(String::as_str).collect();
+        let wide = (0..200)
+            .map(|n| (format!("item_{n}"), json!([n, true, null, "温度"])))
+            .collect::<serde_json::Map<_, _>>();
+        for data in [
+            json!({"reading":1,"signed":[i64::MIN,i64::MAX,-0.0,-3.25],"tag":"a\0b"}),
+            json!({"values": (0..1000).collect::<Vec<_>>() }),
+            json!({"text": "x".repeat(32000), "nested": wide }),
+            json!({"legacy_unsigned": u64::MAX}),
+            json!({"legacy\0key": 12}),
+        ] {
+            let expected = encode_message(&tags, &data);
+            let receipt = pool.feed(&data, super::Feed::new().tags(tags.clone()));
+            match (expected, receipt) {
+                (Ok(expected), Ok(receipt)) => {
+                    if let Ok(view) = crate::view::MessageView::encode_legacy_value(&data, &labels)
+                    {
+                        assert_eq!(view.bytes(), expected.as_slice(), "{data}");
+                    }
+                    assert_eq!(receipt.data, data);
+                    assert_eq!(pool.get(receipt.seq).unwrap().payload, expected.as_slice());
+                }
+                (Err(expected), Err(error)) => {
+                    assert_eq!(error.kind(), expected.kind());
+                    assert_eq!(error.message(), expected.message());
+                }
+                pair => panic!("feed compatibility mismatch for {data}: {pair:?}"),
+            }
+        }
+        // Ensure the ordinary path reaches the direct writer.
+        assert!(
+            crate::view::MessageView::encode_legacy_value(&json!({"ok":true}), &labels).is_ok()
+        );
+    }
+
+    #[test]
+    fn json_poll_preserves_wire_bytes_and_checks_filtered_records() {
+        use super::{Read, ReadStatus, message_json_from_frame};
+        let dir = tempdir().unwrap();
+        let mut pool =
+            Pool::create(dir.path().join("http.plasmite"), PoolOptions::new(65536)).unwrap();
+        let encoded = encode_message(&["keep".to_owned()], &json!({"x":"tag-data-probe"})).unwrap();
+        let seq = pool.append_with_timestamp(encoded.as_slice(), 123).unwrap();
+        let expected = message_json_from_frame(&pool.get(seq).unwrap()).unwrap();
+        let mut json = pool.fetch_lite3(Read::new().tags(["keep"])).unwrap();
+        assert!(matches!(
+            json.poll_json(Duration::ZERO).unwrap(),
+            ReadStatus::Message(bytes) if bytes == expected
+        ));
+        drop(json);
+        let mut corrupt = encoded.as_slice().to_vec();
+        let offset = corrupt
+            .windows(14)
+            .position(|part| part == b"tag-data-probe")
+            .unwrap();
+        corrupt[offset] = 0xff;
+        pool.append_with_timestamp(&corrupt, 124).unwrap();
+        let mut filtered = pool.fetch_lite3(Read::new().tags(["absent"])).unwrap();
+        assert!(matches!(
+            filtered.poll_json(Duration::ZERO),
+            Err(error) if error.kind() == ErrorKind::Corrupt
+        ));
     }
 
     #[test]

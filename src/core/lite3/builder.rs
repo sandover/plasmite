@@ -10,6 +10,7 @@ pub(crate) struct Builder {
     pub data: usize,
     json_native_safe: bool,
     failed: bool,
+    growth_retries: u32,
 }
 impl Builder {
     pub fn new(tags: &[&str]) -> Result<Self, Error> {
@@ -24,6 +25,7 @@ impl Builder {
             data: 0,
             json_native_safe: true,
             failed: false,
+            growth_retries: 0,
         };
         b.put(usize::MAX, None, sys::ValueView::default())?;
         let meta = b.container(0, Some("meta"), false)?;
@@ -88,6 +90,7 @@ impl Builder {
                     .with_message("failed to build Lite3 value")
                     .with_source(std::io::Error::from_raw_os_error(errno)));
             }
+            self.growth_retries += 1;
             self.words
                 .resize((self.words.len() * 2).min(MAX_LITE3_BUF / 4), 0);
         }
@@ -213,6 +216,18 @@ impl Builder {
             self.seal()
         }
     }
+    /// Match the legacy encoder, which restarts from empty on buffer growth.
+    /// The private writer grows in place, so failed setters leave increments
+    /// in the high 24 bits of the root's generation/type word.
+    ///
+    /// # Safety
+    /// The caller must satisfy the construction proof for finish_proven.
+    pub(crate) unsafe fn finish_legacy(mut self) -> Result<MessageView, Error> {
+        self.check_failed()?;
+        self.words[0] = self.words[0].wrapping_sub(self.growth_retries << 8);
+        unsafe { self.finish_proven() }
+    }
+
     fn seal(self) -> Result<MessageView, Error> {
         self.check_failed()?;
         Ok(unsafe {
