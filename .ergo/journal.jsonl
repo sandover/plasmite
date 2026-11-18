@@ -1104,3 +1104,15 @@
 {"version":1,"task_id":"AJN6IX","kind":"result","at":"2026-11-17T22:16:53.646341Z","text":"Updated browser, examples, cookbook checks, and Windows workflow. Hosted CI remains."}
 {"version":1,"task_id":"ZJQFWJ","kind":"result","at":"2026-11-17T22:16:53.686031Z","text":"Updated the README, CLI guide, cookbook, serving guide, and recording. Brandon’s review remains."}
 {"version":1,"task_id":"T2QQ6P","kind":"result","at":"2026-11-17T22:16:53.721Z","text":"Both VMs passed before the final Node HTTP fix. Local retest passed. The locked Mac blocks the final VM repack."}
+{"version":1,"task_id":"MBDOON","kind":"created","at":"2026-11-18T17:23:03.511497Z"}
+{"version":1,"task_id":"QT4TZR","kind":"created","at":"2026-11-18T17:23:03.511514Z"}
+{"version":1,"task_id":"WDHKKQ","kind":"created","at":"2026-11-18T17:23:03.511518Z"}
+{"version":1,"task_id":"PU3I2X","kind":"created","at":"2026-11-18T17:23:03.51152Z"}
+{"version":1,"task_id":"PK2WTN","kind":"created","at":"2026-11-18T17:23:03.511523Z"}
+{"version":1,"task_id":"ZIU2PH","kind":"created","at":"2026-11-18T17:23:03.511525Z"}
+{"version":1,"task_id":"TKAGXH","kind":"created","at":"2026-11-18T17:23:03.511528Z"}
+{"version":1,"task_id":"K4YNA7","kind":"created","at":"2026-11-18T17:23:03.51153Z"}
+{"version":1,"task_id":"VJTFS6","kind":"created","at":"2026-11-18T17:23:03.511533Z"}
+{"version":1,"task_id":"HNEFLL","kind":"created","at":"2026-11-18T17:23:03.511536Z"}
+{"version":1,"task_id":"WVTZQO","kind":"created","at":"2026-11-18T17:23:03.51154Z"}
+{"version":1,"task_id":"CB5GMA","kind":"created","at":"2026-11-18T17:23:03.511544Z"}
