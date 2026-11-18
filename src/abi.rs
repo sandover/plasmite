@@ -1399,7 +1399,7 @@ fn read_state(
         .cancel(cancel.clone());
     let state = (|| match &handle.pool {
         PoolHandle::Local(source) => {
-            let pool = Box::new(Pool::open(source.path())?);
+            let pool = Box::new(source.reopen()?);
             let state = pool.read_state(options, live)?;
             Ok(StreamState::Local { pool, state })
         }

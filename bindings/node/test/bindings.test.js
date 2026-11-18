@@ -79,6 +79,39 @@ async function fillPast(pool, seq) {
   assert.fail(`sequence ${seq} remained retained after filling the pool`);
 }
 
+test("createPool preserves safe sizes wider than 32 bits", () => {
+  const size = 2 ** 32 + 65536;
+  const native = {
+    createPool(name, bytes) {
+      assert.equal(name, "events");
+      assert.equal(bytes, BigInt(size));
+      return {};
+    },
+  };
+  const client = { _inner: native };
+  assert.ok(Client.prototype.createPool.call(client, "events", size) instanceof Pool);
+  assert.throws(() => Client.prototype.createPool.call(client, "events", 2 ** 53),
+    { kind: ErrorKind.Usage });
+});
+
+test("an old pool handle cannot open a reader on its replacement", { skip: process.platform === "win32" }, async () => {
+  await withPool("events", async ({ client, pool, poolDir }) => {
+    await pool.feed({ name: "original" });
+    fs.renameSync(path.join(poolDir, "events.plasmite"), path.join(poolDir, "original.plasmite"));
+    const replacement = client.createPool("events", 2 * TEST_POOL_SIZE_BYTES);
+    try {
+      await replacement.feed({ name: "replacement" });
+      for (const open of [pool.follow, pool.fetch, pool.fetchLite3, pool.fetchView]) {
+        await assert.rejects(open.call(pool), { kind: ErrorKind.NotFound });
+      }
+      const reader = await replacement.fetch();
+      try {
+        assert.deepEqual((await reader.next()).value.data, { name: "replacement" });
+      } finally { reader.close(); }
+    } finally { replacement.close(); }
+  });
+});
+
 test("native output buffers and slices survive handle close and garbage collection", async () => {
   const script = `
 (async () => {
@@ -534,20 +567,10 @@ test("remote tail encodes tags as repeated tag query params", async () => {
 
   global.fetch = async (input) => {
     capturedUrl = new URL(String(input));
-    return {
-      ok: true,
-      status: 200,
-      body: new ReadableStream({
-        start(controller) {
-          controller.enqueue(
-            new TextEncoder().encode(
-              '{"seq":1,"time":"2026-01-01T00:00:00Z","meta":{"tags":["keep","prod"]},"data":{}}\n'
-            )
-          );
-          controller.close();
-        },
-      }),
-    };
+    return new Response(
+      '{"seq":1,"time":"2026-01-01T00:00:00Z","meta":{"tags":["keep","prod"]},"data":{}}\n',
+      { headers: { "Plasmite-Incarnation": "demo" } },
+    );
   };
 
   try {
@@ -572,20 +595,10 @@ test("remote tail encodes tags as repeated tag query params", async () => {
 
 test("remote tail preserves terminal retention-gap errors", async () => {
   const originalFetch = global.fetch;
-  global.fetch = async () => ({
-    ok: true,
-    status: 200,
-    body: new ReadableStream({
-      start(controller) {
-        controller.enqueue(
-          new TextEncoder().encode(
-            '{"type":"error","error":{"kind":"RetentionGap","message":"retention gap","missing":7,"next_seq":18}}\n',
-          ),
-        );
-        controller.close();
-      },
-    }),
-  });
+  global.fetch = async () => new Response(
+    '{"type":"error","error":{"kind":"RetentionGap","message":"retention gap","missing":7,"next_seq":18}}\n',
+    { headers: { "Plasmite-Incarnation": "demo" } },
+  );
 
   try {
     const client = new RemoteClient("http://127.0.0.1:9700");
@@ -653,7 +666,7 @@ test("remote append rejects invalid durability before fetch", async () => {
 });
 
 test("UDP SDK waits without blocking, cancels, and rejects imprecise sequence numbers", async () => {
-  let cancelCalls = 0;
+  let closeCalls = 0;
   const follow = new UdpFollow({
     async nextEventWait(timeoutMs) {
       assert.equal(timeoutMs, 1000n);
@@ -663,10 +676,9 @@ test("UDP SDK waits without blocking, cancels, and rejects imprecise sequence nu
     get isFinished() {
       return false;
     },
-    cancel() {
-      cancelCalls += 1;
+    close() {
+      closeCalls += 1;
     },
-    close() {},
   });
   const pool = new UdpPool({
     follow() {
@@ -688,7 +700,7 @@ test("UDP SDK waits without blocking, cancels, and rejects imprecise sequence nu
   try {
     assert.equal(await follow.nextEvent(1), null);
     assert.equal(timerFired, true);
-    assert.equal(cancelCalls, 1);
+    assert.equal(closeCalls, 1);
     assert.equal(follow.finished, true);
   } finally {
     clearTimeout(timer);

@@ -126,9 +126,9 @@ test("2.0 fetch opens eagerly and keeps its bound through cutoff", async () => {
     const request = new URL(url);
     calls.push(request);
     const message = (seq) => `{"seq":${seq},"time":"2026-11-17T01:00:00.123456789Z","meta":{"tags":["keep"]},"data":{}}\n`;
-    return new Response(calls.length === 1
-      ? message(1) + '{"type":"cutoff","next_seq":2,"until":3}\n'
-      : message(3) + '{"type":"complete"}\n');
+    const cutoff = '{"type":"cutoff","next_seq":2,"until":3}\n';
+    const body = [message(1) + cutoff, cutoff, message(3) + '{"type":"complete"}\n'];
+    return new Response(body[calls.length - 1], { headers: { "Plasmite-Incarnation": "original" } });
   };
   try {
     const pool = new RemotePool(new RemoteClient("http://localhost"), "events");
@@ -144,7 +144,30 @@ test("2.0 fetch opens eagerly and keeps its bound through cutoff", async () => {
     assert.equal(calls[1].searchParams.get("since"), "2");
     assert.equal(calls[1].searchParams.get("until"), "3");
     assert.equal(calls[1].searchParams.get("tag"), "keep");
+    assert.equal(calls[2].href, calls[1].href);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("HTTP continuation rejects another pool or a missing identity before reading records", async () => {
+  const { RemotePool } = require("../remote");
+  for (const [identity, kind] of [["replacement", "NotFound"], [null, "Io"]]) {
+    let calls = 0;
+    await withFetchStub(() => {
+      if (++calls === 1) {
+        return new Response('{"type":"cutoff","next_seq":2}\n', {
+          headers: { "Plasmite-Incarnation": "original" },
+        });
+      }
+      return new Response('{"seq":2,"time":"2026-11-17T00:00:00Z","meta":{"tags":[]},"data":{}}\n', {
+        headers: identity === null ? {} : { "Plasmite-Incarnation": identity },
+      });
+    }, async () => {
+      const pool = new RemotePool(new RemoteClient("http://localhost"), "events");
+      const reader = await pool.follow();
+      await assert.rejects(reader.next(), { kind: new RemoteError({ kind }, 0).kind });
+      assert.equal(calls, 2);
+    });
   }
 });

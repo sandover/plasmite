@@ -14,11 +14,13 @@ All notable changes to this project will be documented in this file.
   Follow keeps its one-message option for shell scripts.
 - HTTP pool operations use v2. Local and HTTP readers report the first missing
   sequence and the first sequence still retained when the pool wraps.
+- Readers check pool identity when they open from a local handle or resume an HTTP stream. A different pool identity produces `NotFound` even when the name matches.
 - Native packages use versioned shared-library filenames. The on-disk pool
   format remains compatible with 1.x.
 
 - Remove `tap` and the CLI flags `--no-follow`, `--tail`, `--timeout`, `--replay`, `--where`, `--file`, `--create-size`, `--retry`, `--retry-delay`, `--quiet-drops`, `--no-notify`, `--me`, and `--echo-self`. Use `--last` for retained history and ordinary shell pipes to capture command output.
 - Rename MCP tools `plasmite_read` and `plasmite_wait` to `plasmite_fetch` and `plasmite_follow`. Use `since` and `next_seq` to resume and handle gaps as structured errors.
+- MCP preserves tag strings exactly, including whitespace, on writes and reads.
 - Use `PLS2` for framed Lite3 files. Existing pool files keep their format.
 - UDP follows deliver late and duplicate datagrams in arrival order. A server-confirmed retention gap names the first missing and first retained sequences. Positional UDP fetch only returns the requested sequence.
 

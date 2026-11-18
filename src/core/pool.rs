@@ -545,7 +545,16 @@ impl Pool {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = path.as_ref().to_path_buf();
+        Self::open_file(path.as_ref(), None)
+    }
+
+    /// Open an independent file description for a reader on this pool.
+    pub(crate) fn reopen(&self) -> Result<Self, Error> {
+        Self::open_file(&self.path, Some(&self.file))
+    }
+
+    fn open_file(path: &Path, original: Option<&File>) -> Result<Self, Error> {
+        let path = path.to_path_buf();
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -560,6 +569,10 @@ impl Pool {
                 }
                 error
             })?;
+
+        if let Some(original) = original {
+            require_same_file(original, &file, &path)?;
+        }
 
         let metadata = file
             .metadata()
@@ -680,8 +693,8 @@ impl Pool {
     }
 
     /// An opaque native file identity for detecting replacement of an opened pool.
-    /// It stays stable across appends and server restarts. Retain a path guard when
-    /// comparing identities over time, so the OS cannot reuse the original file ID.
+    /// It stays stable across appends and server restarts. A path guard prevents
+    /// reuse of the native file ID on filesystems without creation timestamps.
     pub fn incarnation(&self) -> Result<String, Error> {
         file_incarnation(&self.file).map_err(|err| {
             Error::new(map_io_error_kind(&err))
@@ -1226,7 +1239,7 @@ fn require_identity_matches(same: bool, path: &Path) -> Result<(), Error> {
         return Err(Error::new(ErrorKind::NotFound)
             .with_message("pool path now refers to a different file")
             .with_path(path)
-            .with_hint("Open the pool again before writing."));
+            .with_hint("Open the pool again."));
     }
     Ok(())
 }
@@ -1260,11 +1273,28 @@ fn same_file_identity(first: &File, second: &File) -> io::Result<bool> {
     Ok(first.dev() == second.dev() && first.ino() == second.ino())
 }
 
-#[cfg(unix)]
 fn file_incarnation(file: &File) -> io::Result<String> {
-    use std::os::unix::fs::MetadataExt;
     let info = file.metadata()?;
-    Ok(format!("{:x}:{:x}", info.dev(), info.ino()))
+    #[cfg(unix)]
+    let identity = {
+        use std::os::unix::fs::MetadataExt;
+        format!("{:x}:{:x}", info.dev(), info.ino())
+    };
+    #[cfg(windows)]
+    let identity = {
+        let (volume, high, low) = windows_file_identity(file)?;
+        format!("{volume:x}:{high:x}:{low:x}")
+    };
+    // A cutoff releases the original file. Include its creation time when the
+    // filesystem supplies one so reusing the native file ID changes the token.
+    let Ok(created) = info.created() else {
+        return Ok(identity);
+    };
+    let stamp = match created.duration_since(std::time::UNIX_EPOCH) {
+        Ok(since) => since.as_nanos() as i128,
+        Err(before) => -(before.duration().as_nanos() as i128),
+    };
+    Ok(format!("{identity}:{stamp}"))
 }
 
 #[cfg(windows)]
@@ -1282,12 +1312,6 @@ fn windows_file_identity(file: &File) -> io::Result<(u32, u32, u32)> {
         info.nFileIndexHigh,
         info.nFileIndexLow,
     ))
-}
-
-#[cfg(windows)]
-fn file_incarnation(file: &File) -> io::Result<String> {
-    let (volume, high, low) = windows_file_identity(file)?;
-    Ok(format!("{volume:x}:{high:x}:{low:x}"))
 }
 
 #[cfg(windows)]

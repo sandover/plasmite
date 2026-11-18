@@ -1254,6 +1254,34 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
 }
 
 #[test]
+fn follow_rejects_a_same_name_replacement_after_cutoff() -> TestResult<()> {
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::start_with_args_and_scheme(
+        temp.path(),
+        &["--max-tail-timeout-ms", "150"],
+        "http",
+    );
+    let client = server.client()?;
+    let name = PoolRef::name("events");
+    let original = client.create_pool(&name, PoolOptions::new(65536))?;
+    original.feed(&json!({"pool": "original"}), Feed::new())?;
+    let mut follow = original.follow_lite3(ReadOptions::new())?;
+    sleep(Duration::from_millis(450));
+    client.delete_pool(&name)?;
+    let replacement = client.create_pool(&name, PoolOptions::new(65536))?;
+    for n in 1..=2 {
+        replacement.feed(&json!({"pool": "replacement", "n": n}), Feed::new())?;
+    }
+    let error = follow
+        .next_frame()
+        .expect_err("replace the old reader explicitly");
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+    assert_eq!(error.message(), Some("pool was replaced during the read"));
+    assert_eq!(fetch_frame(&replacement, 2)?.seq, 2);
+    Ok(())
+}
+
+#[test]
 fn real_fetch_continues_after_cutoff_with_its_original_end() -> TestResult<()> {
     use plasmite::api::LocalClient;
 

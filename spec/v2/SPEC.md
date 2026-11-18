@@ -100,6 +100,8 @@ Every read response ends with exactly one control record:
 
 The server sends every matching record before it advances past it, so a cutoff never skips one. The next request uses the cutoff's `next_seq` even when the response carried no matching records. A continued fetch keeps its original upper bound instead of taking a new snapshot. `until` is a protocol parameter for continuation only; libraries don't expose it as a read option. A follow on a quiet pool may see repeated cutoffs without new messages. A cutoff never hides a retention gap or turns incomplete history into a successful completion. A response that ends without a control record raises `Io`, unless the caller cancelled or closed the reader.
 
+Each successful read response carries `Plasmite-Incarnation`, the opaque identity of the opened pool. A client checks that the identity still matches before accepting records from a continuation. A different identity ends the read with `NotFound`. A continuation with a missing identity raises `Io`.
+
 Fetching one record over HTTP opens a fetch and closes it after the first record. Closing a response early stops the server's work for that read promptly.
 
 ### JSON stream

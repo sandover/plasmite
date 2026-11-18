@@ -969,7 +969,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     "properties": {
                         "pool": {"type":"string","description":"Destination pool name"},
                         "data": {"type":"object","description":"Application data"},
-                        "tags": {"type":"array","items":{"type":"string"},"description":"Optional labels readers can filter on; surrounding whitespace is trimmed and empty tags are rejected"},
+                        "tags": {"type":"array","items":{"type":"string"},"description":"Optional labels readers can match exactly"},
                         "create": {"type":"boolean","description":"Create a missing pool with the default fixed capacity (default: false)"}
                     },
                     "required": ["pool", "data"],
@@ -1277,11 +1277,7 @@ fn optional_string_array_arg(
         let Value::String(value) = value else {
             return Err(format!("`{key}` must be an array of strings"));
         };
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err(format!("`{key}` entries must not be empty"));
-        }
-        out.push(trimmed.to_string());
+        out.push(value.clone());
     }
     Ok(Some(out))
 }
@@ -2125,7 +2121,7 @@ mod tests {
     }
 
     #[test]
-    fn plasmite_tools_reject_empty_tags() {
+    fn plasmite_tools_reject_non_string_tags() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
         let result = handler
@@ -2134,7 +2130,7 @@ mod tests {
                 arguments: map_args(json!({
                     "pool": "events",
                     "data": {},
-                    "tags": [" "]
+                    "tags": [false]
                 })),
             })
             .expect("feed");
@@ -2143,6 +2139,34 @@ mod tests {
         let structured = result.structured_content.expect("structured");
         assert_eq!(structured["error_kind"], json!("Usage"));
         assert_eq!(structured["field"], json!("tags"));
+    }
+
+    #[test]
+    fn plasmite_feed_and_fetch_preserve_tag_whitespace() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let handler = PlasmiteMcpHandler::new(tmp.path());
+        for tag in ["sensor A ", "sensor A", " ", ""] {
+            let fed = handler.tool_feed(&map_args(json!({
+                "pool": "events", "data": {}, "create": true, "tags": [tag]
+            })));
+            assert!(!fed.is_error);
+            let result = fed.structured_content.expect("feed data");
+            assert_eq!(result["message"]["meta"]["tags"], json!([tag]));
+        }
+        for (seq, tag) in [(1, "sensor A "), (2, "sensor A"), (3, " "), (4, "")] {
+            let fetched = handler.tool_read(
+                &map_args(json!({
+                    "pool": "events", "tags": [tag]
+                })),
+                false,
+            );
+            assert!(!fetched.is_error);
+            let result = fetched.structured_content.expect("fetch data");
+            assert_eq!(result["messages"].as_array().unwrap().len(), 1);
+            assert_eq!(result["messages"][0]["seq"], seq);
+            assert_eq!(result["messages"][0]["meta"]["tags"], json!([tag]));
+            assert_eq!(result["next_seq"], 5);
+        }
     }
 
     #[test]

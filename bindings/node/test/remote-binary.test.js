@@ -109,6 +109,8 @@ test("binary appends preserve transport policy, durability and exact receipt ide
   await stub(response, async (getCall) => {
     const pool = new RemotePool(new RemoteClient("https://example.com", { token: "secret" }), "p");
     const payload = Buffer.from([1, 2, 3]);
+    await assert.rejects(pool.feedLite3(payload, { tags: ["override"] }), /cannot supply tags/);
+    assert.equal(getCall(), undefined);
     assert.equal((await pool.feedLite3(payload, { durability: "flush" })).seq, 18446744073709551615n);
     assert.equal(getCall().options.body, payload);
     assert.equal(getCall().options.headers["Content-Type"], "application/x-plasmite-lite3");

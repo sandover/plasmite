@@ -19,6 +19,7 @@ pub(super) struct Reader {
     demand: async_mpsc::Sender<()>,
     chunks: Mutex<mpsc::Receiver<io::Result<Bytes>>>,
     buffered: Bytes,
+    pub(super) incarnation: Option<header::HeaderValue>,
     // Dropping the sender interrupts network I/O even with no active read.
     _stop: oneshot::Sender<()>,
 }
@@ -83,16 +84,17 @@ pub(super) fn open(
                     Ok(result) => result,
                     Err(error) => Err(transport_error("stream opening timed out", error)),
                 };
-                let mut body = match response {
-                    Ok(body) => body.into_data_stream(),
+                let (incarnation, body) = match response {
+                    Ok(response) => response,
                     Err(error) => {
                         let _ = ready.send(Err(error));
                         return;
                     }
                 };
-                if ready.send(Ok(())).is_err() {
+                if ready.send(Ok(incarnation)).is_err() {
                     return;
                 }
+                let mut body = body.into_data_stream();
                 while requests.recv().await.is_some() {
                     let Some(chunk) = body.next().await else { break };
                     if deliver.send(chunk.map_err(io::Error::other)).is_err() {
@@ -104,11 +106,12 @@ pub(super) fn open(
     });
 
     match opened.recv() {
-        Ok(result) => result.map(|()| {
+        Ok(result) => result.map(|incarnation| {
             Some(Reader {
                 demand,
                 chunks: Mutex::new(chunks),
                 buffered: Bytes::new(),
+                incarnation,
                 _stop: stop,
             })
         }),
@@ -142,7 +145,11 @@ fn stream_runtime() -> ApiResult<&'static Runtime> {
         })
 }
 
-async fn connect(url: Url, accept: &'static str, key: Option<AccessKey>) -> ApiResult<Body> {
+async fn connect(
+    url: Url,
+    accept: &'static str,
+    key: Option<AccessKey>,
+) -> ApiResult<(Option<header::HeaderValue>, Body)> {
     if key.is_some() && url.scheme() != "https" {
         return Err(
             Error::new(ErrorKind::Corrupt).with_message("saved native connections must use HTTPS")
@@ -191,9 +198,10 @@ async fn connect(url: Url, accept: &'static str, key: Option<AccessKey>) -> ApiR
         .headers()
         .get("plasmite-version")
         .is_some_and(|value| value == "2");
+    let incarnation = response.headers().get("plasmite-incarnation").cloned();
     let body = Body::new(response.into_body());
     if status.is_success() {
-        return Ok(body);
+        return Ok((incarnation, body));
     }
     if status.as_u16() == 404 && !version_is_2 {
         return Err(Error::new(ErrorKind::Io)

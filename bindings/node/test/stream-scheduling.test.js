@@ -122,6 +122,37 @@ test('returning an unused UDP iterator leaves another caller’s read alone', as
   follow.close();
 });
 
+test('UDP loop exit and reader-level abort close the native subscription', async () => {
+  const { UdpFollow } = require('../index');
+  for (const stop of ['break', 'abort reader', 'abort iterator']) {
+    let closes = 0;
+    const controller = new AbortController();
+    const follow = new UdpFollow({
+      async nextEventWait() {
+        return { status: 1, event: { kind: 3, startSeq: 1n, nextSeq: 1n, terminal: false } };
+      },
+      isFinished: false,
+      close() { closes++; },
+    }, false, stop === 'abort reader' ? controller.signal : undefined);
+    if (stop === 'break') {
+      for await (const event of follow) {
+        assert.equal(event.kind, 'progress');
+        break;
+      }
+    } else if (stop === 'abort reader') {
+      controller.abort();
+    } else {
+      const iterator = follow.events({ signal: controller.signal });
+      assert.equal((await iterator.next()).done, false);
+      controller.abort();
+      assert.equal(closes, 1);
+      await iterator.return();
+    }
+    assert.equal(closes, 1, stop);
+    assert.equal(follow.finished, true);
+  }
+});
+
 test('a stream reuses one completion resource across reads', async () => {
   const { createHook } = require('node:async_hooks');
   await fixture(async pool => {

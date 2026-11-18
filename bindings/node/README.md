@@ -164,9 +164,7 @@ separate mutable payload Buffer. Gap and progress events keep their existing
 meaning and fields. Each iterator reads on demand and creates no default
 prefetch queue. A supplied type argument asserts the payload shape.
 
-Passing a signal to UDP `nextEvent` cancels that wait. The reader can read
-again. `cancel()` permanently cancels the reader. `close()` releases it after
-any active call finishes.
+Passing a signal to UDP `nextEvent` cancels that wait and keeps the reader open. Leaving an async iteration, aborting a signal supplied to `follow`, `fetch` or `events`, and calling `cancel()` or `close()` all release the subscription after any active call finishes. The view variants follow the same rules.
 
 Async reads first check for available data on four private workers, leaving
 Node's shared filesystem/DNS workers available. An empty read waits on a parked

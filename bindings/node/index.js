@@ -144,8 +144,11 @@ class Client {
    * @returns {Pool}
    */
   createPool(poolRef, sizeBytes = DEFAULT_POOL_SIZE_BYTES) {
+    let size;
+    try { size = normalizeUint64(sizeBytes, "sizeBytes"); }
+    catch (err) { throw usageError(err.message); }
     try {
-      return new Pool(this._inner.createPool(poolRef, sizeBytes));
+      return new Pool(this._inner.createPool(poolRef, size));
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -205,7 +208,8 @@ class Pool {
     this._inner = inner;
   }
 
-  async feedLite3(payload, { durability = Durability.Fast } = {}) {
+  async feedLite3(payload, { tags, durability = Durability.Fast } = {}) {
+    if (tags !== undefined) throw usageError("cannot supply tags when forwarding a message");
     try {
       return parseNativeMessage(await this._inner.feedLite3(payload, durability));
     } catch (err) {
@@ -231,7 +235,8 @@ class Pool {
     }
   }
 
-  async feedLite3Receipt(payload, { durability = Durability.Fast } = {}) {
+  async feedLite3Receipt(payload, { tags, durability = Durability.Fast } = {}) {
+    if (tags !== undefined) throw usageError("cannot supply tags when forwarding a message");
     try {
       return await this._inner.feedLite3Receipt(payload, durability);
     } catch (err) {
@@ -690,7 +695,9 @@ class UdpFollow {
     this._views = views;
     this._signal = signal;
     this._closed = false;
-    this._cancelled = false;
+    this._abort = () => this.close();
+    if (signal?.aborted) this.close();
+    else signal?.addEventListener("abort", this._abort, { once: true });
   }
 
   async nextEvent(wait, { signal = this._signal } = {}) {
@@ -719,7 +726,7 @@ class UdpFollow {
   }
 
   get finished() {
-    return this._closed || this._cancelled || this._inner.isFinished;
+    return this._closed || this._inner.isFinished;
   }
 
   async next(wait) {
@@ -729,21 +736,26 @@ class UdpFollow {
 
   events({ signal = this._signal } = {}) {
     const follow = this;
-    let stopped = false;
-    let reading = false;
+    let started = false;
+    const iteratorSignal = signal === this._signal ? undefined : signal;
+    const close = () => follow.close();
     async function* read() {
-      while (!stopped) {
-        let event;
-        reading = true;
-        try { event = await follow.nextEvent(undefined, { signal }); }
-        finally { reading = false; }
-        if (stopped) return;
-        if (event) { yield event; continue; }
-        if (follow.finished) return;
-        await new Promise((resolve) => setImmediate(resolve));
+      started = true;
+      iteratorSignal?.addEventListener("abort", close, { once: true });
+      try {
+        while (true) {
+          const event = await follow.nextEvent(undefined, { signal });
+          if (follow._closed) return;
+          if (event) { yield event; continue; }
+          if (follow.finished) return;
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      } finally {
+        iteratorSignal?.removeEventListener("abort", close);
+        close();
       }
     }
-    return cancelOnReturn(read(), () => { stopped = true; if (reading) follow._inner.interruptRead(); });
+    return cancelOnReturn(read(), () => { if (started) close(); });
   }
 
   [Symbol.asyncIterator]() {
@@ -751,15 +763,13 @@ class UdpFollow {
   }
 
   cancel() {
-    if (!this._closed) {
-      this._cancelled = true;
-      this._inner.cancel();
-    }
+    this.close();
   }
 
   close() {
     if (!this._closed) {
       this._closed = true;
+      this._signal?.removeEventListener("abort", this._abort);
       this._inner.close();
     }
   }
@@ -769,8 +779,8 @@ class UdpFollow {
   }
 }
 
-// Async generators queue return/throw behind a pending next(). Interrupt the
-// native read first so explicit iterator cleanup also works on an idle stream.
+// Async generators queue return/throw behind a pending next(). Close the
+// native read first so explicit iterator cleanup works on an idle stream.
 function cancelOnReturn(iterator, cancel) {
   const end = iterator.return.bind(iterator), fail = iterator.throw.bind(iterator);
   iterator.return = value => { cancel(); return end(value); };

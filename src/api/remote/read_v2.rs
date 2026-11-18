@@ -129,6 +129,7 @@ struct Stream {
     live: bool,
     binary: bool,
     reader: Option<TailReader>,
+    incarnation: Option<hyper::header::HeaderValue>,
     resumed: Option<(u64, Option<u64>)>,
     last_message: Option<u64>,
     failure: Option<Box<Error>>,
@@ -156,6 +157,7 @@ impl Stream {
             live,
             binary,
             reader: None,
+            incarnation: None,
             resumed: None,
             last_message: None,
             failure: None,
@@ -213,8 +215,26 @@ impl Stream {
             .client
             .key_for_request(&url)?
             .map(std::borrow::Cow::into_owned);
-        self.reader = cancellable_read::open(url, accept, key, self.selection.cancel.clone())?
-            .map(|body| BufReader::new(Box::new(body) as Box<dyn std::io::Read + Send + Sync>));
+        if let Some(body) = cancellable_read::open(url, accept, key, self.selection.cancel.clone())?
+        {
+            if self.resumed.is_some() {
+                match (&self.incarnation, &body.incarnation) {
+                    (Some(original), Some(current)) if original == current => {}
+                    (Some(_), Some(_)) => {
+                        return Err(Error::new(ErrorKind::NotFound)
+                            .with_message("pool was replaced during the read"));
+                    }
+                    _ => {
+                        return Err(protocol_error(
+                            "missing pool identity on stream continuation",
+                        ));
+                    }
+                }
+            } else {
+                self.incarnation = body.incarnation.clone();
+            }
+            self.reader = Some(BufReader::new(Box::new(body)));
+        }
         Ok(())
     }
 
@@ -381,7 +401,7 @@ mod tests {
     use std::net::TcpListener;
 
     fn responses<const N: usize>(
-        scripts: [(&'static str, &'static str); N],
+        scripts: [(&'static str, &'static str, &'static str); N],
     ) -> (RemotePool, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listen on loopback");
         listener.set_nonblocking(true).expect("bounded accept");
@@ -399,7 +419,7 @@ mod tests {
         };
         let worker = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            for (path, body) in scripts {
+            for (path, incarnation, body) in scripts {
                 let mut socket = loop {
                     match listener.accept() {
                         Ok((socket, _)) => break socket,
@@ -428,7 +448,7 @@ mod tests {
                         break;
                     }
                 }
-                write!(socket, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\nPlasmite-Version: 2\r\n\r\n{body}", body.len())
+                write!(socket, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\nPlasmite-Version: 2\r\nPlasmite-Incarnation: {incarnation}\r\n\r\n{body}", body.len())
                     .expect("send response");
             }
         });
@@ -440,14 +460,17 @@ mod tests {
         let (pool, server) = responses([
             (
                 "/v2/pools/events/fetch?tag=keep",
+                "original",
                 "{\"type\":\"cutoff\",\"next_seq\":8,\"until\":10}\n",
             ),
             (
                 "/v2/pools/events/fetch?since=8&until=10&tag=keep",
+                "original",
                 "{\"type\":\"cutoff\",\"next_seq\":8,\"until\":10}\n",
             ),
             (
                 "/v2/pools/events/fetch?since=8&until=10&tag=keep",
+                "original",
                 concat!(
                     "{\"seq\":9,\"time\":\"2026-11-17T00:00:00.000000123Z\",\"data\":{},\"meta\":{\"tags\":[\"keep\"]}}\n",
                     "{\"type\":\"complete\"}\n"
@@ -503,6 +526,7 @@ mod tests {
     fn missing_ending_is_a_terminal_io_error() {
         let (pool, server) = responses([(
             "/v2/pools/events/fetch",
+            "original",
             "{\"seq\":1,\"time\":\"2026-11-17T00:00:00Z\",\"data\":{},\"meta\":{\"tags\":[]}}\n",
         )]);
         let mut reader = pool.fetch(Selection::new()).expect("open");

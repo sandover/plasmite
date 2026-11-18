@@ -224,7 +224,8 @@ class RemotePool {
     return openV2Reader(this, false, options, "view");
   }
 
-  async feedLite3(payload, { durability = "fast" } = {}) {
+  async feedLite3(payload, { tags, durability = "fast" } = {}) {
+    if (tags !== undefined) throw new RemoteError({ kind: "Usage", message: "cannot supply tags when forwarding a message" }, 400);
     if (!Buffer.isBuffer(payload)) throw new TypeError("Lite3 payload must be a Buffer");
     if (payload.length > MAX_FRAME_BYTES) throw new RangeError("Lite3 payload exceeds maximum frame size");
     const response = await this._feedBinary(payload, durability, "application/json");
@@ -295,6 +296,7 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
   }
 
   const invalid = message => new RemoteError({ kind: "Io", message }, 0);
+  const incarnation = response.headers.get("plasmite-incarnation");
   const read = async function* () {
     let lastMessage;
     let continuation;
@@ -320,13 +322,19 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
       const until = cutoff.until === undefined ? undefined : normalizeMessageSeq(cutoff.until);
       if (next === 0n || (lastMessage !== undefined && next <= lastMessage)
           || live === (until !== undefined) || (until !== undefined && next > until)
-          || (continuation && (until !== continuation.until || next < continuation.next
-              || (!live && next === continuation.next)))) throw invalid("invalid stream cutoff");
+          || (continuation && (until !== continuation.until || next < continuation.next))) {
+        throw invalid("invalid stream cutoff");
+      }
       continuation = { next, until };
       const resumed = new URL(base);
       resumed.searchParams.set("since", next.toString());
       if (until !== undefined) resumed.searchParams.set("until", until.toString());
       response = await open(resumed);
+      const current = response.headers.get("plasmite-incarnation");
+      if (incarnation === null || current === null) throw invalid("missing pool identity on stream continuation");
+      if (current !== incarnation) {
+        throw new RemoteError({ kind: "NotFound", message: "pool was replaced during the read" }, 404);
+      }
     }
   };
 

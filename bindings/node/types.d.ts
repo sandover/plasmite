@@ -283,7 +283,7 @@ export class RemotePool {
   client: RemoteClient
   pool: string
   poolRef(): string
-  feedLite3(payload: Buffer, options?: FeedOptions): Promise<Message>
+  feedLite3(payload: Buffer, options?: Omit<FeedOptions, "tags">): Promise<Message>
   feedView<T = unknown>(value: unknown, options?: FeedOptions): Promise<MessageView<T>>
   followLite3(options?: ReadOptions): Promise<Reader<RemoteLite3Frame>>
   fetchLite3(options?: ReadOptions): Promise<Reader<RemoteLite3Frame>>
