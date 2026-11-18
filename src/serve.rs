@@ -2373,12 +2373,6 @@ fn encode_message_payload(message: plasmite::api::Message) -> Result<Vec<u8>, Er
     })
 }
 
-fn encode_jsonl_message(message: plasmite::api::Message) -> Result<Bytes, Error> {
-    let mut payload = encode_message_payload(message)?;
-    payload.push(b'\n');
-    Ok(Bytes::from(payload))
-}
-
 fn encode_sse_message(message: plasmite::api::Message) -> Result<Bytes, Error> {
     let mut payload = encode_message_payload(message)?;
     // SSE event frame: clients parse one JSON message per event.

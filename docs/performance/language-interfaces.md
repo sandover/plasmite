@@ -116,6 +116,42 @@ Run `bench_view_streams local LANE small 10000` for `raw`, `json`,
 `view_selected` and `view_full`, and `bench_owned_views 2000` for the
 typed-input and sparse-view lanes. These checks cover local Rust paths.
 
+### Indexed starts and HTTP streaming
+
+The 2.0 performance fixes restore the sequence index for range starts and use
+the same frame-header scan as point reads when the index misses. HTTP waits for
+room in the output queue and formats JSON directly from the encoded frame.
+These changes keep the existing selection and stream-ending rules.
+
+Optimized builds on the same Apple Silicon Mac gave these medians against
+`80a92f1`. The indexed pool had 300,000 small records and 600,000 index slots.
+The HTTP transfers used loopback and read 2,000 records with a 16,000-byte
+text field. Each run verified the requested sequences or returned record.
+
+| Workload | 1.x baseline | 2.0 with fixes |
+| --- | ---: | ---: |
+| CLI fetch of sequence 300,000, indexed | 2.76 ms | 2.69 ms |
+| CLI fetch of sequence 300,000, no index | 19.15 ms | 18.95 ms |
+| HTTP time to first record at sequence 300,000 | 0.21 ms | 0.19 ms |
+| HTTP Lite3 transfer | 55.91 ms | 10.11 ms |
+| HTTP JSON transfer | 27.81 ms | 20.58 ms |
+
+The CLI and point HTTP runs alternated the two builds seven times. The
+unindexed CLI check used 21 runs per build after warmup. The HTTP transfers
+used ten runs per build after warmup. To reproduce the point checks, create a
+256 MiB pool with `pool create --size 256M --index-capacity 600000` and seed it
+with 300,000 small records. Time `fetch POOL 300000` or the first record of an
+HTTP fetch starting at `since=300000`. Set the index capacity to zero to
+measure the scan. For HTTP throughput, compare the complete finite `/v2`
+fetch with the 1.x finite follow of the same retained records.
+
+Against the original 2.0 candidate (`e4b2429`), a time seek past all 300,000
+retained records reduced a concurrent writer's median lock wait from 17.4 ms
+to 14.7 ms. The seek still holds a shared lock to select the first matching
+record from a consistent opening snapshot. With 64 quiet cancellable HTTP
+readers, the client used two native threads and 6.9 MiB of resident memory,
+down from 65 threads and 13.2 MiB. All readers still close on cancellation.
+
 ## Integration checks
 
 The pre-2.0 owned-view checkpoint passed `just check` and

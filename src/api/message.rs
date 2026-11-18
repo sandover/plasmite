@@ -410,11 +410,13 @@ impl Pool {
                     }
                     Some(seq)
                 }
-                ReadStart::Since(Since::At(time)) => cursor.seek_time_locked(self, time)?.or(next),
+                ReadStart::Since(Since::At(time)) => {
+                    cursor.seek_time_locked(self, header, time)?.or(next)
+                }
                 ReadStart::Since(Since::Ago(duration)) => {
                     let nanos = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
                     let time = now_ns()?.saturating_sub(nanos);
-                    cursor.seek_time_locked(self, time)?.or(next)
+                    cursor.seek_time_locked(self, header, time)?.or(next)
                 }
             };
             if let Some(first) = first {
@@ -423,6 +425,13 @@ impl Pool {
                 }
                 if Some(first) == next {
                     cursor.seek_to(header.head_off as usize);
+                } else if first > oldest
+                    && matches!(
+                        read.start,
+                        ReadStart::Last(_) | ReadStart::Since(Since::Seq(_))
+                    )
+                {
+                    self.seek_index_locked(&mut cursor, header, first);
                 }
             }
             if read.until.is_some_and(|until| live || until > newest) {
@@ -444,7 +453,7 @@ impl Pool {
             options,
             seen: 0,
             deadline: None,
-            notify: open_for_pool(self),
+            notify: live.then(|| open_for_pool(self)).flatten(),
             expected_seq: first,
             terminated: first.is_none()
                 || upper.zip(first).is_some_and(|(last, first)| first > last),
@@ -1251,7 +1260,8 @@ pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
 }
 
 /// Produce the existing wire envelope while borrowing data from this owned frame.
-pub(crate) fn message_json_from_frame(frame: &FrameRef) -> Result<Vec<u8>, Error> {
+#[doc(hidden)]
+pub fn message_json_from_frame(frame: &FrameRef) -> Result<Vec<u8>, Error> {
     let doc = Lite3DocRef::new(&frame.payload);
     let (tags_offset, count) = meta_tags(doc)?;
     let mut tags = Vec::with_capacity(count as usize);
@@ -1444,6 +1454,40 @@ mod tests {
                 .unwrap();
         }
         pool
+    }
+
+    #[test]
+    fn reads_seek_to_an_indexed_start_and_scan_on_index_miss() {
+        use super::{Read, Since};
+        use crate::core::cursor::CursorResult;
+
+        let dir = tempdir().unwrap();
+        for (slots, first_frame) in [(8, 3), (1, 1), (0, 1)] {
+            let mut pool = Pool::create(
+                dir.path().join(format!("index-{slots}.plasmite")),
+                PoolOptions::new(65536).with_index_capacity(slots),
+            )
+            .unwrap();
+            for value in 1..=4 {
+                pool.append_json_now(&json!({ "value": value }), &[], Durability::Fast)
+                    .unwrap();
+            }
+            for read in [Read::since(Since::Seq(3)), Read::last(2)] {
+                for live in [false, true] {
+                    let mut state = pool.read_state(read.clone(), live).unwrap();
+                    assert!(matches!(
+                        state.cursor.next(&pool).unwrap(),
+                        CursorResult::Message(frame) if frame.seq == first_frame
+                    ));
+                }
+                let seqs = pool
+                    .fetch_lite3(read)
+                    .unwrap()
+                    .map(|frame| frame.unwrap().seq)
+                    .collect::<Vec<_>>();
+                assert_eq!(seqs, [3, 4]);
+            }
+        }
     }
 
     #[test]

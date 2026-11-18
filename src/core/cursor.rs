@@ -99,8 +99,10 @@ impl Cursor {
         pool: &Pool,
         expected: Option<u64>,
     ) -> Result<CursorResult, Error> {
+        let header = pool.header_locked()?;
+        self.seek_expected_locked(pool, header, expected)?;
         loop {
-            match self.next_view_locked(pool, expected)? {
+            match self.next_view_at_header(pool, header, expected)? {
                 CursorViewResult::Message(frame) => {
                     if expected.is_none_or(|expected| frame.seq >= expected) {
                         return Ok(CursorResult::Message(frame.into_owned()));
@@ -121,9 +123,11 @@ impl Cursor {
         if bytes == usize::MAX && minimum_seq.is_none() {
             return self.next_locked(pool);
         }
+        let header = pool.header_locked()?;
+        self.seek_expected_locked(pool, header, minimum_seq)?;
         loop {
             let checkpoint = self.clone();
-            match self.next_view_locked(pool, minimum_seq)? {
+            match self.next_view_at_header(pool, header, minimum_seq)? {
                 CursorViewResult::Message(frame) => {
                     // Older records never cross this stream's requested boundary.
                     // Check their frame headers, then skip without copying payloads.
@@ -149,31 +153,42 @@ impl Cursor {
     pub(crate) fn seek_time_locked(
         &mut self,
         pool: &Pool,
+        header: PoolHeader,
         time_ns: u64,
     ) -> Result<Option<u64>, Error> {
-        loop {
-            let before = self.clone();
-            match self.next_view_locked(pool, None)? {
-                CursorViewResult::Message(frame) if frame.time >= time_ns => {
-                    *self = before;
-                    return Ok(Some(frame.seq));
-                }
-                CursorViewResult::Message(_) => continue,
-                CursorViewResult::WouldBlock => return Ok(None),
-                CursorViewResult::FellBehind => {
-                    return Err(Error::new(ErrorKind::Corrupt)
-                        .with_message("retained history changed while locked"));
-                }
-            }
+        if let Some((offset, frame)) =
+            pool.scan_history_locked(header, None, |frame| frame.time >= time_ns)?
+        {
+            self.seek_to(offset);
+            return Ok(Some(frame.seq));
         }
+        Ok(None)
     }
 
-    fn next_view_locked<'p>(
+    fn seek_expected_locked(
+        &mut self,
+        pool: &Pool,
+        header: PoolHeader,
+        expected: Option<u64>,
+    ) -> Result<(), Error> {
+        if !self.started
+            && let Some(seq) = expected
+            && seq > header.oldest_seq
+            && seq <= header.newest_seq
+            && let Some((offset, _)) =
+                pool.scan_history_locked(header, None, |frame| frame.seq >= seq)?
+        {
+            self.seek_to(offset);
+        }
+        Ok(())
+    }
+
+    fn next_view_at_header<'p>(
         &mut self,
         pool: &'p Pool,
+        header: PoolHeader,
         expected: Option<u64>,
     ) -> Result<CursorViewResult<'p>, Error> {
-        let header = pool.header_locked()?;
         if let Some(expected) = expected
             && expected < header.oldest_seq
         {

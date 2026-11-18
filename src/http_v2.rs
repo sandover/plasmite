@@ -240,12 +240,29 @@ impl ReadWorker {
             // Keep one channel slot for a terminal record. Advance the read only
             // when there is room to hand off the next matching frame.
             if self.send.capacity() <= 1 {
-                if Instant::now() >= self.deadline {
-                    self.cutoff(reader.position());
-                    return;
+                // The worker already runs on a blocking thread. Let the receiver
+                // wake it as soon as there is room while checking revocation and
+                // the cutoff even if the consumer has stopped reading.
+                let wait = self.deadline.saturating_duration_since(Instant::now());
+                let room = tokio::runtime::Handle::current().block_on(async {
+                    tokio::time::timeout(
+                        wait.min(Duration::from_millis(50)),
+                        self.send.reserve_many(2),
+                    )
+                    .await
+                });
+                match room {
+                    Ok(Ok(permits)) => {
+                        drop(permits);
+                        continue;
+                    }
+                    Ok(Err(_)) => return,
+                    Err(_) if Instant::now() >= self.deadline => {
+                        self.cutoff(reader.position());
+                        return;
+                    }
+                    Err(_) => continue,
                 }
-                std::thread::sleep(Duration::from_millis(10));
-                continue;
             }
             let wait = self.deadline.saturating_duration_since(Instant::now());
             if wait.is_zero() {
@@ -287,9 +304,9 @@ impl ReadWorker {
 
     fn frame(&self, frame: plasmite::api::FrameRef) -> Result<Bytes, Error> {
         if !self.binary {
-            let message =
-                plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload)?;
-            return encode_jsonl_message(message);
+            let mut bytes = plasmite::api::message_json_from_frame(&frame)?;
+            bytes.push(b'\n');
+            return Ok(bytes.into());
         }
         let length = u32::try_from(frame.payload.len() + LITE3_MESSAGE_ID_LEN)
             .expect("a stored frame fits a record length");
@@ -335,4 +352,42 @@ fn encode_control(binary: bool, record: Value) -> Bytes {
         bytes.push(b'\n');
     }
     bytes.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn full_read_queue_keeps_room_for_cutoff_at_the_next_unsent_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let pool_ref = PoolRef::name("history");
+        let mut pool = client
+            .create_pool(&pool_ref, plasmite::api::PoolOptions::new(65536))
+            .unwrap();
+        for n in 1..=3 {
+            pool.feed(&json!({"n": n}), Default::default()).unwrap();
+        }
+
+        let (send, mut receive) = mpsc::channel(2);
+        let (opened, opening) = tokio::sync::oneshot::channel();
+        let done = tokio::task::spawn_blocking(move || {
+            let worker = ReadWorker {
+                send,
+                deadline: Instant::now() + Duration::from_millis(250),
+                revoked: None,
+                binary: false,
+            };
+            worker.run::<false>(client, pool_ref, Read::new(), opened);
+        });
+        opening.await.unwrap().unwrap();
+        done.await.unwrap();
+
+        let message: Value = serde_json::from_slice(&receive.try_recv().unwrap()).unwrap();
+        assert_eq!(message["seq"], 1);
+        let cutoff: Value = serde_json::from_slice(&receive.try_recv().unwrap()).unwrap();
+        assert_eq!(cutoff, json!({"type": "cutoff", "next_seq": 2, "until": 3}));
+        assert!(receive.try_recv().is_err());
+    }
 }

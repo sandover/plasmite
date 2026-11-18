@@ -8,8 +8,9 @@ use hyper::{Request, header};
 use hyper_util::rt::TokioIo;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::sync::{mpsc as async_mpsc, oneshot};
 use tokio_stream::StreamExt;
 use url::{Host, Position, Url};
@@ -59,50 +60,41 @@ pub(super) fn open(
     let (deliver, chunks) = mpsc::channel();
     let (ready, opened) = mpsc::channel();
     let flag = Arc::clone(&cancel);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| transport_error("could not create stream runtime", error))?;
-    std::thread::Builder::new()
-        .name("plasmite-http-read".into())
-        .spawn(move || {
-            runtime.block_on(async move {
-                tokio::select! {
-                    biased;
-                    _ = stopped => {},
-                    _ = async {
-                        while !flag.load(Ordering::Acquire) {
-                            tokio::time::sleep(Duration::from_millis(25)).await;
-                        }
-                    } => {},
-                    _ = async move {
-                        let response = match tokio::time::timeout(
-                            REQUEST_TIMEOUT, connect(url, accept, key),
-                        ).await {
-                            Ok(result) => result,
-                            Err(error) => Err(transport_error("stream opening timed out", error)),
-                        };
-                        let mut body = match response {
-                            Ok(body) => body.into_data_stream(),
-                            Err(error) => {
-                                let _ = ready.send(Err(error));
-                                return;
-                            }
-                        };
-                        if ready.send(Ok(())).is_err() {
-                            return;
-                        }
-                        while requests.recv().await.is_some() {
-                            let Some(chunk) = body.next().await else { break };
-                            if deliver.send(chunk.map_err(io::Error::other)).is_err() {
-                                break;
-                            }
-                        }
-                    } => {},
+    stream_runtime()?.spawn(async move {
+        tokio::select! {
+            biased;
+            _ = stopped => {},
+            _ = async {
+                while !flag.load(Ordering::Acquire) {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
                 }
-            });
-        })
-        .map_err(|error| transport_error("could not start stream worker", error))?;
+            } => {},
+            _ = async move {
+                let response = match tokio::time::timeout(
+                    REQUEST_TIMEOUT, connect(url, accept, key),
+                ).await {
+                    Ok(result) => result,
+                    Err(error) => Err(transport_error("stream opening timed out", error)),
+                };
+                let mut body = match response {
+                    Ok(body) => body.into_data_stream(),
+                    Err(error) => {
+                        let _ = ready.send(Err(error));
+                        return;
+                    }
+                };
+                if ready.send(Ok(())).is_err() {
+                    return;
+                }
+                while requests.recv().await.is_some() {
+                    let Some(chunk) = body.next().await else { break };
+                    if deliver.send(chunk.map_err(io::Error::other)).is_err() {
+                        break;
+                    }
+                }
+            } => {},
+        }
+    });
 
     match opened.recv() {
         Ok(result) => result.map(|()| {
@@ -116,6 +108,25 @@ pub(super) fn open(
         Err(_) if cancel.load(Ordering::Acquire) => Ok(None),
         Err(error) => Err(transport_error("stream could not open", error)),
     }
+}
+
+// The synchronous reader may run inside any caller runtime. A dedicated
+// worker drives the outstanding HTTP bodies without a thread per reader.
+fn stream_runtime() -> ApiResult<&'static Runtime> {
+    static RUNTIME: OnceLock<Result<Runtime, io::Error>> = OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("plasmite-http-read")
+                .enable_all()
+                .build()
+        })
+        .as_ref()
+        .map_err(|error| {
+            Error::new(ErrorKind::Io)
+                .with_message(format!("could not start stream runtime: {error}"))
+        })
 }
 
 async fn connect(url: Url, accept: &'static str, key: Option<AccessKey>) -> ApiResult<Body> {

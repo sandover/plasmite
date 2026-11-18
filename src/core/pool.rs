@@ -768,10 +768,19 @@ impl Pool {
         let _lock = self.read_lock()?;
         let header = self.header_locked()?;
         let mut cursor = crate::core::cursor::Cursor::new();
+        self.seek_index_locked(&mut cursor, header, seq);
+        Ok(cursor)
+    }
+
+    pub(crate) fn seek_index_locked(
+        &self,
+        cursor: &mut crate::core::cursor::Cursor,
+        header: PoolHeader,
+        seq: u64,
+    ) {
         if let Some((offset, _)) = self.get_via_index(header, seq) {
             cursor.seek_to(offset);
         }
-        Ok(cursor)
     }
 
     /// Fetch a frame using a caller-managed seq->offset cache for faster repeats.
@@ -839,17 +848,27 @@ impl Pool {
             return Ok(frame);
         }
 
-        self.get_by_scan(seq, header, cache)
+        self.scan_history_locked(header, cache, |frame| frame.seq >= seq)?
+            .map(|(_, frame)| frame)
+            .filter(|frame| frame.seq == seq)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::NotFound)
+                    .with_message("message not found")
+                    .with_seq(seq)
+            })
     }
 
     // The caller holds the shared lock. Skipped payloads remain private borrowed
     // views; only the selected message is copied across the public boundary.
-    fn get_by_scan(
+    pub(crate) fn scan_history_locked(
         &self,
-        seq: u64,
         header: PoolHeader,
         mut cache: Option<&mut SeqOffsetCache>,
-    ) -> Result<crate::core::cursor::FrameView<'_>, Error> {
+        matches: impl Fn(&crate::core::cursor::FrameView<'_>) -> bool,
+    ) -> Result<Option<(usize, crate::core::cursor::FrameView<'_>)>, Error> {
+        if header.oldest_seq == 0 {
+            return Ok(None);
+        }
         let ring_offset = header.ring_offset as usize;
         let ring_size = header.ring_size as usize;
         let mut offset = header.tail_off as usize;
@@ -866,13 +885,11 @@ impl Pool {
                     if let Some(cache) = cache.as_deref_mut() {
                         cache.insert(frame.seq, offset);
                     }
-                    if frame.seq == seq {
-                        return Ok(frame);
+                    if matches(&frame) {
+                        return Ok(Some((offset, frame)));
                     }
-                    if frame.seq > seq {
-                        return Err(Error::new(ErrorKind::NotFound)
-                            .with_message("message not found")
-                            .with_seq(seq));
+                    if frame.seq == header.newest_seq {
+                        return Ok(None);
                     }
                     offset = next_off;
                     last_seq = frame.seq;
