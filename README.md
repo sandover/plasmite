@@ -22,177 +22,146 @@ What would make it pleasant and predictable for programs (and agents) to communi
 So, there's **Plasmite**.
 
 Programs (Rust, C, Python, Go, or JS) send JSON messages into a channel called a *pool*. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. There are 3 basic verbs in the API and CLI:
+
 - `feed` sends a message
-- `follow` waits for new messages (like `tail`)
-- `fetch` reads specific messages
+- `fetch` reads what's already in the pool, then stops
+- `follow` waits for new messages (like `tail -f`)
 
 On the command line, `pls` is short for `plasmite`.
 
 #### Local message passing
 
-<table width="100%">
-  <tr>
-    <th align="left">Alice</th>
-    <th align="left">Bob (a local reader)</th>
-  </tr>
-  <tr>
-    <td valign="top">
-      <b>Alice creates a channel (aka a pool)</b><br/>
-      <code>pls pool create channel</code>
-      <br/><br/>
-      <b>Alice sends a message</b><br/>
-      <code>pls feed channel '{"from":"A","msg":"hello world"}'</code>
-    </td>
-    <td valign="top">
-      <b>Bob starts watching, after Alice sent</b><br/>
-      <code>pls follow channel --last 1</code>
-      <br/><br/>
-      <b>Bob sees it on stdout, then waits for more</b><br/>
-      <code>{"data":{"from":"A","msg":"hello world"}, ...}</code>
-    </td>
-  </tr>
-</table>
+Read down: each row happens after the one above.
+
+| | Alice in Terminal 1 | Alice in Terminal 2 |
+|---|---|---|
+| 1 | **Creates a message pool**<br>`pls pool create channel` | |
+| 2 | | **Starts watching**<br>`pls follow channel` |
+| 3 | **Sends a message**<br>`pls feed channel '{"msg":"hello world"}'` | **Sees it**<br>`{"data":{"msg":"hello world"}, ...}` |
+
+The message stays in the pool, so a later reader can fetch it: `pls fetch channel --last 1`.
 
 #### Remote message passing
 
-Replace `alice.example.test` with a hostname Carol can reach.
+| | Alice in Terminal 1 | Alice in Terminal 2 | Bob (another machine) |
+|---|---|---|---|
+| 4 | **Starts the server** in the background<br>`pls serve https://alice.local:9743 &` | | |
+| 5 | **Invites Bob**, then sends him the address and key<br>`pls access invite Bob` | | |
+| 6 | | | **Connects and watches**<br>`pls access connect https://alice.local:9743`<br>`pls follow https://alice.local:9743/channel` |
+| 7 | **Sends**<br>`pls feed channel '{"msg":"hi all"}'` | **Sees it**<br>`{"data":{"msg":"hi all"}, ...}` | **Sees it**<br>`{"data":{"msg":"hi all"}, ...}` |
 
-<table width="100%">
-  <tr>
-    <th align="left">Alice</th>
-    <th align="left">Bob</th>
-    <th align="left">Carol (remote)</th>
-  </tr>
-  <tr>
-    <td valign="top">
-      <b>Alice starts the server</b><br/>
-      <code>pls serve https://alice.example.test:9743</code>
-      <br/><br/>
-      <b>Alice invites Carol</b> (in another terminal)<br/>
-      <code>pls access invite Carol</code>
-      <br/><br/>
-      She sends Carol the address and the printed key privately.
-      <br/><br/>
-      <b>Alice sends</b><br/>
-      <code>pls feed channel '{"from":"A","msg":"hi all"}'</code>
-    </td>
-    <td valign="top">
-      <i>Bob never quit his <code>follow</code>, so he's still watching the same pool.</i>
-      <br/><br/>
-      <b>Bob sees it</b><br/>
-      <code>{"data":{"from":"A","msg":"hi all"}, ...}</code>
-    </td>
-    <td valign="top">
-      <b>Carol connects and watches</b><br/>
-      <code>pls access connect https://alice.example.test:9743</code><br/>
-      <code>pls follow https://alice.example.test:9743/channel</code>
-      <br/><br/>
-      <b>Carol sees it</b><br/>
-      <code>{"data":{"from":"A","msg":"hi all"}, ...}</code>
-    </td>
-  </tr>
-</table>
+Bob pastes the key at the prompt. Remote pools take the same commands as local ones. Bob can also open the address in a browser, and AI agents can connect over MCP. See the [serving guide](docs/record/serving.md).
 
-Carol pastes the key at a hidden prompt. The key grants full access to Alice's pools, so treat it like a password. `feed`, `fetch`, `follow` and `duplex` work the same way on remote pools as on local ones. Carol can also open the address in a browser, AI clients can connect over the Model Context Protocol (MCP), and on a trusted network the server can accept small messages over UDP. The [serving guide](docs/record/serving.md) covers all of it.
+#### Fire-and-forget over UDP
+
+On a trusted network, Alice's server can also take UDP datagrams: no handshake, no receipt, very little overhead. That suits sensors and other chatty senders that can live with an occasional lost message.
+
+```bash
+pls serve https://alice.local:9743 --udp=0.0.0.0:9701 &       # Alice
+pls feed udp://alice.local:9701/channel '{"temp_c": 21.4}'    # Bob
+```
 
 ## How it works
 
-A pool is one `.plasmite` file holding a ring buffer, 1 MiB unless you choose a size. Pools live in `~/.plasmite/pools/` unless you pass `--dir`. Many processes can feed and follow the same pool at once, and each message arrives whole and in order.
+A pool is a `.plasmite` file in `~/.plasmite/pools/` by default. Any number of programs can feed and follow the same pool.
 
 Every message has four fields:
 
-- `seq`: a sequence number that counts up from 1. It identifies the message.
-- `time`: when the pool stored the message.
-- `meta.tags`: labels you attach with `--tag`, for cheap filtering.
-- `data`: your JSON object.
+- `data`: your JSON payload
+- `meta.tags`: optional text labels you attach with `--tag`, for cheap filtering
+- `seq`: message index, counting up from 1
+- `time`: when the pool stored it
 
-Every read starts at a position. Without one, `follow` waits for the next new message and `fetch` reads everything the pool holds:
+`fetch` and `follow` can start wherever:
 
 ```bash
-pls fetch channel --last 5            # the last 5 messages, then exit
-pls follow channel --since 10m        # the last 10 minutes, then keep waiting
-pls follow channel --since 42         # from sequence 42 on
-pls follow channel --tag deploy --one # wait for one message tagged deploy, then exit
+pls fetch channel --last 5         # the last 5 messages, then stop
+pls follow channel --since 10m     # the last 10 minutes, then keep waiting
 ```
 
-A reader that falls behind never loses messages silently. If the pool has overwritten messages a reader asked for, the reader gets a `RetentionGap` error naming the first missing sequence and `next_seq`, where it can resume. `fetch` exits with the error, `follow` reports it on stderr and carries on from `next_seq`, and the libraries raise it. To resume after a restart, save the last `seq` you handled and start from the one after it.
+**Pipes just work.** Pipe `fetch` or `follow` into `feed` to copy messages between pools, tags and all. `jq` and similar tools work great.
 
-Output is readable in a terminal and compact JSON in a pipe, so `jq` and other tools work on it directly. Piping `fetch` or `follow` into `feed` copies messages to another pool with their data and tags.
-
-## When to use it
-
-Plasmite fits messaging on one machine or between a few nearby ones: CI gates, live event streams, sensor feeds, two-way process communication, system log ring buffers, and replay while you debug. The [Cookbook](docs/cookbook.md) has a recipe for each.
+## Comparison with other styles of IPC
 
 | If you'd reach for | What gets in the way | With Plasmite |
 |---|---|---|
-| **Kafka**, **RabbitMQ** | A cluster to run before the first message: brokers, partitions, consumer groups, oh my | No broker, no config: a pool is just a file |
-| **Redis**, **NATS** | A server even for two programs on one machine; messages lost on restart unless configured | Local pools with no server; messages survive restarts |
+| **Kafka**, **RabbitMQ** | Lots to set up before the first message: brokers, partitions, consumer groups | No config — just make a pool & go |
+| **Redis**, **NATS** | Always needs a server; messages lost on restart unless configured | Local pools don't need a server; messages survive restarts |
 | **Log files and `tail -f`** | A wall of text, growing without limits | Numbered series of JSON objects, fixed-size file |
-| **Temp files and watched folders** | Polling loops, stale lock files after a crash, files piling up | Readers wake on new messages; no cleanup, the pool overwrites the oldest |
+| **Temp files and watched folders** | Polling loops, stale lock files after a crash, files piling up | No polling, no lock files, nothing to clean up |
 | **SQLite as a queue** | Your own table, cleanup job and polling loop | Following, replay and bounded history built in |
-| **Pipes and sockets** | One reader, no memory: start late and you've missed it | Many readers and writers; late readers catch up |
+| **Pipes and sockets** | One reader & no memory | Many readers and writers; late readers catch up |
 | **ZeroMQ** | Messages gone on restart, in frames ordinary tools can't read | Messages survive restarts, as JSON you can pipe through `jq` |
 
-Plasmite keeps recent history and forgets the rest; it does not hold work until a consumer finishes it. If you need cluster replication, schema registries, or workflow orchestration, see [When Plasmite isn't the right fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
+**Use cases**: CI gates, live event streams, sensor feeds, duplex chat, system log ring buffers, replay & debug. See the **[Cookbook](docs/cookbook.md)**.
+
+## Performance
+
+Fast, small and quiet. Publishing small messages through the local APIs on an Apple M5 Pro Mac:
+
+| Language | Messages per second | Peak memory |
+|---|---:|---:|
+| Rust | 432,700 | 17 MiB |
+| C | 380,400 | 18 MiB |
+| Go | 224,300 | 28 MiB |
+| Python | 105,600 | 40 MiB |
+| JavaScript (Node) | 89,600 | 67 MiB |
+
+A reader waiting on a quiet pool uses about 0.1% of one CPU core, and local pools never touch the network. See the [2.0 measurements](CHANGELOG.md#faster-publishing-and-catch-up) and the [performance reports](docs/performance/README.md).
 
 ## Install
 
-**Homebrew** (macOS and Linux x86_64) installs the CLI and the SDK (library, C header, pkg-config):
+### macOS and Linux (Homebrew)
 
 ```bash
 brew install sandover/tap/plasmite
 ```
 
-**Python** (macOS, Linux x86_64, Windows x86_64) installs the CLI and the Python library:
+Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header, pkg-config). Go links against this SDK, so install it first if you use Go.
+
+### Python
 
 ```bash
 uv tool install plasmite   # CLI
-uv add plasmite            # library in a uv project
+uv add plasmite            # library, in a uv project
 ```
 
-**Node** (Node.js 24 or newer, on macOS, Linux x86_64 or Windows x86_64). Install the CLI globally or add the library to a project:
+Wheels for macOS, Linux x86_64 and Windows x86_64 bundle the CLI and native library.
+
+### Node
 
 ```bash
-npm i -g plasmite
-npm i plasmite
+npm i -g plasmite          # CLI
+npm i plasmite             # library
 ```
 
-**Rust** builds from source:
+Needs Node.js 24 or newer, on macOS, Linux x86_64 or Windows x86_64.
+
+### Rust
 
 ```bash
 cargo install plasmite     # CLI
 cargo add plasmite         # library
 ```
 
-**Go** links against the SDK through cgo, so install the SDK first with Homebrew or from a release archive:
+### Go
 
 ```bash
 go get github.com/sandover/plasmite/bindings/go/v2/local@v2.0.0
 ```
 
-**Release archives** on [GitHub Releases](https://github.com/sandover/plasmite/releases) hold the CLI and SDK for macOS and Linux, including preview builds for Linux ARM and Raspberry Pi. The [distribution guide](docs/record/distribution.md) lists every platform, its requirements, and how to install the archives.
+### Everything else
 
-Upgrading from 1.x? Read the [2.0 upgrade guide](docs/record/upgrading-2.0.md).
+[GitHub Releases](https://github.com/sandover/plasmite/releases) has archives of the CLI and SDK for macOS and Linux, including preview builds for Linux ARM and Raspberry Pi. See the [distribution guide](docs/record/distribution.md) for every platform.
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `feed POOL [MESSAGE]` | Send a JSON object, or messages from stdin |
-| `follow POOL` | Wait for new messages; `--since` or `--last` starts in history |
-| `fetch POOL [SEQ]` | Read retained messages, or one message by sequence, and exit |
-| `duplex POOL` | Send from stdin and follow on stdout in one session |
-| `pool create\|list\|info\|delete` | Manage pool files |
-
-Run `plasmite --help` for everything else, including the server, access keys, and MCP, and `plasmite COMMAND --help` for each command's options.
-
-## Performance
-
-Local pools need no network round trip. The [performance reports](docs/performance/README.md) measure local, HTTP, UDP and MCP access across different payloads, read paths and hosts, with benchmarks you can rerun.
+Upgrading from 1.x? See the [2.0 upgrade guide](docs/record/upgrading-2.0.md).
 
 ## Learn more
 
+`pls --help` lists every command; `pls COMMAND --help` lists its options.
+
 - [Cookbook](docs/cookbook.md): task-by-task recipes.
+- [Performance reports](docs/performance/README.md) measure local, HTTP, UDP and MCP access.
 - [CLI guide](docs/cli.md): pool references, input and output formats, exit codes.
 - Libraries: [Rust](README-crate.md), [Python](bindings/python/README.md), [Node](bindings/node/README.md), [Go](bindings/go/README.md), [C](include/plasmite.h).
 - [Serving guide](docs/record/serving.md): HTTPS, access keys, browsers, MCP, UDP, running at boot.
