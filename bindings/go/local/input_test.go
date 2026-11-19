@@ -3,7 +3,7 @@ package local
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/sandover/plasmite/bindings/go/api"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
 	"math"
 	"reflect"
 	"strconv"

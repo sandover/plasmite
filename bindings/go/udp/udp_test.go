@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sandover/plasmite/bindings/go/api"
-	"github.com/sandover/plasmite/bindings/go/local"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
+	"github.com/sandover/plasmite/bindings/go/v2/local"
 )
 
 func fetchStored(pool *local.Pool, seq uint64) (*api.Message, error) {

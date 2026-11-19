@@ -6,7 +6,7 @@ package local
 import "C"
 
 import (
-	"github.com/sandover/plasmite/bindings/go/api"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
 	"reflect"
 	"runtime"
 	"unsafe"

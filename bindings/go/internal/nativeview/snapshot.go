@@ -14,7 +14,7 @@ package nativeview
 import "C"
 
 import (
-	"github.com/sandover/plasmite/bindings/go/api"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
 	"runtime"
 	"slices"
 	"unsafe"
@@ -48,9 +48,9 @@ func TagSpans(tags []string) (unsafe.Pointer, func()) {
 // Snapshot contains only private Go allocations and relative checked offsets.
 // Binding code must keep Bytes and Duplicates immutable after transfer.
 type Snapshot struct {
-	bytes            []byte
-	duplicates       []uintptr
-	data, meta       uintptr
+	bytes       []byte
+	duplicates  []uintptr
+	data, meta  uintptr
 	seq, timeNS uint64
 }
 

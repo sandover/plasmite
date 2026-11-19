@@ -23,9 +23,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/sandover/plasmite/bindings/go/api"
-	"github.com/sandover/plasmite/bindings/go/internal/nativeview"
-	"github.com/sandover/plasmite/bindings/go/local"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
+	"github.com/sandover/plasmite/bindings/go/v2/internal/nativeview"
+	"github.com/sandover/plasmite/bindings/go/v2/local"
 )
 
 type Error = api.Error

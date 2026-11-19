@@ -6,7 +6,7 @@ package local
 import "C"
 
 import (
-	"github.com/sandover/plasmite/bindings/go/internal/nativeview"
+	"github.com/sandover/plasmite/bindings/go/v2/internal/nativeview"
 	"runtime"
 	"unsafe"
 )

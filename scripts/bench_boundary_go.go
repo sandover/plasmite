@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/sandover/plasmite/bindings/go/local"
+	"github.com/sandover/plasmite/bindings/go/v2/local"
 )
 
 type request struct {

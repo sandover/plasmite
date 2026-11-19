@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/sandover/plasmite/bindings/go/api"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
 	"io"
 	"math"
 	"testing"

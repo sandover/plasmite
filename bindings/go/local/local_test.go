@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sandover/plasmite/bindings/go/api"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
 )
 
 const testPoolSizeBytes uint64 = 1024 * 1024

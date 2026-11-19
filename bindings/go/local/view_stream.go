@@ -9,7 +9,7 @@ import (
 	"context"
 	"unsafe"
 
-	"github.com/sandover/plasmite/bindings/go/internal/nativeview"
+	"github.com/sandover/plasmite/bindings/go/v2/internal/nativeview"
 )
 
 // ViewStream pulls one independent immutable message at a time. Close releases

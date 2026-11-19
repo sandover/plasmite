@@ -30,7 +30,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/sandover/plasmite/bindings/go/api"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
 )
 
 type ErrorKind = api.ErrorKind

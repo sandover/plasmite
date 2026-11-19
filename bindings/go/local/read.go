@@ -15,8 +15,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/sandover/plasmite/bindings/go/api"
-	"github.com/sandover/plasmite/bindings/go/internal/nativeview"
+	"github.com/sandover/plasmite/bindings/go/v2/api"
+	"github.com/sandover/plasmite/bindings/go/v2/internal/nativeview"
 )
 
 func Create(create bool) api.OpenOption  { return api.Create(create) }
