@@ -1,2 +1,11 @@
-vendor/lite3/** whitespace=-trailing-space
-vendor/lite3-read-safety.patch -whitespace
+# The portable manifest and Lite3 vendor checks hash these source bytes.
+bindings/node/portable-core/** -text
+c/** -text
+src/abi_builder.rs -text
+src/core/error.rs -text
+src/core/lite3/** -text
+src/interface_wire.rs -text
+src/view.rs -text
+src/view/** -text
+vendor/lite3/** -text whitespace=-trailing-space
+vendor/lite3-read-safety.patch -text -whitespace
