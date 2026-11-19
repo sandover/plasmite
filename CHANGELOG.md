@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
   Follow keeps its one-message option for shell scripts.
 - HTTP pool operations use v2. Local and HTTP readers report the first missing
   sequence and the first sequence still retained when the pool wraps.
+- HTTP follow stays open on quiet pools and times out when the client stops
+  draining a full output queue.
 - Readers check pool identity when they open from a local handle or resume an HTTP stream. A different pool identity produces `NotFound` even when the name matches.
 - Native packages use versioned shared-library filenames. The on-disk pool
   format remains compatible with 1.x.

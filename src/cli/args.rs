@@ -732,7 +732,7 @@ pub(crate) struct ServeRunArgs {
     #[arg(
         long,
         value_name = "MILLISECONDS",
-        help = "Max tail timeout in milliseconds (must be positive)",
+        help = "Timeout in milliseconds for opening a read, completing a fetch response, or a stalled follow (must be positive)",
         help_heading = "Safety"
     )]
     pub(crate) max_tail_timeout_ms: Option<u64>,

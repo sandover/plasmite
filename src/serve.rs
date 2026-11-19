@@ -206,10 +206,23 @@ pub(crate) async fn serve_secure_pair(
             .with_message("remote sharing requires a TLS certificate and key"));
     }
     let activity = ActivityRegistry::default();
-    let local_server =
-        prepare_server_with_access(&local, Some(access.clone()), true, activity.clone()).await?;
-    let remote_server =
-        prepare_server_with_access(&remote, Some(access.clone()), false, activity).await?;
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let local_server = prepare_server_with_access(
+        &local,
+        Some(access.clone()),
+        true,
+        activity.clone(),
+        shutdown_rx.clone(),
+    )
+    .await?;
+    let remote_server = prepare_server_with_access(
+        &remote,
+        Some(access.clone()),
+        false,
+        activity,
+        shutdown_rx.clone(),
+    )
+    .await?;
     let local_listener = tokio::net::TcpListener::bind(local.bind)
         .await
         .map_err(|err| {
@@ -321,7 +334,6 @@ pub(crate) async fn serve_secure_pair(
         "Create access: plasmite --dir {} access invite NAME",
         crate::cli::output_support::human_literal(&local.pool_dir.display().to_string())
     );
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut listeners = JoinSet::new();
     listeners.spawn(serve_plain(
         local_listener,
@@ -412,6 +424,7 @@ async fn prepare_server_with_access(
     secure_access: Option<Arc<AccessStore>>,
     local_admin: bool,
     activity: ActivityRegistry,
+    shutdown: watch::Receiver<bool>,
 ) -> Result<PreparedServer, Error> {
     validate_config(config)?;
 
@@ -484,7 +497,7 @@ async fn prepare_server_with_access(
         .route("/v0/ui/pools/stream", get(ui_pool_stream))
         .route("/v0/ui/pools/:pool/info", get(ui_pool_info))
         .route("/v0/ui/activity", get(ui_activity))
-        .merge(http_v2::routes())
+        .merge(http_v2::routes(shutdown))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             observe_activity,
@@ -2495,10 +2508,16 @@ mod tests {
         cfg.pool_dir = temp.path().to_owned();
         cfg.max_tail_timeout_ms = 1_000;
         let activity = super::ActivityRegistry::default();
-        let mut app = super::prepare_server_with_access(&cfg, None, true, activity.clone())
-            .await
-            .unwrap()
-            .app;
+        let mut app = super::prepare_server_with_access(
+            &cfg,
+            None,
+            true,
+            activity.clone(),
+            tokio::sync::watch::channel(false).1,
+        )
+        .await
+        .unwrap()
+        .app;
         let mut follow = Request::builder()
             .uri("/v2/pools/events/follow")
             .header("host", "localhost")
@@ -2543,10 +2562,16 @@ mod tests {
                 .any(|entry| entry["kind"] == "browser")
         );
 
-        let mut remote = super::prepare_server_with_access(&cfg, None, false, activity)
-            .await
-            .unwrap()
-            .app;
+        let mut remote = super::prepare_server_with_access(
+            &cfg,
+            None,
+            false,
+            activity,
+            tokio::sync::watch::channel(false).1,
+        )
+        .await
+        .unwrap()
+        .app;
         let forbidden = remote
             .call(
                 Request::builder()

@@ -7,7 +7,7 @@ use crate::interface_wire::{
 use plasmite::api::{Read, ReadStatus, Since};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub(super) fn routes() -> Router<Arc<AppState>> {
+pub(super) fn routes(shutdown: watch::Receiver<bool>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/v2/pools", post(create_pool).get(list_pools))
         .route("/v2/pools/:pool", get(pool_info).delete(delete_pool))
@@ -15,6 +15,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/v2/pools/:pool/feed", post(feed))
         .route("/v2/pools/:pool/fetch", get(read::<false>))
         .route("/v2/pools/:pool/follow", get(read::<true>))
+        .layer(Extension(shutdown))
         .layer(middleware::map_response(|mut response: Response| async {
             response
                 .headers_mut()
@@ -97,6 +98,7 @@ struct ReadQuery {
 
 async fn read<const LIVE: bool>(
     State(state): State<Arc<AppState>>,
+    Extension(shutdown): Extension<watch::Receiver<bool>>,
     headers: HeaderMap,
     AxumPath(name): AxumPath<String>,
     Query(query): Query<ReadQuery>,
@@ -140,6 +142,7 @@ async fn read<const LIVE: bool>(
     let worker = ReadWorker {
         send,
         timeout,
+        shutdown,
         revoked,
         binary,
     };
@@ -187,6 +190,7 @@ async fn read<const LIVE: bool>(
 struct ReadWorker {
     send: mpsc::Sender<Bytes>,
     timeout: Duration,
+    shutdown: watch::Receiver<bool>,
     revoked: Option<Arc<AtomicBool>>,
     binary: bool,
 }
@@ -234,16 +238,19 @@ impl ReadWorker {
                 return;
             }
         };
-        let Some(deadline) = Instant::now().checked_add(self.timeout) else {
+        let started = Instant::now();
+        if !LIVE && started.checked_add(self.timeout).is_none() {
             let _ = opened.send(Err(
                 Error::new(ErrorKind::Usage).with_message("stream limit is out of range")
             ));
             return;
-        };
+        }
         if opened.send(Ok(incarnation)).is_err() {
             return;
         }
 
+        const CHECK_INTERVAL: Duration = Duration::from_millis(50);
+        let mut stalled_since = None;
         loop {
             if self.send.is_closed() {
                 return;
@@ -252,39 +259,46 @@ impl ReadWorker {
                 self.error(&Error::new(ErrorKind::Permission).with_message("access key revoked"));
                 return;
             }
-            // Keep one channel slot for a terminal record. Advance the read only
-            // when there is room to hand off the next matching frame.
-            if self.send.capacity() <= 1 {
-                // The worker already runs on a blocking thread. Let the receiver
-                // wake it as soon as there is room while checking revocation and
-                // the cutoff even if the consumer has stopped reading.
-                let wait = deadline.saturating_duration_since(Instant::now());
-                let room = tokio::runtime::Handle::current().block_on(async {
-                    tokio::time::timeout(
-                        wait.min(Duration::from_millis(50)),
-                        self.send.reserve_many(2),
-                    )
-                    .await
-                });
-                match room {
-                    Ok(Ok(permits)) => {
-                        drop(permits);
-                        continue;
-                    }
-                    Ok(Err(_)) => return,
-                    Err(_) if Instant::now() >= deadline => {
-                        self.cutoff(reader.position());
-                        return;
-                    }
-                    Err(_) => continue,
-                }
-            }
-            let wait = deadline.saturating_duration_since(Instant::now());
-            if wait.is_zero() {
-                self.cutoff(reader.position());
+            if *self.shutdown.borrow() {
+                self.error(&Error::new(ErrorKind::Io).with_message("server is shutting down"));
                 return;
             }
-            let wait = wait.min(Duration::from_millis(50));
+            // Keep one channel slot for a terminal record. Advance the read only
+            // when there is room to hand off the next matching frame.
+            let full = self.send.capacity() <= 1;
+            if !full {
+                stalled_since = None;
+            }
+            let wait = if !LIVE {
+                self.timeout.saturating_sub(started.elapsed())
+            } else if full {
+                let since = stalled_since.get_or_insert_with(Instant::now);
+                self.timeout.saturating_sub(since.elapsed())
+            } else {
+                CHECK_INTERVAL
+            };
+            if wait.is_zero() {
+                if LIVE {
+                    self.error(&Error::new(ErrorKind::Io).with_message("follow output stalled"));
+                } else {
+                    self.cutoff(reader.position());
+                }
+                return;
+            }
+            let wait = wait.min(CHECK_INTERVAL);
+            if full {
+                // Wake as soon as the response makes progress. Cap each wait
+                // so the worker also checks revocation and server shutdown.
+                let room = tokio::runtime::Handle::current().block_on(async {
+                    tokio::time::timeout(wait, self.send.reserve_many(2)).await
+                });
+                match room {
+                    Ok(Ok(_)) => stalled_since = None,
+                    Ok(Err(_)) => return,
+                    Err(_) => {}
+                }
+                continue;
+            }
             let record = if self.binary {
                 reader.poll(wait).map(|poll| poll.map(encode_binary_frame))
             } else {
@@ -321,12 +335,8 @@ impl ReadWorker {
 
     fn cutoff(&self, position: (Option<u64>, Option<u64>)) {
         match position {
-            (Some(next_seq), until) if until.is_none_or(|end| next_seq <= end) => {
-                let mut record = json!({"type":"cutoff","next_seq":next_seq});
-                if let Some(until) = until {
-                    record["until"] = until.into();
-                }
-                self.control(record);
+            (Some(next_seq), Some(until)) if next_seq <= until => {
+                self.control(json!({"type":"cutoff","next_seq":next_seq,"until":until}));
             }
             _ => self.control(json!({"type":"complete"})),
         }
@@ -387,6 +397,7 @@ mod tests {
             ReadWorker {
                 send,
                 timeout: Duration::from_secs(5),
+                shutdown: watch::channel(false).1,
                 revoked: None,
                 binary: false,
             }
@@ -415,6 +426,7 @@ mod tests {
         let worker = ReadWorker {
             send,
             timeout: Duration::from_secs(5),
+            shutdown: watch::channel(false).1,
             revoked: Some(revoked.clone()),
             binary: false,
         };
@@ -431,6 +443,80 @@ mod tests {
         assert_eq!(error["type"], "error");
         assert_eq!(error["error"]["kind"], "Permission");
         done.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn quiet_follow_ends_on_server_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let reference = PoolRef::name("quiet");
+        client
+            .create_pool(&reference, PoolOptions::new(65536))
+            .unwrap();
+        let (send, mut receive) = mpsc::channel(2);
+        let (opened, opening) = tokio::sync::oneshot::channel();
+        let (stop, shutdown) = watch::channel(false);
+        let done = tokio::task::spawn_blocking(move || {
+            ReadWorker {
+                send,
+                timeout: Duration::from_secs(5),
+                shutdown,
+                revoked: None,
+                binary: false,
+            }
+            .run::<true>(client, reference, Read::new(), None, opened);
+        });
+        opening.await.unwrap().unwrap();
+        stop.send_replace(true);
+        tokio::time::timeout(Duration::from_secs(2), done)
+            .await
+            .unwrap()
+            .unwrap();
+        let error: Value = serde_json::from_slice(&receive.try_recv().unwrap()).unwrap();
+        assert_eq!(error["type"], "error");
+        assert_eq!(error["error"]["message"], "server is shutting down");
+        assert!(receive.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stalled_follow_reports_io_and_releases_its_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let pool_ref = PoolRef::name("stalled");
+        let mut pool = client
+            .create_pool(&pool_ref, PoolOptions::new(65536))
+            .unwrap();
+        for n in 1..=3 {
+            pool.feed(&json!({"n": n}), Default::default()).unwrap();
+        }
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = permits.clone().try_acquire_owned().unwrap();
+        let (send, mut receive) = mpsc::channel(2);
+        let (opened, opening) = tokio::sync::oneshot::channel();
+        let done = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            ReadWorker {
+                send,
+                timeout: Duration::from_millis(100),
+                shutdown: watch::channel(false).1,
+                revoked: None,
+                binary: false,
+            }
+            .run::<true>(client, pool_ref, Read::since(Since::Oldest), None, opened);
+        });
+        opening.await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), done)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(permits.available_permits(), 1);
+        let message: Value = serde_json::from_slice(&receive.try_recv().unwrap()).unwrap();
+        assert_eq!(message["seq"], 1);
+        let error: Value = serde_json::from_slice(&receive.try_recv().unwrap()).unwrap();
+        assert_eq!(error["type"], "error");
+        assert_eq!(error["error"]["kind"], "Io");
+        assert_eq!(error["error"]["message"], "follow output stalled");
+        assert!(receive.recv().await.is_none());
     }
 
     #[tokio::test]
@@ -451,6 +537,7 @@ mod tests {
             let worker = ReadWorker {
                 send,
                 timeout: Duration::from_millis(250),
+                shutdown: watch::channel(false).1,
                 revoked: None,
                 binary: false,
             };

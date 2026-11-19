@@ -115,7 +115,7 @@ Replace `plasmite_read` with `plasmite_fetch` and `plasmite_wait` with `plasmite
 | `GET /v0/pools/{p}/info` | `GET /v2/pools/{p}` |
 | `POST /v0/pools/open` | `POST /v2/pools/{p}/open` |
 
-A 2.0 read ends with a control record. `complete` ends a finite read. `error` carries the failure and any retention fields. `cutoff` tells the client to continue at `next_seq`, keeping the original `until` on a fetch. Read the [HTTP contract](../../spec/v2/SPEC.md#http) before updating a client.
+An HTTP follow stays open while waiting for new messages. A finite fetch ends with `complete` or asks the client to continue with `cutoff`, using `next_seq` and the original `until`. An `error` record carries the failure and any retention fields. See the [HTTP contract](../../spec/v2/SPEC.md#http).
 
 ## Rebuild C callers
 
