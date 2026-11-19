@@ -69,16 +69,16 @@ func (p *Pool) openLite3Read(finite bool, opts []api.ReadOption) (*Lite3Stream, 
 	if p == nil {
 		return nil, closedError("pool")
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
 	options, free, err := nativeReadOptions(opts)
 	if err != nil {
 		return nil, err
 	}
 	defer free()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
+		return nil, closedError("pool")
+	}
 	var stream *C.plsm_lite3_stream_t
 	var nativeErr *C.plsm_error_t
 	var status C.int
@@ -90,7 +90,7 @@ func (p *Pool) openLite3Read(finite bool, opts []api.ReadOption) (*Lite3Stream, 
 	if status != 0 {
 		return nil, fromCError(nativeErr)
 	}
-	return &Lite3Stream{ptr: stream}, nil
+	return &Lite3Stream{ptr: stream, reading: make(chan struct{}, 1)}, nil
 }
 
 func nativeReadOptions(opts []api.ReadOption) (C.plsm_read_options_t, func(), error) {
@@ -114,16 +114,16 @@ func (p *Pool) openRead(finite bool, opts []api.ReadOption) (*Stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("pool")
-	}
 	options, free, err := nativeReadOptions(opts)
 	if err != nil {
 		return nil, err
 	}
 	defer free()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
+		return nil, closedError("pool")
+	}
 	var stream *C.plsm_stream_t
 	var nativeErr *C.plsm_error_t
 	var status C.int
@@ -135,14 +135,14 @@ func (p *Pool) openRead(finite bool, opts []api.ReadOption) (*Stream, error) {
 	if status != 0 {
 		return nil, fromCError(nativeErr)
 	}
-	return &Stream{ptr: stream}, nil
+	return &Stream{ptr: stream, reading: make(chan struct{}, 1)}, nil
 }
 
 func (s *Stream) Next(ctx context.Context) (*api.Message, error) {
 	if s == nil {
 		return nil, closedError("stream")
 	}
-	return readNext(ctx, func(wait uint64) (*api.Message, int, error) {
+	return readStream(ctx, s.reading, func(wait uint64) (*api.Message, int, error) {
 		raw, status, err := s.nextWait(wait)
 		if err != nil || status != 1 {
 			return nil, status, err
@@ -156,7 +156,23 @@ func (s *Lite3Stream) Next(ctx context.Context) (*Lite3Frame, error) {
 	if s == nil {
 		return nil, closedError("stream")
 	}
-	return readNext(ctx, s.nextWait)
+	return readStream(ctx, s.reading, s.nextWait)
+}
+
+func readStream[T any](ctx context.Context, reading chan struct{}, poll func(uint64) (*T, int, error)) (*T, error) {
+	if ctx == nil {
+		return nil, invalidArgumentError("context is nil")
+	}
+	if reading == nil {
+		return nil, closedError("stream")
+	}
+	select {
+	case reading <- struct{}{}:
+		defer func() { <-reading }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return readNext(ctx, poll)
 }
 
 func readNext[T any](ctx context.Context, poll func(uint64) (*T, int, error)) (*T, error) {

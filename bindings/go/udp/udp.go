@@ -56,7 +56,7 @@ type Pool struct {
 
 type Follow struct {
 	stateMu sync.Mutex
-	readMu  sync.Mutex
+	reading chan struct{}
 	ptr     *C.plsm_udp_follow_t
 	closing bool
 	raw     bool
@@ -118,6 +118,7 @@ func (p *Pool) FeedLite3(payload []byte, opts ...api.FeedOption) error {
 	if p == nil {
 		return closedError("UDP pool")
 	}
+	durability := api.ApplyFeedOptions(opts...).Durability
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.ptr == nil {
@@ -128,7 +129,7 @@ func (p *Pool) FeedLite3(payload []byte, opts ...api.FeedOption) error {
 	}
 	options := C.plsm_feed_options_t{
 		struct_size: C.uint32_t(C.sizeof_plsm_feed_options_t),
-		durability:  C.uint32_t(api.ApplyFeedOptions(opts...).Durability),
+		durability:  C.uint32_t(durability),
 	}
 	var cErr *C.plsm_error_t
 	rc := C.plsm_udp_pool_feed_lite3(
@@ -165,6 +166,7 @@ func (p *Pool) Feed(value any, tags []string, opts ...api.FeedOption) error {
 	if p == nil {
 		return closedError("UDP pool")
 	}
+	durability := api.ApplyFeedOptions(opts...).Durability
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.ptr == nil {
@@ -174,7 +176,7 @@ func (p *Pool) Feed(value any, tags []string, opts ...api.FeedOption) error {
 	defer free()
 	options := C.plsm_feed_options_t{
 		struct_size: C.uint32_t(C.sizeof_plsm_feed_options_t),
-		durability:  C.uint32_t(api.ApplyFeedOptions(opts...).Durability),
+		durability:  C.uint32_t(durability),
 		tags:        (*C.plsm_text_t)(cTags),
 		tags_len:    C.size_t(len(tags)),
 	}
@@ -209,16 +211,16 @@ func (p *Pool) read(live, views, raw bool, opts []api.ReadOption) (*Follow, erro
 	if p == nil {
 		return nil, closedError("UDP pool")
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ptr == nil {
-		return nil, closedError("UDP pool")
-	}
 	var cfg api.ReadConfig
 	for _, opt := range opts {
 		if err := opt(&cfg); err != nil {
 			return nil, err
 		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
+		return nil, closedError("UDP pool")
 	}
 	tags, free := nativeview.TagSpans(cfg.Tags)
 	defer free()
@@ -234,7 +236,7 @@ func (p *Pool) read(live, views, raw bool, opts []api.ReadOption) (*Follow, erro
 	if C.plsm_udp_pool_read(p.ptr, &options, boolToUint32(live), boolToUint32(views), &out, &nativeErr) != 0 {
 		return nil, fromCError(nativeErr)
 	}
-	return &Follow{ptr: out, raw: raw, views: views}, nil
+	return &Follow{ptr: out, raw: raw, views: views, reading: make(chan struct{}, 1)}, nil
 }
 
 func (p *Pool) Close() {
@@ -258,8 +260,15 @@ func (f *Follow) Next(ctx context.Context) (api.UDPEvent, error) {
 	if ctx == nil {
 		return nil, invalidArgument("context is nil")
 	}
-	f.readMu.Lock()
-	defer f.readMu.Unlock()
+	if f.reading == nil {
+		return nil, closedError("UDP follow")
+	}
+	select {
+	case f.reading <- struct{}{}:
+		defer func() { <-f.reading }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	f.stateMu.Lock()
 	if f.ptr == nil || f.closing {
 		f.stateMu.Unlock()
@@ -343,8 +352,8 @@ func (f *Follow) Close() {
 	f.closing = true
 	C.plsm_udp_follow_cancel(ptr)
 	f.stateMu.Unlock()
-	f.readMu.Lock()
-	defer f.readMu.Unlock()
+	f.reading <- struct{}{}
+	defer func() { <-f.reading }()
 	f.stateMu.Lock()
 	defer f.stateMu.Unlock()
 	if f.ptr != nil {

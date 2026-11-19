@@ -26,6 +26,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -67,6 +68,7 @@ type Pool struct {
 type Stream struct {
 	closeMu sync.Mutex
 	mu      sync.Mutex
+	reading chan struct{}
 	ptr     *C.plsm_stream_t
 }
 
@@ -75,6 +77,7 @@ type Stream struct {
 type Lite3Stream struct {
 	closeMu sync.Mutex
 	mu      sync.Mutex
+	reading chan struct{}
 	ptr     *C.plsm_lite3_stream_t
 }
 
@@ -107,8 +110,8 @@ func NewClient(poolDir string) (*Client, error) {
 	if major := C.plsm_abi_major(); major != 2 {
 		return nil, &Error{Kind: ErrorUsage, Message: fmt.Sprintf("Plasmite requires ABI major 2; found %d", major)}
 	}
-	if poolDir == "" {
-		return nil, invalidArgumentError("poolDir is required")
+	if poolDir == "" || strings.ContainsRune(poolDir, 0) {
+		return nil, invalidArgumentError("pool directory must be nonempty and contain no NUL")
 	}
 	cPoolDir := C.CString(poolDir)
 	defer C.free(unsafe.Pointer(cPoolDir))
@@ -175,8 +178,8 @@ func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
 	if c.ptr == nil {
 		return nil, closedError("client")
 	}
-	if ref == "" {
-		return nil, invalidArgumentError("pool ref is required")
+	if ref == "" || strings.ContainsRune(string(ref), 0) {
+		return nil, invalidArgumentError("pool reference must be nonempty and contain no NUL")
 	}
 	if sizeBytes == 0 {
 		sizeBytes = api.DefaultPoolSizeBytes
@@ -197,23 +200,23 @@ func (c *Client) OpenPool(ref PoolRef, opts ...api.OpenOption) (*Pool, error) {
 	if c == nil {
 		return nil, closedError("client")
 	}
+	var cfg api.OpenConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ptr == nil {
 		return nil, closedError("client")
 	}
-	if ref == "" {
-		return nil, invalidArgumentError("pool ref is required")
+	if ref == "" || strings.ContainsRune(string(ref), 0) {
+		return nil, invalidArgumentError("pool reference must be nonempty and contain no NUL")
 	}
 	cRef := C.CString(string(ref))
 	defer C.free(unsafe.Pointer(cRef))
 
 	var cPool *C.plsm_pool_t
 	var cErr *C.plsm_error_t
-	var cfg api.OpenConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
 	var create C.uint32_t
 	if cfg.Create {
 		create = 1

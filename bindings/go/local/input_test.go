@@ -373,3 +373,17 @@ func TestNativeAppendPackedScalarsPreserveTypesSnapshotsAndHooks(t *testing.T) {
 		}
 	}
 }
+
+func TestFeedViewRejectsPointerCycleBeforeAppend(t *testing.T) {
+	pool := newTestPool(t, newTestClient(t), "cycle")
+	var link any
+	link = &link
+	if _, err := pool.FeedView(map[string]any{"link": link}, nil); !isUsage(err) {
+		t.Fatalf("cyclic pointer: %v", err)
+	}
+	value := 7
+	receipt, err := pool.FeedView(map[string]any{"a": &value, "b": &value}, nil)
+	if err != nil || receipt.Seq() != 1 {
+		t.Fatalf("shared pointer: %v, %v", receipt, err)
+	}
+}

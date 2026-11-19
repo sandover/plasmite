@@ -49,10 +49,10 @@ func (s *ViewStream) nextWait(wait uint64) (*MessageView, int, error) {
 // Next blocks until a view arrives, the context ends, or this finite stream
 // finishes. Close interrupts an idle read. A cancellable context bounds each wait.
 func (s *ViewStream) Next(ctx context.Context) (*MessageView, error) {
-	if s == nil {
+	if s == nil || s.stream == nil {
 		return nil, closedError("stream")
 	}
-	return readNext(ctx, s.nextWait)
+	return readStream(ctx, s.stream.reading, s.nextWait)
 }
 func (s *ViewStream) Close() {
 	if s != nil && s.stream != nil {

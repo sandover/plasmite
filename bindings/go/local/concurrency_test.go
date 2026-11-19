@@ -267,3 +267,92 @@ func TestStreamsConcurrentReadAndClose(t *testing.T) {
 		})
 	}
 }
+
+func TestConcurrentReadObservesDeadlineWhileQueued(t *testing.T) {
+	pool := newTestPool(t, newTestClient(t), "busy-readers")
+	json, err := pool.Follow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer json.Close()
+	lite3, err := pool.FollowLite3()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lite3.Close()
+	view, err := pool.FollowView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer view.Close()
+	for _, tc := range []struct {
+		name    string
+		reading chan struct{}
+		read    func(context.Context) error
+	}{
+		{"json", json.(*Stream).reading, func(ctx context.Context) error { _, err := json.Next(ctx); return err }},
+		{"lite3", lite3.reading, func(ctx context.Context) error { _, err := lite3.Next(ctx); return err }},
+		{"view", view.stream.reading, func(ctx context.Context) error { _, err := view.Next(ctx); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.reading <- struct{}{}
+			defer func() { <-tc.reading }()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- tc.read(ctx) }()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("overlapping read: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("overlapping read waited for the active read")
+			}
+		})
+	}
+}
+
+func TestHandleOptionsCanCallBackIntoHandle(t *testing.T) {
+	client, err := NewClient(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := client.CreatePool("option-callback", testPoolSizeBytes)
+	if err != nil {
+		client.Close()
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		other, err := client.OpenPool("option-callback", func(*api.OpenConfig) {
+			_, err := client.ListPools()
+			if err != nil {
+				t.Error(err)
+			}
+		})
+		if err != nil {
+			result <- err
+			return
+		}
+		other.Close()
+		reader, err := pool.Fetch(func(*api.ReadConfig) error {
+			_, err := pool.Info()
+			return err
+		})
+		if err == nil {
+			reader.Close()
+		}
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		pool.Close()
+		client.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("option callback could not use the same handle")
+	}
+}

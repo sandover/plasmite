@@ -673,3 +673,29 @@ func TestRejectsWrongABIMajor(t *testing.T) {
 		t.Fatalf("expected clear ABI version error, got %v", err)
 	}
 }
+
+func TestLocalIdentifiersRejectEmbeddedNUL(t *testing.T) {
+	dir := t.TempDir()
+	if client, err := NewClient(dir + "\x00other"); !isUsage(err) {
+		client.Close()
+		t.Fatalf("NewClient: %v", err)
+	}
+	client := newTestClient(t)
+	newTestPool(t, client, "events")
+	invalid := PoolRefName("events\x00other")
+	if pool, err := client.OpenPool(invalid); !isUsage(err) {
+		pool.Close()
+		t.Fatalf("OpenPool: %v", err)
+	}
+	if pool, err := client.CreatePool(PoolRefName("new\x00other"), testPoolSizeBytes); !isUsage(err) {
+		pool.Close()
+		t.Fatalf("CreatePool: %v", err)
+	}
+	if err := client.DeletePool(invalid); !isUsage(err) {
+		t.Fatalf("DeletePool: %v", err)
+	}
+	pools, err := client.ListPools()
+	if err != nil || len(pools) != 1 || filepath.Base(pools[0].Path) != "events.plasmite" {
+		t.Fatalf("pools changed: %+v, %v", pools, err)
+	}
+}

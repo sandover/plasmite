@@ -29,12 +29,18 @@ var textMarshalType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
 var sourceValueType = reflect.TypeOf(Value{})
 var stringAnyMapType = reflect.TypeOf(map[string]any(nil))
 
+type inputPointer struct {
+	typ     reflect.Type
+	address uintptr
+}
+
 // All referenced Go allocations remain pinned only through the native call.
 // Mutable bytes and JSON hook output receive private snapshots at encounter.
 type nativeInput struct {
-	pin   runtime.Pinner
-	nodes []C.plsm_go_input_node_t
-	tags  []C.plsm_go_input_span_t
+	pointers map[inputPointer]bool
+	pin      runtime.Pinner
+	nodes    []C.plsm_go_input_node_t
+	tags     []C.plsm_go_input_span_t
 }
 
 func (in *nativeInput) bytes(data []byte) C.plsm_go_input_span_t {
@@ -142,6 +148,15 @@ func (in *nativeInput) collect(value reflect.Value, parent uintptr, key string, 
 		return in.json(value.Interface(), parent, key, hasKey, depth)
 	}
 	if value.Kind() == reflect.Pointer {
+		pointer := inputPointer{value.Type(), value.Pointer()}
+		if in.pointers[pointer] {
+			return invalidArgumentError("cyclic feed value")
+		}
+		if in.pointers == nil {
+			in.pointers = make(map[inputPointer]bool)
+		}
+		in.pointers[pointer] = true
+		defer delete(in.pointers, pointer)
 		return in.collect(value.Elem(), parent, key, hasKey, depth)
 	}
 	switch value.Kind() {

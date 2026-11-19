@@ -196,7 +196,10 @@ the server's explicit `--udp-follow` setting; it never switches to HTTP.
 
 ### Concurrent use
 
-Client, pool and reader methods serialize access to each native handle. A reader owns a separate handle and can keep reading after its pool closes. Use a context with a deadline to bound each `Next(ctx)` call.
+Client, pool and reader methods serialize access to each native handle. A reader
+owns a separate handle and can keep reading after its pool closes. A context
+deadline bounds each `Next(ctx)` call, including time spent waiting for another
+call on the same reader.
 
 For playback timing, use ordinary streams and an application scheduler; see the
 [2.0 upgrade guide](../../docs/record/upgrading-2.0.md#applications-control-playback-timing).

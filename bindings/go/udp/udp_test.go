@@ -253,6 +253,21 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("follow did not start reading")
 	}
+	overlap := make(chan error, 1)
+	queued, cancelQueued := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelQueued()
+	go func() {
+		_, err := cancelFollow.Next(queued)
+		overlap <- err
+	}()
+	select {
+	case err := <-overlap:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("overlapping read: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("overlapping read blocked")
+	}
 	cancelWait()
 	select {
 	case err := <-done:
