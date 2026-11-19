@@ -113,15 +113,15 @@ Output is readable in a terminal and compact JSON in a pipe, so `jq` and other t
 
 Plasmite fits messaging on one machine or between a few nearby ones: CI gates, live event streams, sensor feeds, two-way process communication, system log ring buffers, and replay while you debug. The [Cookbook](docs/cookbook.md) has a recipe for each.
 
-| | Drawbacks | Plasmite |
+| If you'd reach for | What gets in the way | With Plasmite |
 |---|---|---|
-| **Kafka**, **RabbitMQ** | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | Covers the 80/20 cases: no config, no broker, no partitions, no topology. |
-| **Redis / NATS** | Server required even for local messaging. Persistence and delivery depend on configuration. | Pools persist on disk independent of any process. Server only if you need one. |
-| **Log files / `tail -f`** | Structure and sequence numbers depend on the log format. Logs grow and need rotation and reader coordination. Can't easily replay from a specific point. Remote access needs extra setup. | Messages have structure and sequence numbers. Disk usage is bounded. Replay retained messages. Remote access is built in. |
-| **Ad-hoc files (temp files, locks, polled dirs)** | Readers have to poll for new files. Locking is manual; crashes leave a stale lock. Files accumulate. No ordering unless you bake it into filenames. | Readers stream messages. Writers append concurrently with file locks managed by the library, and messages are ordered. Ring buffer bounds disk usage. |
-| **SQLite as a queue** | Queue semantics, schemas, retention and notification need application code. Sharing the database file over a network is discouraged. | Built-in follow, replay and bounded retention. Remote access through the server. |
-| **OS primitives (pipes, sockets, shm)** | Named pipes mean if the reader dies, the writer blocks or gets SIGPIPE. With sockets you have to implement your own framing and reconnection. Shared memory needs coordination and crash recovery. Persistence needs extra work. | Many readers, many writers, committed messages, persistent across reboots. |
-| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix is expressive but hard to get right. Binary protocol means you can't inspect messages with standard tools. | Messages persist. One message model for local and remote use. Plain JSON you can pipe through `jq`. |
+| **Kafka**, **RabbitMQ** | A cluster to run before the first message: brokers, partitions, consumer groups, oh my | No broker, no config: a pool is just a file |
+| **Redis**, **NATS** | A server even for two programs on one machine; messages lost on restart unless configured | Local pools with no server; messages survive restarts |
+| **Log files and `tail -f`** | A wall of text, growing without limits | Numbered series of JSON objects, fixed-size file |
+| **Temp files and watched folders** | Polling loops, stale lock files after a crash, files piling up | Readers wake on new messages; no cleanup, the pool overwrites the oldest |
+| **SQLite as a queue** | Your own table, cleanup job and polling loop | Following, replay and bounded history built in |
+| **Pipes and sockets** | One reader, no memory: start late and you've missed it | Many readers and writers; late readers catch up |
+| **ZeroMQ** | Messages gone on restart, in frames ordinary tools can't read | Messages survive restarts, as JSON you can pipe through `jq` |
 
 Plasmite keeps recent history and forgets the rest; it does not hold work until a consumer finishes it. If you need cluster replication, schema registries, or workflow orchestration, see [When Plasmite isn't the right fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
 
