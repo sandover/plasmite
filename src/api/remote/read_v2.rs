@@ -130,7 +130,7 @@ struct Stream {
     binary: bool,
     reader: Option<TailReader>,
     incarnation: Option<hyper::header::HeaderValue>,
-    resumed: Option<(u64, Option<u64>)>,
+    resumed: Option<(u64, u64)>,
     last_message: Option<u64>,
     failure: Option<Box<Error>>,
 }
@@ -146,7 +146,7 @@ enum Record {
 enum Ending {
     Complete,
     Error { error: HttpErrorWire },
-    Cutoff { next_seq: u64, until: Option<u64> },
+    Cutoff { next_seq: u64, until: u64 },
 }
 
 impl Stream {
@@ -176,9 +176,7 @@ impl Stream {
             let mut pairs = url.query_pairs_mut();
             if let Some((next, end)) = self.resumed {
                 pairs.append_pair("since", &next.to_string());
-                if let Some(end) = end {
-                    pairs.append_pair("until", &end.to_string());
-                }
+                pairs.append_pair("until", &end.to_string());
             } else {
                 match &self.selection.start {
                     ReadStart::Default => {}
@@ -286,10 +284,10 @@ impl Stream {
                 }
                 Record::Control(Ending::Error { error }) => return Err(error_from_remote(error)),
                 Record::Control(Ending::Cutoff { next_seq, until }) => {
-                    if next_seq == 0
+                    if self.live
+                        || next_seq == 0
                         || self.last_message.is_some_and(|last| next_seq <= last)
-                        || self.live == until.is_some()
-                        || until.is_some_and(|end| next_seq > end)
+                        || next_seq > until
                     {
                         return Err(protocol_error("invalid stream cutoff"));
                     }
@@ -511,6 +509,27 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::NotFound);
         assert_eq!(error.message(), Some("pool was replaced during the read"));
         server.join().expect("mock server exit");
+    }
+
+    #[test]
+    fn follow_rejects_a_cutoff() {
+        for (body, detail) in [
+            (
+                "{\"type\":\"cutoff\",\"next_seq\":2}\n",
+                "invalid stream ending",
+            ),
+            (
+                "{\"type\":\"cutoff\",\"next_seq\":2,\"until\":3}\n",
+                "invalid stream cutoff",
+            ),
+        ] {
+            let (pool, server) = responses([("/v2/pools/events/follow", "original", body)]);
+            let mut reader = pool.follow(Selection::new()).expect("open");
+            let error = reader.next_message().expect_err("invalid live cutoff");
+            assert_eq!(error.kind(), ErrorKind::Io);
+            assert_eq!(error.message(), Some(detail));
+            server.join().expect("mock server exit");
+        }
     }
 
     #[test]

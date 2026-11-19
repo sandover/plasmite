@@ -376,6 +376,14 @@ jobs:
           cargo test --release --lib windows_private::tests -- --test-threads=1
           cargo test --release --bin plasmite serve_service::windows::tests -- --test-threads=1
           cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access --test udp_input --test udp_client --test udp_transport --test udp_transport_cli --test cli_yaml --test cli_yaml_stream -- --test-threads=1
+      - name: Test local follower wakeups and recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo test --release --lib core::notify::windows::tests
+          cargo test --release --lib commit_without_notification_is_recovered
+          cargo test --release --lib independent_registered_tail_reads_publications_and_cancels
       - name: Local pool roundtrip smoke
         timeout-minutes: 1
         shell: pwsh

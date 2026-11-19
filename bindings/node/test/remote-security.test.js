@@ -156,7 +156,7 @@ test("HTTP continuation rejects another pool or a missing identity before readin
     let calls = 0;
     await withFetchStub(() => {
       if (++calls === 1) {
-        return new Response('{"type":"cutoff","next_seq":2}\n', {
+        return new Response('{"type":"cutoff","next_seq":2,"until":3}\n', {
           headers: { "Plasmite-Incarnation": "original" },
         });
       }
@@ -165,9 +165,25 @@ test("HTTP continuation rejects another pool or a missing identity before readin
       });
     }, async () => {
       const pool = new RemotePool(new RemoteClient("http://localhost"), "events");
-      const reader = await pool.follow();
+      const reader = await pool.fetch();
       await assert.rejects(reader.next(), { kind: new RemoteError({ kind }, 0).kind });
       assert.equal(calls, 2);
     });
   }
+});
+
+test("HTTP follow rejects cutoff without opening another request", async () => {
+  let calls = 0;
+  await withFetchStub(() => {
+    calls++;
+    return new Response('{"type":"cutoff","next_seq":2}\n', {
+      headers: { "Plasmite-Incarnation": "original" },
+    });
+  }, async () => {
+    const { RemotePool } = require("../remote");
+    const pool = new RemotePool(new RemoteClient("http://localhost"), "events");
+    const reader = await pool.follow();
+    await assert.rejects(reader.next(), /invalid stream cutoff/);
+    assert.equal(calls, 1);
+  });
 });

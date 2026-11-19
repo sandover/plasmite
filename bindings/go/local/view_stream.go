@@ -47,7 +47,7 @@ func (s *ViewStream) nextWait(wait uint64) (*MessageView, int, error) {
 }
 
 // Next blocks until a view arrives, the context ends, or this finite stream
-// finishes. Context cancellation and Close interrupt idle waits within 50 ms.
+// finishes. Close interrupts an idle read. A cancellable context bounds each wait.
 func (s *ViewStream) Next(ctx context.Context) (*MessageView, error) {
 	if s == nil {
 		return nil, closedError("stream")

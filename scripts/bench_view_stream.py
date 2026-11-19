@@ -2,9 +2,15 @@
 
 
 def data(plasmite, pool, messages, batch_count, batch_bytes, conversion):
-    with pool.follow_views(
-        start=plasmite.FollowStart.sequence(1), max_messages=messages, timeout_ms=120_000, error_on_gap=True
-    ) as stream:
+    current = hasattr(pool, "follow_view")
+    if current:
+        reader = pool.follow_view(since=1)
+    else:
+        reader = pool.follow_views(
+            start=plasmite.FollowStart.sequence(1), max_messages=messages,
+            timeout_ms=120_000, error_on_gap=True,
+        )
+    with reader as stream:
 
         def convert(message):
             if conversion == "message-json":
@@ -17,13 +23,19 @@ def data(plasmite, pool, messages, batch_count, batch_bytes, conversion):
             raise ValueError("unknown requested view conversion")
 
         if batch_count == 0:
-            for message in stream:
+            for _ in range(messages):
+                message = stream.next(wait=120) if current else next(stream, None)
+                if message is None:
+                    raise RuntimeError("view stream ended before all benchmark messages arrived")
                 yield convert(message)
         else:
             while True:
                 try:
-                    batch = stream.next_batch(batch_count, batch_bytes)
+                    wait = {"wait": 120} if current else {}
+                    batch = stream.next_batch(batch_count, batch_bytes, **wait)
                 except StopIteration:
                     return
+                if not batch:
+                    raise RuntimeError("view stream ended before the next benchmark batch arrived")
                 for message in batch:
                     yield convert(message)

@@ -20,6 +20,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+from textwrap import dedent
 import time
 from pathlib import Path
 
@@ -59,6 +60,7 @@ def worker(args):
             import plasmite
             client = stack.enter_context(plasmite.Client(args.directory))
             pool = stack.enter_context(client.open_pool("events"))
+        current = pool is not None and hasattr(pool, "feed")
         probe = None
         if args.native_counts:
             import ctypes
@@ -83,6 +85,16 @@ def worker(args):
             if args.forward_view:
                 source_view = views.from_bytes(fixture)
                 stack.callback(views.lib.plsm_view_release, source_view)
+        if pool is not None and args.role == "writer" and not args.binary:
+            if args.receipt == "view":
+                store = lambda item: views.append(pool, item)
+            else:
+                names = {
+                    "full": ("feed", "append"),
+                    "identity": ("feed_receipt", "append_identity"),
+                    "native-view": ("feed_view", "append_view"),
+                }
+                store = getattr(pool, names[args.receipt][0 if current else 1])
         profile = cProfile.Profile() if args.profile else None
         print("ready", file=sys.stderr, flush=True)
         # The pipe reader starts blocked on data. Other workers await a start token.
@@ -113,47 +125,63 @@ def worker(args):
                     while time.perf_counter_ns() < work_until:
                         pass
                 if pool is None:
-                    # Match Pool.append's standard json.dumps settings.
+                    # Match the Python binding's standard json.dumps settings.
                     sys.stdout.buffer.write(json.dumps(value).encode("utf-8") + b"\n")
                     if args.interval_ms or args.pipe_flush:
                         sys.stdout.buffer.flush()
                 elif args.binary:
-                    seq = (views.forward(pool, source_view).seq if args.forward_view
-                           else pool.append_lite3(fixture, plasmite.Durability.FAST))
+                    if args.forward_view:
+                        seq = views.forward(pool, source_view).seq
+                    elif current:
+                        seq = pool.feed_lite3_receipt(fixture).seq
+                    else:
+                        seq = pool.append_lite3(fixture, plasmite.Durability.FAST)
                     if seq != index + 1:
                         raise RuntimeError("binary append identity mismatch")
                 else:
-                    receipt = (pool.append_view(value) if args.receipt == "native-view" else
-                               views.append(pool, value) if args.receipt == "view" else
-                               pool.append_identity(value) if args.receipt == "identity"
-                               else pool.append(value))
+                    receipt = store(value)
+                    timestamp = receipt.time if current else getattr(receipt, "timestamp_ns", None)
                     if (receipt.seq != index + 1
                             or (args.receipt == "full" and receipt.data != value)
-                            or (args.receipt in ("identity", "view", "native-view") and receipt.timestamp_ns <= 0)):
+                            or (args.receipt != "full" and (timestamp is None or timestamp <= 0))):
                         raise RuntimeError("append receipt mismatch")
             if pool is None:
                 sys.stdout.buffer.flush()
         else:
-            incoming = pool.open_lite3_follow(
-                start=plasmite.FollowStart.sequence(1), max_messages=args.messages, timeout_ms=120_000, error_on_gap=True,
-            ) if args.binary else (
-                (json.loads(line) for line in sys.stdin.buffer)
-                if pool is None else
-                batch.data(plasmite, pool, args.messages, args.reader_batch_count,
-                           args.reader_batch_bytes, args.reader_view_conversion)
-                if batch is not None else
-                (message.data for message in pool.follow(
-                    start=plasmite.FollowStart.sequence(1), max_messages=args.messages,
-                    timeout_ms=120_000, error_on_gap=True,
-                ))
-            )
+            if current and batch is None:
+                follow = pool.follow_lite3 if args.binary else pool.follow
+                stream = stack.enter_context(follow(since=1))
+
+                def records():
+                    while True:
+                        message = stream.next(wait=120)
+                        if message is None:
+                            raise RuntimeError("timed out waiting for benchmark message")
+                        yield message if args.binary else message.data
+
+                incoming = records()
+            else:
+                incoming = pool.open_lite3_follow(
+                    start=plasmite.FollowStart.sequence(1), max_messages=args.messages, timeout_ms=120_000, error_on_gap=True,
+                ) if args.binary else (
+                    (json.loads(line) for line in sys.stdin.buffer)
+                    if pool is None else
+                    batch.data(plasmite, pool, args.messages, args.reader_batch_count,
+                               args.reader_batch_bytes, args.reader_view_conversion)
+                    if batch is not None else
+                    (message.data for message in pool.follow(
+                        start=plasmite.FollowStart.sequence(1), max_messages=args.messages,
+                        timeout_ms=120_000, error_on_gap=True,
+                    ))
+                )
             count = 0
             for item in incoming:
                 if args.interval_ms:
                     received = time.monotonic_ns()
                     latencies.append(received - item.pop("sent_ns"))
                 if args.binary:
-                    if item.seq != count + 1 or item.payload != fixture or item.timestamp_ns <= 0:
+                    timestamp = item.time if current else item.timestamp_ns
+                    if item.seq != count + 1 or item.payload != fixture or timestamp <= 0:
                         raise RuntimeError(f"binary frame mismatch at {count}")
                     checksum += count * 3
                 else:
@@ -217,17 +245,24 @@ def trial(args, lane, directory, profile=False):
                 "p.close(); c.close()"
             )
             if args.binary:
-                setup = (
-                    "import plasmite; from pathlib import Path; "
-                    f"c=plasmite.Client({directory!r}); "
-                    "seed=c.create_pool('fixture',1048576); "
-                    f"m=seed.append({record()!r}, ['sensor']); "
-                    "payload=seed.get_lite3(m.seq).payload; "
-                    f"Path({str(Path(directory) / 'fixture.lite3')!r}).write_bytes(payload); "
-                    "seed.close(); "
-                    f"p=c.create_pool('events', max(16777216, {args.messages} * (len(payload)+4096))); "
-                    "p.close(); c.close()"
-                )
+                setup = dedent(f"""\
+                    import plasmite
+                    from pathlib import Path
+
+                    with plasmite.Client({directory!r}) as client:
+                        with client.create_pool('fixture', 1048576) as seed:
+                            value = {record()!r}
+                            if hasattr(seed, 'feed'):
+                                message = seed.feed(value, ['sensor'])
+                                with seed.fetch_lite3(since=message.seq) as reader:
+                                    payload = next(reader).payload
+                            else:
+                                message = seed.append(value, ['sensor'])
+                                payload = seed.get_lite3(message.seq).payload
+                        Path({str(Path(directory) / 'fixture.lite3')!r}).write_bytes(payload)
+                        size = max(16777216, {args.messages} * (len(payload) + 4096))
+                        client.create_pool('events', size).close()
+                    """)
             setup_env = dict(environment, PYTHONPATH=str(args.bindings))
             subprocess.run([sys.executable, "-c", setup], env=setup_env, check=True)
         writer_command = [*command, "--role", "writer"]

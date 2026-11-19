@@ -63,17 +63,19 @@ type Pool struct {
 }
 
 // Stream serializes native reads and Close. A Stream must not be copied.
-// Pass a context to Next to bound its wait. Close stops subsequent reads.
+// Pass a context to Next to bound its wait. Close interrupts an idle read and stops subsequent reads.
 type Stream struct {
-	mu  sync.Mutex
-	ptr *C.plsm_stream_t
+	closeMu sync.Mutex
+	mu      sync.Mutex
+	ptr     *C.plsm_stream_t
 }
 
 // Lite3Stream serializes native reads and Close. A Lite3Stream must not be copied.
-// Pass a context to Next to bound its wait. Close stops subsequent reads.
+// Pass a context to Next to bound its wait. Close interrupts an idle read and stops subsequent reads.
 type Lite3Stream struct {
-	mu  sync.Mutex
-	ptr *C.plsm_lite3_stream_t
+	closeMu sync.Mutex
+	mu      sync.Mutex
+	ptr     *C.plsm_lite3_stream_t
 }
 
 type Durability = api.Durability
@@ -269,11 +271,15 @@ func (s *Stream) Close() {
 	if s == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Serialize close calls so the handle stays alive while we cancel a read.
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
 	if s.ptr == nil {
 		return
 	}
+	C.plsm_stream_cancel(s.ptr)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	C.plsm_stream_free(s.ptr)
 	s.ptr = nil
 }
@@ -282,11 +288,15 @@ func (s *Lite3Stream) Close() {
 	if s == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Serialize close calls so the handle stays alive while we cancel a read.
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
 	if s.ptr == nil {
 		return
 	}
+	C.plsm_lite3_stream_cancel(s.ptr)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	C.plsm_lite3_stream_free(s.ptr)
 	s.ptr = nil
 }

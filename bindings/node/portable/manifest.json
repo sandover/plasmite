@@ -14,7 +14,7 @@
     "src/core/error.rs": "93b56638df71bf4585eab1cc1c1bdd57f748a95c80ad60b55357eefec91cf2b9",
     "src/abi_builder.rs": "5b60fdfddaf781a974ed1496ebd89e6257019f70026e6736b751747e767b2a53",
     "src/view.rs": "edebe3cf762eee849e0d3dad13f1dea8ef86f79dc7537e75b05920ccb41f9f2d",
-    "src/interface_wire.rs": "6982b27856e2f6fc3713e9bec124d9be24db5a954e932ba79a22fa44de6e7424",
+    "src/interface_wire.rs": "9a3fb8ea1055d279485cb640e0b65828eb7302fd497de677eecb6ad910fa6193",
     "c/lite3_shim.c": "c29f5dea3bc02de3a4381dcb0ffebd0294473095d2aaf1044b2a08c635262530",
     "c/lite3_shim.h": "9b784e1dc6c19bdd414e68a59a1b370d2b1ebb0eed24f5637b6a8978046a46fc",
     "c/lite3_builder.c": "3f99c4113b1848373ac28db40245f1e4fad5c4c297ad9022128921efd9eff5e2",

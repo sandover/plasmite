@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"strings"
 	"time"
 	"unsafe"
@@ -166,23 +167,31 @@ func readNext[T any](ctx context.Context, poll func(uint64) (*T, int, error)) (*
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		wait := 50 * time.Millisecond
-		if deadline, ok := ctx.Deadline(); ok {
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				return nil, context.DeadlineExceeded
+		waitMS := uint64(math.MaxUint64)
+		// A context can cancel one Next without closing the native reader.
+		deadline, hasDeadline := ctx.Deadline()
+		if hasDeadline || ctx.Done() != nil {
+			wait := 50 * time.Millisecond
+			if hasDeadline {
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					return nil, context.DeadlineExceeded
+				}
+				wait = min(wait, remaining)
 			}
-			wait = min(wait, remaining)
+			waitMS = uint64((wait + time.Millisecond - 1) / time.Millisecond)
 		}
-		value, status, err := poll(uint64((wait + time.Millisecond - 1) / time.Millisecond))
+		value, status, err := poll(waitMS)
 		if err != nil {
 			return nil, err
 		}
 		switch status {
 		case 1:
 			return value, nil
-		case 2, 3:
+		case 2:
 			return nil, io.EOF
+		case 3:
+			return nil, closedError("stream")
 		}
 	}
 }

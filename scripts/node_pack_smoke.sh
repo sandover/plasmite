@@ -4,7 +4,7 @@
 # Role: Local/CI smoke gate for native/{platform} layout and CLI entrypoint.
 # Invariants: Uses workspace-local temp dirs under .scratch/.
 # Invariants: Requires npm, Node.js, Python 3, and a built SDK (target/debug by default).
-# Notes: Set PLASMITE_SDK_DIR to test alternate SDK layouts.
+# Notes: Pass an existing tarball to test it directly, or set PLASMITE_SDK_DIR to build one from an alternate SDK.
 
 set -euo pipefail
 
@@ -19,9 +19,6 @@ cleanup_workdir() {
   fi
 }
 trap cleanup_workdir EXIT
-source "$ROOT/scripts/normalize_sdk_layout.sh"
-SDK_INPUT_DIR="${PLASMITE_SDK_DIR:-$ROOT/target/debug}"
-SDK_DIR="$(plasmite_normalize_sdk_dir "$SDK_INPUT_DIR" "$WORKDIR/sdk" "Node smoke SDK")"
 platform_key() {
   local os arch
   os="$(node -p 'process.platform')"
@@ -56,44 +53,50 @@ archive_has_member() {
   fi
 }
 
-(
-  cd "$NODE_DIR"
-  if [[ ! -f "$NODE_DIR/index.node" ]]; then
-    PLASMITE_LIB_DIR="$SDK_DIR/lib" npm run build >/dev/null
-  fi
-  current_target="$(jq -r --arg platform "$CURRENT_PLATFORM" '
-    [.targets[] | select(.node_platform == $platform)][0].rust_target // empty
-  ' "$ROOT/release/targets.json")"
-  if [[ -z "$current_target" ]]; then
-    echo "failed to resolve Rust target for Node platform: $CURRENT_PLATFORM" >&2
-    exit 1
-  fi
-  "$ROOT/scripts/package_node_natives.sh" "$current_target" "$SDK_DIR" "$NODE_DIR/index.node"
-  npm run check:portable >/dev/null
-  npm pack --ignore-scripts >/dev/null
-)
-
-TARBALL="$(cd "$NODE_DIR" && ls -1 plasmite-*.tgz | tail -n 1)"
-if [[ -z "$TARBALL" ]]; then
-  echo "failed to produce npm tarball"
-  exit 1
+if [[ $# -gt 1 ]]; then
+  echo "usage: node_pack_smoke.sh [tarball]" >&2
+  exit 2
 fi
-
-archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/index\\.node"
-if [[ "$CURRENT_PLATFORM" == "win32-x64" ]]; then
-  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite2\\.dll"
-  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite\\.exe"
+(cd "$NODE_DIR" && npm run check:portable >/dev/null)
+if [[ $# -eq 1 ]]; then
+  TARBALL="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 else
-  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/libplasmite\\.(2\\.dylib|so\\.2)"
-  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite"
+  source "$ROOT/scripts/normalize_sdk_layout.sh"
+  SDK_INPUT_DIR="${PLASMITE_SDK_DIR:-$ROOT/target/debug}"
+  SDK_DIR="$(plasmite_normalize_sdk_dir "$SDK_INPUT_DIR" "$WORKDIR/sdk" "Node smoke SDK")"
+  (
+    cd "$NODE_DIR"
+    if [[ ! -f "$NODE_DIR/index.node" ]]; then
+      PLASMITE_LIB_DIR="$SDK_DIR/lib" npm run build >/dev/null
+    fi
+    current_target="$(jq -r --arg platform "$CURRENT_PLATFORM" '
+      [.targets[] | select(.node_platform == $platform)][0].rust_target // empty
+    ' "$ROOT/release/targets.json")"
+    if [[ -z "$current_target" ]]; then
+      echo "failed to resolve Rust target for Node platform: $CURRENT_PLATFORM" >&2
+      exit 1
+    fi
+    "$ROOT/scripts/package_node_natives.sh" "$current_target" "$SDK_DIR" "$NODE_DIR/index.node"
+    npm pack --ignore-scripts --silent --pack-destination "$WORKDIR" > "$WORKDIR/tarball-name"
+  )
+  TARBALL="$WORKDIR/$(cat "$WORKDIR/tarball-name")"
 fi
-archive_has_member "$NODE_DIR/$TARBALL" 'package/bin/plasmite\.js'
+
+archive_has_member "$TARBALL" "package/native/${CURRENT_PLATFORM}/index\\.node"
+if [[ "$CURRENT_PLATFORM" == "win32-x64" ]]; then
+  archive_has_member "$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite2\\.dll"
+  archive_has_member "$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite\\.exe"
+else
+  archive_has_member "$TARBALL" "package/native/${CURRENT_PLATFORM}/libplasmite\\.(2\\.dylib|so\\.2)"
+  archive_has_member "$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite"
+fi
+archive_has_member "$TARBALL" 'package/bin/plasmite\.js'
 
 mkdir -p "$WORKDIR/app"
 (
   cd "$WORKDIR/app"
   npm init -y >/dev/null
-  npm install "$NODE_DIR/$TARBALL" >/dev/null
+  npm install "$TARBALL" >/dev/null
   node <<'JS'
 const assert = require("node:assert/strict");
 const { Client, RemoteClient } = require("plasmite");
@@ -155,5 +158,4 @@ JS
   "$smoke_python" "$ROOT/scripts/packaged_serve_smoke.py" --cli "$cli_binary" --scratch "$WORKDIR"
 )
 
-rm -f "$NODE_DIR/$TARBALL"
 echo "[smoke] node pack install + runtime ok"

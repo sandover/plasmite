@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -195,13 +196,24 @@ func TestClientConcurrentOpenAndClose(t *testing.T) {
 	}
 }
 
+func TestReadNextWithBackgroundWaitsWithoutDeadline(t *testing.T) {
+	_, err := readNext(context.Background(), func(wait uint64) (*int, int, error) {
+		if wait != math.MaxUint64 {
+			t.Fatalf("idle read asked to wake after %d ms", wait)
+		}
+		return nil, 2, nil
+	})
+	if err != io.EOF {
+		t.Fatalf("read completion: got %v, want EOF", err)
+	}
+}
+
 func TestStreamsConcurrentReadAndClose(t *testing.T) {
 	for _, lite3 := range []bool{false, true} {
 		t.Run(fmt.Sprintf("lite3=%v", lite3), func(t *testing.T) {
 			client := newTestClient(t)
 			pool := newTestPool(t, client, "idle")
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
+			ctx := context.Background()
 			var next func() error
 			var closeStream func()
 			if lite3 {
@@ -243,7 +255,7 @@ func TestStreamsConcurrentReadAndClose(t *testing.T) {
 			select {
 			case <-completed:
 			case <-time.After(2 * time.Second):
-				t.Fatal("finite-timeout stream did not finish reads and close")
+				t.Fatal("idle stream did not finish reads and close")
 			}
 			close(failures)
 			for err := range failures {

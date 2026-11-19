@@ -310,6 +310,7 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
         }
         if (record.type === "error") throw new RemoteError(record, response.status);
         if (record.type === "cutoff") {
+          if (live || record.until === undefined) throw invalid("invalid stream cutoff");
           cutoff = record;
           break;
         }
@@ -319,16 +320,16 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
       }
       if (!cutoff) throw invalid("read response ended without a control record");
       const next = normalizeMessageSeq(cutoff.next_seq);
-      const until = cutoff.until === undefined ? undefined : normalizeMessageSeq(cutoff.until);
+      const until = normalizeMessageSeq(cutoff.until);
       if (next === 0n || (lastMessage !== undefined && next <= lastMessage)
-          || live === (until !== undefined) || (until !== undefined && next > until)
+          || next > until
           || (continuation && (until !== continuation.until || next < continuation.next))) {
         throw invalid("invalid stream cutoff");
       }
       continuation = { next, until };
       const resumed = new URL(base);
       resumed.searchParams.set("since", next.toString());
-      if (until !== undefined) resumed.searchParams.set("until", until.toString());
+      resumed.searchParams.set("until", until.toString());
       response = await open(resumed);
       const current = response.headers.get("plasmite-incarnation");
       if (incarnation === null || current === null) throw invalid("missing pool identity on stream continuation");

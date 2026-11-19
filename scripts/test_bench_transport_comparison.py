@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check benchmark grant cleanup without opening a socket or issuing a grant."""
+"""Check benchmark requests and grant cleanup without opening a socket."""
 
 from contextlib import ExitStack
 import argparse
@@ -10,7 +10,17 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from bench_transport_comparison import HttpsMcp, PROTOCOL_VERSION, run
+from bench_transport_comparison import HttpsMcp, PROTOCOL_VERSION, mcp_fetch_one, run
+
+
+class BenchmarkFetchTests(unittest.TestCase):
+    def test_fetch_uses_an_inclusive_start_and_a_single_message_batch(self):
+        message = {"seq": 42, "data": {"sample": 1}}
+        client = Mock()
+        client.tool.return_value = {"messages": [message], "next_seq": 43, "ended": "limit"}
+
+        self.assertEqual(mcp_fetch_one(client, "events", 42), message)
+        client.tool.assert_called_once_with("plasmite_fetch", {"pool": "events", "since": 42, "count": 1})
 
 
 class GrantCleanupTests(unittest.TestCase):

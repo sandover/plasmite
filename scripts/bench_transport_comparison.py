@@ -304,6 +304,14 @@ def append_batch(lane: str, data: list[dict[str, str]], native: subprocess.Popen
     return {"sequences": sequences, "latencies": latencies, "total": total}
 
 
+def mcp_fetch_one(client, pool, sequence):
+    result = client.tool("plasmite_fetch", {"pool": pool, "since": sequence, "count": 1})
+    (message,) = result["messages"]
+    if message["seq"] != sequence:
+        raise RuntimeError(f"MCP fetch returned the wrong sequence for {sequence}")
+    return message
+
+
 def read_batch(lane: str, sequences: list[int], expected: list[dict[str, str]], native: subprocess.Popen[str],
                direct: HttpsMcp, pool: str) -> tuple[list[int], int]:
     started = time.perf_counter_ns()
@@ -315,10 +323,9 @@ def read_batch(lane: str, sequences: list[int], expected: list[dict[str, str]], 
     latencies = []
     for sequence, data in zip(sequences, expected, strict=True):
         call_started = time.perf_counter_ns()
-        result = direct.tool("plasmite_fetch", {"pool": pool, "seq": sequence})
+        message = mcp_fetch_one(direct, pool, sequence)
         latencies.append(time.perf_counter_ns() - call_started)
-        message = result["message"]
-        if message["seq"] != sequence or message["data"] != data:
+        if message["data"] != data:
             raise RuntimeError(f"{lane} readback mismatch for sequence {sequence}")
     return latencies, time.perf_counter_ns() - started
 
@@ -383,8 +390,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 else:
                     result = client.tool("plasmite_feed", {"pool": args.pool, "data": warm, "create": False})
                     sequence = result["message"]["seq"]
-                    check = client.tool("plasmite_fetch", {"pool": args.pool, "seq": sequence})
-                    if check["message"]["data"] != warm:
+                    check = mcp_fetch_one(client, args.pool, sequence)
+                    if check["data"] != warm:
                         raise RuntimeError(f"{lane} warmup readback failed")
 
         for size in args.sizes:
