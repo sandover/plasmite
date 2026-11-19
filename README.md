@@ -8,15 +8,19 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/sandover/plasmite/bindings/go/v2/local.svg)](https://pkg.go.dev/github.com/sandover/plasmite/bindings/go/v2/local)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Plasmite is a pipe that remembers.** Programs send and receive JSON messages through a bounded file called a pool. The pool keeps recent messages after writers exit. When it fills, new messages overwrite the oldest ones.
+**Easy interprocess communication.**
 
-Three verbs cover almost everything:
+What would make it pleasant and predictable for programs to talk to each other?
 
-- `feed` writes a message.
-- `follow` waits for new messages, like `tail -f`.
-- `fetch` reads what the pool holds and exits.
+- Programs come and go... so **channels should outlast them**
+- Machines crash... so **channels should live on disk**
+- Disks are finite... so **channels should have a fixed size**
+- Brokers bring complexity and ceremony... so **local messaging shouldn't need one**
+- You need to see what's happening... so **messages should be plain JSON you can read**
 
-Local pools need no server or broker. The CLI and the Rust, Python, Go, Node and C libraries share one model, so a shell script can feed a pool that a Python service follows. `pls` is a short alias for `plasmite`.
+So, there's **Plasmite**.
+
+Programs send JSON messages into a channel, called a pool. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. `feed` sends a message, `follow` waits for new ones, and `fetch` reads what the pool holds. The same three work from the command line and from Rust, Python, Go, Node and C, on one machine or across a network. On the command line, `pls` is a short alias for `plasmite`.
 
 #### Local IPC
 
