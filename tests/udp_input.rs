@@ -54,6 +54,8 @@ impl TestHome {
             .env("HOME", &self.home)
             .env("PLASMITE_ACCESS_HOME", &self.home)
             .env("RUST_LOG", "info");
+        #[cfg(windows)]
+        command.env("USERPROFILE", &self.home);
         command
     }
 
