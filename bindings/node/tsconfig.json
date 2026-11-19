@@ -4,9 +4,10 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "strict": true,
+    "isolatedModules": true,
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "files": ["typecheck.ts"]
+  "files": ["typecheck.ts", "test/views-types.ts"]
 }

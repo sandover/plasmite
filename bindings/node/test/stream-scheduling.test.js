@@ -245,3 +245,39 @@ test('an unlimited owned tail keeps one native read across quiet intervals', asy
     } finally { clearTimeout(timer); await tail.return(); }
   });
 });
+
+test('an overlapping local next leaves the active read open', async () => {
+  const { ErrorKind } = require('../index');
+  await fixture(async pool => {
+    const reader = await pool.follow();
+    const pending = reader.next();
+    try {
+      await assert.rejects(reader.next(0), { kind: ErrorKind.Busy });
+      const written = await pool.feed({ value: 1 });
+      assert.equal((await within(pending, 500)).value.seq, written.seq);
+    } finally {
+      await reader.return();
+      await pending;
+    }
+  });
+});
+
+test('UDP nextEvent takes milliseconds while iterator next takes seconds', async () => {
+  const { UdpFollow } = require('../index');
+  const timeouts = [];
+  const follow = new UdpFollow({
+    async nextEventWait(timeout) {
+      timeouts.push(timeout);
+      return { status: 0 };
+    },
+    isFinished: false,
+    close() {},
+  });
+  try {
+    assert.equal(await follow.nextEvent(500), null);
+    assert.deepEqual(await follow.next(0.5), { done: false, value: undefined });
+    assert.deepEqual(timeouts, [500n, 500n]);
+  } finally {
+    follow.close();
+  }
+});

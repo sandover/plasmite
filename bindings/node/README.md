@@ -222,7 +222,8 @@ integer range; the SDK rejects unsafe `number` values instead of rounding them.
 Closing its pool during that handshake does not cancel the opening call; the
 call keeps its native handle until it succeeds or reaches the five-second
 startup deadline. Once open, call `follow.close()` to close the subscription.
-Await `nextEvent(timeoutMs)`; it returns `null` when the wait expires. Pass an
+Await `nextEvent(timeoutMs)` with a timeout in milliseconds. It returns `null`
+when the wait expires. The iterator-style `next(wait)` takes seconds. Pass an
 `AbortSignal` as the second argument to stop one pending wait. The async
 iterator keeps waiting until a finite follow ends and accepts the same signal
 in its options.

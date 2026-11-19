@@ -698,7 +698,7 @@ test("UDP SDK waits without blocking, cancels, and rejects imprecise sequence nu
     follow.cancel();
   }, 5);
   try {
-    assert.equal(await follow.nextEvent(1), null);
+    assert.equal(await follow.nextEvent(1000), null);
     assert.equal(timerFired, true);
     assert.equal(closeCalls, 1);
     assert.equal(follow.finished, true);
@@ -869,7 +869,7 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
     const cancelFollow = await udpPool.follow();
     await cancelFollow.nextEvent(0);
     const controller = new AbortController();
-    const pending = cancelFollow.nextEvent(5, { signal: controller.signal });
+    const pending = cancelFollow.nextEvent(5000, { signal: controller.signal });
     setTimeout(() => controller.abort(), 10);
     await assert.rejects(pending, (err) => err.name === "AbortError");
     // Aborting one wait leaves the follower reusable and releases its read lease.
@@ -895,7 +895,7 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
 
     const closeFollow = await udpPool.follow();
     await closeFollow.nextEvent(0);
-    const pendingClose = closeFollow.nextEvent(5);
+    const pendingClose = closeFollow.nextEvent(5000);
     setTimeout(() => closeFollow.close(), 10);
     assert.equal(await pendingClose, null);
   } finally {
@@ -919,7 +919,7 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
 async function nextUdpFrame(follow) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    const event = await follow.nextEvent(0.1);
+    const event = await follow.nextEvent(100);
     if (event?.kind === "frame") return event;
   }
   assert.fail("UDP follower did not receive a frame");
@@ -977,7 +977,7 @@ test("UDP native frames retain arrival order, duplicates, and uint64 metadata", 
   udpPool = udpClient.openPool("sensors");
   follow = await udpPool.fetch({ last: 4 });
   const events = [];
-  for (let i = 0; i < 7; i++) events.push(await follow.nextEvent(1));
+  for (let i = 0; i < 7; i++) events.push(await follow.nextEvent(1000));
   assert.equal(await follow.nextEvent(0), null);
   const frames = events.filter((event) => event?.kind === "frame");
   assert.deepEqual(frames.map((frame) => frame.seq), [base + 10n, base + 12n, base + 11n, base + 12n]);

@@ -7,22 +7,24 @@ Invariants: Numeric sequence fields accept number or bigint input.
 Notes: Canonical declaration source for package typing (`package.json#types`).
 */
 
-export const enum Durability {
-  Fast = 0,
-  Flush = 1,
+export const Durability: {
+  readonly Fast: 0
+  readonly Flush: 1
 }
+export type Durability = typeof Durability[keyof typeof Durability]
 
-export const enum ErrorKind {
-  Internal = 1,
-  Usage = 2,
-  NotFound = 3,
-  AlreadyExists = 4,
-  Busy = 5,
-  Permission = 6,
-  Corrupt = 7,
-  Io = 8,
-  RetentionGap = 9,
+export const ErrorKind: {
+  readonly Internal: 1
+  readonly Usage: 2
+  readonly NotFound: 3
+  readonly AlreadyExists: 4
+  readonly Busy: 5
+  readonly Permission: 6
+  readonly Corrupt: 7
+  readonly Io: 8
+  readonly RetentionGap: 9
 }
+export type ErrorKind = typeof ErrorKind[keyof typeof ErrorKind]
 export const DEFAULT_POOL_DIR: string | undefined
 export const DEFAULT_POOL_SIZE_BYTES: number
 
@@ -34,16 +36,17 @@ export interface Lite3Frame {
 }
 
 export interface MessageMeta {
-  tags: string[]
+  readonly tags: readonly string[]
 }
 
 export class Message {
+  constructor(envelope: MessageEnvelope, raw?: Buffer | null)
   readonly seq: bigint
   readonly time: bigint
   readonly data: unknown
   readonly meta: MessageMeta
   readonly raw: Buffer
-  get tags(): string[]
+  get tags(): readonly string[]
 }
 
 export interface MessageEnvelope {
@@ -51,7 +54,7 @@ export interface MessageEnvelope {
   time: string
   data: unknown
   meta?: {
-    tags?: unknown[]
+    tags?: readonly unknown[]
   }
 }
 
@@ -75,10 +78,10 @@ export interface PoolInfo {
 export interface ReadOptions {
   since?: number | bigint | string | Instant
   last?: number | bigint
-  tags?: string[]
+  tags?: readonly string[]
   signal?: AbortSignal
 }
-export interface FeedOptions { tags?: string[]; durability?: Durability }
+export interface FeedOptions { tags?: readonly string[]; durability?: Durability }
 declare const instantType: unique symbol
 export interface Instant { readonly [instantType]: true }
 export function at(time: number | bigint): Instant
@@ -217,7 +220,7 @@ export class UdpPool {
 
 export class UdpFollow {
   readonly finished: boolean
-  nextEvent(wait?: number, options?: UdpWaitOptions): Promise<UdpEvent | null>
+  nextEvent(timeoutMs?: number, options?: UdpWaitOptions): Promise<UdpEvent | null>
   next(wait?: number): Promise<IteratorResult<UdpEvent | undefined>>
   events(options?: { signal?: AbortSignal }): AsyncGenerator<UdpEvent, void, unknown>
   cancel(): void
@@ -232,7 +235,7 @@ export type UdpViewEvent<T = unknown> =
 
 export interface UdpViewFollow<T = unknown> {
   readonly finished: boolean
-  nextEvent(wait?: number, options?: UdpWaitOptions): Promise<UdpViewEvent<T> | null>
+  nextEvent(timeoutMs?: number, options?: UdpWaitOptions): Promise<UdpViewEvent<T> | null>
   next(wait?: number): Promise<IteratorResult<UdpViewEvent<T> | undefined>>
   events(options?: { signal?: AbortSignal }): AsyncGenerator<UdpViewEvent<T>, void, unknown>
   cancel(): void
@@ -257,6 +260,7 @@ export interface RemoteLite3Frame {
 
 export class RemoteError extends Error {
   status: number
+  cause?: unknown
   kind: ErrorKind
   hint?: string
   path?: string

@@ -27,6 +27,18 @@ const parsedFromEnvelope: Message = parseMessage({
   data: { ok: true },
   meta: { tags: ["tag"] },
 });
+const constructed = new Message({
+  seq: 1,
+  time: "2026-02-18T00:00:00Z",
+  data: { ok: true },
+});
+void pool.feed(constructed.data as object, { tags: parsedFromEnvelope.tags });
+// @ts-expect-error Message requires an envelope
+new Message();
+// @ts-expect-error message tags are immutable
+parsedFromEnvelope.tags.push("tag");
+// @ts-expect-error message metadata is immutable
+parsedFromEnvelope.meta.tags = [];
 const retentionGap: ErrorKind = ErrorKind.RetentionGap;
 void pooled;
 void fed;

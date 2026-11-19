@@ -5,7 +5,7 @@ async function usage() {
   const m = (await (await pool.fetchView<Reading>({ since: 17n })).next()).value!;
   const written = await pool.feedView<Reading>({ metrics: { power: 42 } });
   const writtenPower: number = written.data.metrics.power;
-  await pool.feedView(m, { tags: m.meta.tags });
+  await pool.feedView(m.data, { tags: m.meta.tags });
   await pool.feedView({}, { tags: ['sensor'] as const });
   // @ts-expect-error committed results remain immutable
   written.data.metrics.power = 2;

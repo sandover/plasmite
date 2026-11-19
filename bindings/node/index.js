@@ -414,6 +414,7 @@ class Reader {
     this._stream = stream;
     this._decode = decode;
     this._signal = signal;
+    this._reading = false;
     this._poll = stream instanceof Lite3Stream ? timeout => stream.nextWait(timeout)
       : timeout => stream.nextJsonWait(timeout);
     this._abort = () => this.close();
@@ -428,6 +429,10 @@ class Reader {
     if (wait !== undefined) {
       try { waitMs = normalizeWait(wait); } catch (err) { throw usageError(err.message); }
     }
+    if (this._reading) {
+      throw new PlasmiteNativeError("stream already has an active reader", { kind: ErrorKind.Busy });
+    }
+    this._reading = true;
     try {
       if (wait !== undefined) {
         const result = await this._poll(BigInt(waitMs));
@@ -445,6 +450,8 @@ class Reader {
     } catch (err) {
       this.close();
       throw err;
+    } finally {
+      this._reading = false;
     }
     return this.return();
   }
@@ -700,10 +707,15 @@ class UdpFollow {
     else signal?.addEventListener("abort", this._abort, { once: true });
   }
 
-  async nextEvent(wait, { signal = this._signal } = {}) {
-    let timeout;
-    try { timeout = wait === undefined ? UINT64_MAX : BigInt(normalizeWait(wait)); }
-    catch (err) { throw usageError(err.message); }
+  async nextEvent(timeoutMs, options) {
+    if (timeoutMs === undefined) return this._nextEvent(UINT64_MAX, options);
+    if (typeof timeoutMs !== "number" || timeoutMs < 0 || !Number.isSafeInteger(Math.ceil(timeoutMs))) {
+      throw usageError("timeout must be a non-negative duration in milliseconds");
+    }
+    return this._nextEvent(BigInt(Math.ceil(timeoutMs)), options);
+  }
+
+  async _nextEvent(timeout, { signal = this._signal } = {}) {
     if (signal?.aborted) throw abortError(signal);
     if (this._closed || this.finished) return null;
     const abort = () => this._inner.interruptRead();
@@ -730,7 +742,10 @@ class UdpFollow {
   }
 
   async next(wait) {
-    const value = await this.nextEvent(wait);
+    let timeout;
+    try { timeout = wait === undefined ? UINT64_MAX : BigInt(normalizeWait(wait)); }
+    catch (err) { throw usageError(err.message); }
+    const value = await this._nextEvent(timeout);
     return { done: value === null && this.finished, value: value ?? undefined };
   }
 
