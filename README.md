@@ -10,19 +10,25 @@
 
 **Easy interprocess communication.**
 
-What would make it pleasant and predictable for programs to talk to each other?
+What would make it pleasant and predictable for programs (and agents) to communicate?
 
-- Programs come and go... so **channels should outlast them**
+- Programs come and go... so **message channels should outlast them**
 - Machines crash... so **channels should live on disk**
-- Disks are finite... so **channels should have a fixed size**
+- Disks are finite... so **channels should have a bounded size**
 - Brokers bring complexity and ceremony... so **local messaging shouldn't need one**
-- You need to see what's happening... so **messages should be plain JSON you can read**
+- People need to see what's happening... so **messages should be plain JSON**
+- Schemas are great... but **schemas should be optional**
 
 So, there's **Plasmite**.
 
-Programs send JSON messages into a channel, called a pool. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. `feed` sends a message, `follow` waits for new ones, and `fetch` reads what the pool holds. The same three work from the command line and from Rust, Python, Go, Node and C, on one machine or across a network. On the command line, `pls` is a short alias for `plasmite`.
+Programs send JSON messages into a channel called a *pool*. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. There are 3 basic verbs in the API and CLI:
+- `feed` sends a message
+- `follow` waits for new messages (like `tail`)
+- `fetch` reads specific messages
 
-#### Local IPC
+On the command line, `pls` is short for `plasmite`.
+
+#### Local message passing
 
 <table width="100%">
   <tr>
@@ -47,7 +53,7 @@ Programs send JSON messages into a channel, called a pool. A pool is a ring buff
   </tr>
 </table>
 
-#### Remote IPC
+#### Remote message passing
 
 Replace `alice.example.test` with a hostname Carol can reach.
 
