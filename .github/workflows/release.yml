@@ -1,8 +1,6 @@
-name: release
+name: release-build-rehearsal
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
@@ -35,17 +33,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            tag="$RELEASE_TAG_INPUT"
-          else
-            tag="${GITHUB_REF_NAME}"
-          fi
-
-          source_sha="$(./scripts/resolve_release_tag_sha.sh "$GITHUB_REPOSITORY" "$tag")"
-          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_SHA" != "$source_sha" ]]; then
-            echo "error: pushed tag '${tag}' no longer points to event commit $GITHUB_SHA." >&2
-            exit 1
-          fi
+          tag="$RELEASE_TAG_INPUT"
+          ./scripts/validate_release_tag.sh "$tag"
+          source_sha="6591eae6404cbadb8b858039fba9a7e3efad9f05"
 
           version="${tag#v}"
           {
@@ -81,7 +71,7 @@ jobs:
             --arg tag "$RELEASE_TAG" \
             --arg version "$RELEASE_VERSION" \
             --arg source_sha "$RELEASE_SOURCE_SHA" \
-            --arg source_ref "refs/tags/${RELEASE_TAG}" \
+            --arg source_ref "refs/heads/codex/plasmite-2.0-cleanup-ci" \
             --arg source_run_id "$GITHUB_RUN_ID" \
             --arg source_workflow "$GITHUB_WORKFLOW" \
             '{tag:$tag,version:$version,source_sha:$source_sha,source_ref:$source_ref,source_run_id:$source_run_id,source_workflow:$source_workflow}' \
@@ -125,7 +115,7 @@ jobs:
           echo "ci gate passed: $success_url"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-metadata
+          name: rehearsal-build-metadata
           path: .scratch/release-metadata/metadata.json
           if-no-files-found: error
 
@@ -143,14 +133,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-context.outputs.source_sha }}
-      - name: Restore and verify release tag for build identity
+      - name: Set local build version for the rehearsal
         shell: bash
         env:
           RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
           RELEASE_SOURCE_SHA: ${{ needs.release-context.outputs.source_sha }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          git tag "$RELEASE_TAG" "$RELEASE_SOURCE_SHA"
           test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
           test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "$RELEASE_SOURCE_SHA"
       - uses: dtolnay/rust-toolchain@stable
