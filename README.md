@@ -21,7 +21,7 @@ What would make it pleasant and predictable for programs (and agents) to communi
 
 So, there's **Plasmite**.
 
-Programs (Rust, C, Python, Go, or JS) send JSON messages into a channel called a *pool*. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. There are 3 basic verbs in the API and CLI:
+Programs and scripts (shell, Rust, C, Python, Go or JS) send JSON messages into a channel called a *pool*. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. Three verbs, in the CLI and every library:
 
 - `feed` sends a message
 - `fetch` reads what's already in the pool, then stops
@@ -43,22 +43,34 @@ The message stays in the pool, so a later reader can fetch it: `pls fetch channe
 
 #### Remote message passing
 
+Remote pools take the same commands as local ones.
+
 | | Alice in Terminal 1 | Alice in Terminal 2 | Bob (another machine) |
 |---|---|---|---|
 | 4 | **Starts the server** in the background<br>`pls serve https://alice.local:9743 &` | | |
 | 5 | **Invites Bob**, then sends him the address and key<br>`pls access invite Bob` | | |
-| 6 | | | **Connects and watches**<br>`pls access connect https://alice.local:9743`<br>`pls follow https://alice.local:9743/channel` |
+| 6 | | | **Connects, pastes in the key, and then watches**<br>`pls access connect https://alice.local:9743`<br>`pls follow https://alice.local:9743/channel` |
 | 7 | **Sends**<br>`pls feed channel '{"msg":"hi all"}'` | **Sees it**<br>`{"data":{"msg":"hi all"}, ...}` | **Sees it**<br>`{"data":{"msg":"hi all"}, ...}` |
 
-Bob pastes the key at the prompt. Remote pools take the same commands as local ones. Bob can also open the address in a browser, and AI agents can connect over MCP. See the [serving guide](docs/record/serving.md).
+Bob can also browse the pools at `https://alice.local:9743` once his browser trusts Alice's certificate. See the [serving guide](docs/record/serving.md).
+
+#### Agents
+
+Alice's server also speaks MCP, so coding agents can share the same pools, with nothing installed. Add the server to an agent, then sign in with an access key:
+
+```bash
+claude mcp add --transport http plasmite https://alice.local:9743/mcp
+```
+
+Now Alice's agent can post "tests pass on `fix-login`", Bob's agent can wait for it, and Alice and Bob can watch the whole exchange with `pls follow channel`. Each agent's machine needs to trust Alice's certificate. See [Plasmite for agents](docs/agents.md).
 
 #### Fire-and-forget over UDP
 
-On a trusted network, Alice's server can also take UDP datagrams: no handshake, no receipt, very little overhead. That suits sensors and other chatty senders that can live with an occasional lost message.
+On a trusted network, Alice's server can also take UDP datagrams. A UDP sender fires off a message and moves on, where HTTP waits for the server to confirm the write. That suits sensors and other chatty senders that can live with an occasional lost message.
 
 ```bash
-pls serve https://alice.local:9743 --udp=0.0.0.0:9701 &       # Alice
-pls feed udp://alice.local:9701/channel '{"temp_c": 21.4}'    # Bob
+kill %1 && pls serve https://alice.local:9743 --udp=0.0.0.0:9701 &   # Alice restarts her server with UDP on
+pls feed udp://alice.local:9701/channel '{"temp_c": 21.4}'              # Bob
 ```
 
 ## How it works
@@ -93,21 +105,23 @@ pls follow channel --since 10m     # the last 10 minutes, then keep waiting
 | **Pipes and sockets** | One reader & no memory | Many readers and writers; late readers catch up |
 | **ZeroMQ** | Messages gone on restart, in frames ordinary tools can't read | Messages survive restarts, as JSON you can pipe through `jq` |
 
-**Use cases**: CI gates, live event streams, sensor feeds, duplex chat, system log ring buffers, replay & debug. See the **[Cookbook](docs/cookbook.md)**.
+**Use cases**: agent handoffs, CI gates, live event streams, sensor feeds, duplex chat, system log ring buffers, replay & debug. See the **[Cookbook](docs/cookbook.md)**.
 
 ## Performance
 
-Fast, small and quiet. Publishing small messages through the local APIs on an Apple M5 Pro Mac:
+Fast, small and quiet. Measured through the local APIs on an Apple M5 Pro Mac, with a 2.0 development build and medians of seven runs:
 
-| Language | Messages per second | Peak memory |
+| Language | Publish small messages (msg/s) | Peak memory while publishing |
 |---|---:|---:|
-| Rust | 432,700 | 17 MiB |
-| C | 380,400 | 18 MiB |
-| Go | 224,300 | 28 MiB |
-| Python | 105,600 | 40 MiB |
-| JavaScript (Node) | 89,600 | 67 MiB |
+| Rust | 404,900 | 17 MiB |
+| C | 309,200 | 18 MiB |
+| Go | 213,800 | 28 MiB |
+| Python | 90,600 | 40 MiB |
+| JavaScript (Node) | 84,800 | 67 MiB |
 
-A reader waiting on a quiet pool uses about 0.1% of one CPU core, and local pools never touch the network. See the [2.0 measurements](CHANGELOG.md#faster-publishing-and-catch-up) and the [performance reports](docs/performance/README.md).
+Delivery is quick: at 250 messages per second with 1 KiB payloads, a message reached **one reader in 0.13 ms** and **four readers in 0.19 ms** (median p95), and every reader got every message. A reader waiting on a quiet pool uses **under 0.1% of one CPU core**.
+
+See the [live-stream measurements](docs/performance/language-boundary-results/wakeups/README.md#live-stream-with-one-and-four-readers) and the [full 2.0 benchmarks](CHANGELOG.md#faster-publishing-and-catch-up), including replay.
 
 ## Install
 
@@ -161,7 +175,8 @@ Upgrading from 1.x? See the [2.0 upgrade guide](docs/record/upgrading-2.0.md).
 `pls --help` lists every command; `pls COMMAND --help` lists its options.
 
 - [Cookbook](docs/cookbook.md): task-by-task recipes.
-- [Performance reports](docs/performance/README.md) measure local, HTTP, UDP and MCP access.
+- [Plasmite for agents](docs/agents.md): connecting agents, handoffs and instructions to paste into `AGENTS.md`.
+- [Performance reports](docs/performance/README.md): local, HTTP, UDP and MCP measurements.
 - [CLI guide](docs/cli.md): pool references, input and output formats, exit codes.
 - Libraries: [Rust](README-crate.md), [Python](bindings/python/README.md), [Node](bindings/node/README.md), [Go](bindings/go/README.md), [C](include/plasmite.h).
 - [Serving guide](docs/record/serving.md): HTTPS, access keys, browsers, MCP, UDP, running at boot.
