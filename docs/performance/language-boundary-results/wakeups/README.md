@@ -1,10 +1,83 @@
 # Local follower wake-ups
 
-Shared-address waits cut paced delivery latency and idle CPU on macOS 14.4
-and later. The writer wakes every independent reader after publishing a new
-sequence. This replaces 5 ms semaphore polling and adds a kernel wake per append;
-binary bulk throughput falls 8.1% in the matched run below. The installed SDK
-declares the public APIs in `usr/include/os/os_sync_wait_on_address.h`.
+Local followers can sleep until the operating system wakes them. These
+measurements show the delivered-message latency, idle work, and writer
+throughput of the notification paths on each tested host.
+
+## Matched native follower benchmark
+
+Run [native-follow.py](native-follow.py) with the paths to two release
+libraries on the same machine. Use Python of the same architecture as the
+libraries. The harness verifies every sequence. It records the last of four
+independent readers on each paced message, idle process CPU, and the peak
+resident memory of each worker. The saturated runs also record writer
+completion and last-reader completion. The pools retain all test messages.
+
+```sh
+python3 native-follow.py /path/to/baseline /path/to/candidate --mixed --output runs.json
+```
+
+On Unix the idle switch count comes from `getrusage` and includes the
+benchmark control thread sampling each endpoint. Windows reports process CPU
+and peak working set. Process memory includes mapped pool pages. Physical
+energy use requires separate hardware measurement.
+
+### macOS conditional wake-all
+
+On the Apple Silicon Mac, five alternating release-build runs compared
+unconditional wake-all with the shared wait bit. Each saturated run sent
+20,000 messages. Throughput below uses the time until the last reader caught
+up when four readers were present.
+
+| macOS workload | Before | With the wait bit |
+| --- | ---: | ---: |
+| Ordinary writes, zero readers | 257,300 msg/s | 300,100 msg/s |
+| Pre-encoded writes, zero readers | 266,300 msg/s | 308,100 msg/s |
+| Ordinary writes and four readers | 61,700 msg/s | 66,300 msg/s |
+| Pre-encoded writes and four readers | 73,300 msg/s | 75,400 msg/s |
+| Paced delivery to all four readers, p95 | 0.35 ms | 0.44 ms |
+
+Median peak memory per worker changed by at most 0.33 MiB in each lane.
+Cancellation through the C API still checks a flag, and idle CPU stayed near
+0.1% of a core per paced reader. Each mixed-version run delivered all 96
+expected messages. With an older writer and newer readers, four-reader p95
+was 0.67 ms. With a newer writer and older readers, it was 52.0 ms.
+
+The CLI uses a longer recovery check when standard output is a regular file
+and the reader has no cancellation flag. Over one eight-second quiet sample,
+macOS `proc_pid_rusage` reported 152 interrupt wake-ups before and 8 after.
+Both readers then received the first message and exited. The x86-64 release
+test also recovered a commit after writer exit under Rosetta.
+
+### Windows generation events
+
+Five alternating runs compared timer polling with generation events using
+x64 release libraries on an ARM64 Windows 11 VM. The benchmark used the
+high-resolution performance counter for cross-process timing. Absolute
+throughput describes the emulated x64 process on this host.
+
+| Windows workload | Before | With generation events |
+| --- | ---: | ---: |
+| Paced delivery to one reader, p95 | 48.31 ms | 1.11 ms |
+| Paced delivery to all four readers, p95 | 49.96 ms | 2.53 ms |
+| Slowest observed paced cancellation | 63.89 ms | 0.69 ms |
+| Ordinary writes, zero readers | 29,000 msg/s | 30,200 msg/s |
+| Pre-encoded writes, zero readers | 29,700 msg/s | 29,900 msg/s |
+| Ordinary writes and four readers, complete drain | 10,170 msg/s | 9,077 msg/s |
+| Pre-encoded writes and four readers, complete drain | 10,397 msg/s | 8,799 msg/s |
+
+Peak working set changed by about 0.2 MiB or less per worker. Process CPU
+accounting on this VM was too coarse over the quiet samples to quantify an
+idle CPU savings. The named events trade 11–15% of drain throughput in the
+saturated four-reader case for much quicker notification and cancellation.
+Caching the held file's identity avoids repeating filesystem queries on
+the writer's wake-up path.
+
+Both mixed-version runs delivered all 96 expected messages. An older writer
+and newer readers fell back to the one-second recovery check, with a 937 ms
+p95. Newer writers and older readers saw a 52 ms p95 on the older reader's
+check. The crash test verified that a reader discovers a committed message
+once even when the writer exits before signalling.
 
 ## Wake-all on Linux
 
@@ -14,6 +87,17 @@ set. Writers skip the wake call when the bit is clear. Readers still check
 the pool after one second so a writer that exits after committing cannot
 leave a reader asleep indefinitely. The C reader can wake immediately on
 cancellation on kernels with `futex_waitv`.
+
+The desktop backend work also reran the native benchmark on the Debian ARM64
+VM. Both builds used the Linux wake-all protocol. Across three repeats the
+median peak resident memory changed by 0.12 MiB or less in every worker lane.
+Four-reader p95 ran from 6.59 to 7.35 ms on this loaded VM. The ordinary
+four-reader drain moved from 69,600 to 67,400 messages/s, while the pre-encoded
+drain moved from 76,300 to 90,700 messages/s. Treat this as a regression
+check for the shared-code refactor. The large spread across workloads and
+concurrent host activity make it unsuitable for a Linux speedup claim. The full Debian ARM64 Rust
+suite passed. Linux x64 and ARMv7 both passed the forced cancellation
+fallback and writer-exit recovery tests under emulation.
 
 ## Earlier blocking semaphore experiment on Linux
 
@@ -42,7 +126,9 @@ The four-follower median ran slower in this repeat. Which follower receives
 the wake-up still depends on scheduling. These measurements cover VM behavior
 and give no estimate of power draw on a physical device.
 
-## Adopted macOS path
+<a id="adopted-macos-path"></a>
+
+## Earlier unconditional macOS wake-all
 
 On macOS 14.4 and later, the writer publishes the existing aligned eight-byte
 newest-sequence word with a release store, unlocks the pool, and calls the public
@@ -56,8 +142,9 @@ Each notification owns a 4 KiB header mapping, which can outlive its originating
 Pool without retaining another descriptor. The writer uses its existing mapping.
 The change adds no thread, shared waiter count, coordination file, or format
 version. Waits retain their existing deadlines and at most 50 ms cancellation
-slices. Unavailable or failed hints retain bounded polling. Other Unix hosts without shared-address waits use 5 ms semaphore polling.
-Windows checks for changes on a timer.
+slices. Unavailable or failed hints retain bounded polling. Other Unix hosts without
+shared-address waits use 5 ms semaphore polling. Windows used a timer at the
+time of the macOS measurements below.
 
 The bridge compiles against the supported minimum macOS version, rather than
 the installed SDK's default. An initial development build inherited the SDK's

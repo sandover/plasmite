@@ -28,9 +28,18 @@ const MAGIC: [u8; 4] = *b"PLSM";
 const ENDIANNESS_LE: u8 = 1;
 const HEADER_SIZE: usize = 4096;
 const NEWEST_SEQ_OFFSET: usize = 96;
-// Linux uses one previously reserved word as a disposable wake-up hint.
-#[cfg(target_os = "linux")]
+// Native waiters use a reserved word as a disposable wake-up hint.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 const NOTIFY_OFFSET: usize = 104;
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+macro_rules! crash_before_wake_for_tests {
+    () => {
+        #[cfg(test)]
+        if std::env::var_os("PLASMITE_TEST_CRASH_BEFORE_WAKE").is_some() {
+            std::process::exit(91);
+        }
+    };
+}
 const INDEX_SLOT_BYTES: u64 = 16;
 const MAX_AUTO_INDEX_CAPACITY: u64 = 65_536;
 const MIN_RING_SIZE_FOR_INDEX: u64 = 1024;
@@ -436,10 +445,12 @@ pub struct PoolAgeMetrics {
 pub struct Pool {
     path: PathBuf,
     // Derive the canonical wake-up name once, outside the append path.
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     notify_name: String,
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     notify_writer: Option<notify::PoolSemaphore>,
+    #[cfg(windows)]
+    notify_identity: Option<String>,
     file: File,
     #[cfg(unix)]
     file_identity: (u64, u64),
@@ -535,10 +546,12 @@ impl Pool {
         let mut pool = Self {
             #[cfg(unix)]
             file_identity: unix_file_identity(&file, &path)?,
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             notify_name: notify::pool_semaphore_name(&path),
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             notify_writer: None,
+            #[cfg(windows)]
+            notify_identity: file_incarnation(&file).ok(),
             path,
             file,
             mmap,
@@ -615,10 +628,12 @@ impl Pool {
                 use std::os::unix::fs::MetadataExt;
                 (metadata.dev(), metadata.ino())
             },
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             notify_name: notify::pool_semaphore_name(&path),
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             notify_writer: None,
+            #[cfg(windows)]
+            notify_identity: file_incarnation(&file).ok(),
             path,
             file,
             mmap,
@@ -642,7 +657,7 @@ impl Pool {
         Ok(header)
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
@@ -677,7 +692,13 @@ impl Pool {
                 .with_path(&self.path)
                 .with_source(error)
         })?;
-        Ok(ProgressWatch { mmap })
+        Ok(ProgressWatch {
+            mmap,
+            #[cfg(windows)]
+            identity: self.notify_identity.clone().ok_or_else(|| {
+                Error::new(ErrorKind::Io).with_message("pool notification identity unavailable")
+            })?,
+        })
     }
 
     pub(crate) fn read_lock(&self) -> Result<ReadLock<'_>, Error> {
@@ -984,6 +1005,8 @@ impl Pool {
         require_current_path(&self.file, &self.path)?;
         // Refresh header after acquiring the lock to avoid stale state across processes.
         self.header = self.header_locked()?;
+        #[cfg(windows)]
+        let previous = self.header.newest_seq;
         let seq = append_locked_with_flush(
             &mut self.mmap,
             &mut self.header,
@@ -994,25 +1017,37 @@ impl Pool {
         )?;
         #[cfg(target_os = "linux")]
         {
-            let word = linux_wake_word(&self.mmap);
-            let armed = notify::linux::publish(word, seq);
+            let word = wake_word(&self.mmap);
+            let armed = notify::publish(word, seq);
             drop(lock);
-            #[cfg(test)]
-            if std::env::var_os("PLASMITE_TEST_CRASH_BEFORE_WAKE").is_some() {
-                std::process::exit(91);
-            }
+            crash_before_wake_for_tests!();
             if armed {
                 notify::linux::wake(word);
             }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        {
+            let armed = notify::publish(wake_word(&self.mmap), seq);
+            drop(lock);
+            crash_before_wake_for_tests!();
+            if armed && let Some(identity) = &self.notify_identity {
+                notify::windows::wake(identity, previous);
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if notify::shared_address_available() {
+            let armed = notify::publish(wake_word(&self.mmap), seq);
+            drop(lock);
+            crash_before_wake_for_tests!();
+            if armed {
+                notify::wake_sequence(progress_word(&self.mmap));
+            }
+            return Ok(seq);
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             drop(lock);
-            let _ = notify::post_for_pool(
-                progress_word(&self.mmap),
-                &self.notify_name,
-                &mut self.notify_writer,
-            );
+            let _ = notify::post_for_name(&self.notify_name, &mut self.notify_writer);
         }
         Ok(seq)
     }
@@ -1144,6 +1179,8 @@ where
 
 pub(crate) struct ProgressWatch {
     mmap: MmapMut,
+    #[cfg(windows)]
+    identity: String,
 }
 
 impl ProgressWatch {
@@ -1159,7 +1196,7 @@ impl ProgressWatch {
         cancel: Option<&notify::CancelSignal>,
     ) -> Result<notify::WaitOutcome, notify::NotifyError> {
         notify::linux::wait(
-            linux_wake_word(&self.mmap),
+            wake_word(&self.mmap),
             progress_word(&self.mmap),
             expected,
             timeout,
@@ -1167,18 +1204,49 @@ impl ProgressWatch {
         )
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    pub(crate) fn wait(
+        &self,
+        expected: u64,
+        timeout: std::time::Duration,
+        cancel: Option<&notify::CancelSignal>,
+    ) -> Result<notify::WaitOutcome, notify::NotifyError> {
+        notify::windows::wait(
+            &self.identity,
+            wake_word(&self.mmap),
+            progress_word(&self.mmap),
+            expected,
+            timeout,
+            cancel,
+        )
+    }
+
+    #[cfg(target_os = "macos")]
     pub(crate) fn wait(
         &self,
         expected: u64,
         timeout: std::time::Duration,
     ) -> Result<notify::WaitOutcome, notify::NotifyError> {
-        notify::wait_for_sequence(progress_word(&self.mmap), expected, timeout)
+        notify::wait_for_sequence(
+            wake_word(&self.mmap),
+            progress_word(&self.mmap),
+            expected,
+            timeout,
+        )
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    pub(crate) fn wait(
+        &self,
+        _expected: u64,
+        _timeout: std::time::Duration,
+    ) -> Result<notify::WaitOutcome, notify::NotifyError> {
+        Err(notify::NotifyError::Unavailable)
     }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_wake_word(mmap: &MmapMut) -> &std::sync::atomic::AtomicU32 {
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn wake_word(mmap: &MmapMut) -> &std::sync::atomic::AtomicU32 {
     // SAFETY: A validated header starts at a page boundary. This aligned,
     // reserved word has no other live accesses in this version.
     unsafe {
@@ -2498,7 +2566,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn commit_without_notification_is_recovered() {
         use crate::api::{Read, ReadPoll};
@@ -2507,10 +2575,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("quiet-crash.plasmite");
         let pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        if !crate::core::notify::shared_address_available() {
+            return;
+        }
         let mut reader = pool.follow_lite3(Read::new()).unwrap();
         thread::scope(|scope| {
             let crash = scope.spawn(|| {
-                let word = super::linux_wake_word(&pool.mmap);
+                let word = super::wake_word(&pool.mmap);
                 let deadline = Instant::now() + Duration::from_secs(2);
                 while word.load(Ordering::Acquire) == 0 && Instant::now() < deadline {
                     thread::sleep(Duration::from_millis(1));
@@ -2536,7 +2607,7 @@ mod tests {
         ));
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn crash_before_wake_child() {
         let Some(path) = std::env::var_os("PLASMITE_TEST_CRASH_BEFORE_WAKE") else {

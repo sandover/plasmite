@@ -24,11 +24,66 @@ All notable changes to this project will be documented in this file.
 - Use `PLS2` for framed Lite3 files. Existing pool files keep their format.
 - UDP follows deliver late and duplicate datagrams in arrival order. A server-confirmed retention gap names the first missing and first retained sequences. Positional UDP fetch only returns the requested sequence.
 
-### Faster Linux followers
+### Publish faster and catch up sooner
+
+All five bindings published more small events per second, handled more
+structured records, and caught up faster when reading retained logs. Node.js
+can run other callbacks during replay. In our check, a queued callback ran
+before 2.0 finished reading the 4,000 messages. In 1.3.0, it ran after replay
+finished.
+
+Median messages per second, from 1.3.0 to the 2.0 draft.
+
+| Language | Publish heartbeats | Write and read telemetry | Replay large log messages |
+| --- | ---: | ---: | ---: |
+| Rust | 105,500 → 432,700 | 43,000 → 79,800 | 101,400 → 413,500 |
+| C | 97,200 → 380,400 | 32,700 → 81,200 | 62,400 → 235,700 |
+| Python | 59,100 → 105,600 | 18,100 → 26,200 | 28,900 → 43,300 |
+| JavaScript / Node.js | 68,700 → 89,600 | 14,000 → 27,200 | 28,100 → 35,200 |
+| Go | 81,600 → 224,300 | 23,100 → 44,500 | 29,200 → 54,100 |
+
+We ran each workload seven times per version on the same Apple M5 Pro Mac
+using the ordinary local APIs. The measured 2.0 development snapshot includes conditional macOS wake-ups
+and pending JSON read optimizations. The publisher wrote 25,000 heartbeats
+and received a complete
+message for each write. The telemetry workload wrote and read back 12,000
+messages with 16 sensor readings each, counting each message once. The
+replay read 4,000 preloaded messages with 16 KiB of text each.
+
+#### Peak memory
+
+Node.js used less memory in all three workloads. Its peak memory fell by 44%
+when replaying large log messages. Python used about 1–3 MiB more across the
+three workloads. Rust, C, and Go stayed within about 1 MiB.
+
+Median peak resident memory in MiB, from 1.3.0 to the 2.0 draft.
+
+| Language | Publish heartbeats | Write and read telemetry | Replay large log messages |
+| --- | ---: | ---: | ---: |
+| Rust | 16.7 → 17.1 | 45.4 → 46.0 | 67.4 → 67.1 |
+| C | 16.8 → 17.7 | 88.0 → 88.9 | 67.8 → 67.5 |
+| Python | 36.6 → 39.7 | 107.7 → 111.1 | 87.5 → 88.6 |
+| JavaScript / Node.js | 77.0 → 67.2 | 175.5 → 135.9 | 199.9 → 112.4 |
+| Go | 26.5 → 27.5 | 98.4 → 99.0 | 77.0 → 77.2 |
+
+We measured the whole process, including pool-file pages in RAM, across seven
+runs per version on the same Mac. Both versions replayed the same prefilled
+pool, so the replay figures exclude writing the history.
+
+See the [performance guide](docs/performance/language-interfaces.md) for more
+workloads and guidance on choosing a read path.
+
+### Faster local followers
 
 - Wake every waiting local follower on a write. Writers skip the wake-up call
   when nobody has registered a wait. Readers check for committed messages
   about once a second if a writer exits before waking them.
+- On macOS 14.4 and later, writers skip the wake-up call when nobody is
+  waiting. A quiet CLI follower with regular-file output also rechecks less
+  often.
+- On Windows, a write now wakes all waiting followers. In our Windows VM,
+  four-reader paced delivery fell from about 50 ms to 2.5 ms at p95.
+  At saturation, four readers drained 11–15% fewer messages per second.
 
 ### Immutable views and direct native input
 

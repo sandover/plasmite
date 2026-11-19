@@ -5,17 +5,6 @@ use std::io;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
-// One bit is enough for any number of sleepers. A departing reader may leave
-// one harmless wake for the next writer without leaving a permanent count.
-const ARMED: u32 = 1;
-const FLAG_CHECK: Duration = Duration::from_millis(50);
-pub(crate) const RECOVERY_CHECK: Duration = Duration::from_secs(1);
-
-pub(crate) fn publish(word: &AtomicU32, sequence: u64) -> bool {
-    let next = ((sequence as u32) << 1).to_le();
-    word.swap(next, Ordering::AcqRel) & ARMED.to_le() != 0
-}
-
 pub(crate) fn wake(word: &AtomicU32) {
     wake_address(word, libc::FUTEX_WAKE);
 }
@@ -46,15 +35,9 @@ pub(crate) fn wait(
         return Ok(WaitOutcome::TimedOut);
     }
 
-    let before = word.load(Ordering::Acquire);
-    let armed = before | ARMED.to_le();
-    if before != armed
-        && word
-            .compare_exchange(before, armed, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-    {
+    let Some(armed) = super::arm(word) else {
         return Ok(WaitOutcome::Signaled);
-    }
+    };
     // Registration and the final sequence check cover writes racing with
     // entry into the kernel, including writers that leave the wake word alone.
     if sequence.load(Ordering::Acquire) != expected.to_le() {
@@ -71,7 +54,7 @@ pub(crate) fn wait(
     }
 
     let timeout = if cancel.is_some() {
-        timeout.min(FLAG_CHECK)
+        timeout.min(super::FLAG_CHECK)
     } else {
         timeout
     };
@@ -107,6 +90,10 @@ fn wait_with_cancel(
     duration: Duration,
     cancel: &AtomicU32,
 ) -> Result<Option<WaitOutcome>, NotifyError> {
+    #[cfg(test)]
+    if std::env::var_os("PLASMITE_TEST_NO_FUTEX_WAITV").is_some() {
+        return Ok(None);
+    }
     // futex_waitv compares both words before parking. Its timeout uses an
     // absolute CLOCK_MONOTONIC deadline and a fixed 64-bit kernel layout.
     #[repr(C)]
@@ -182,5 +169,45 @@ fn wait_result(result: libc::c_long) -> Result<WaitOutcome, NotifyError> {
         Some(libc::ETIMEDOUT) => Ok(WaitOutcome::TimedOut),
         Some(libc::EPERM | libc::EACCES) => Err(NotifyError::Unavailable),
         _ => Err(map_notify_error_with(error)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_preserves_cancellation_checks() {
+        use std::process::Command;
+        if std::env::var_os("PLASMITE_TEST_NO_FUTEX_WAITV").is_none() {
+            assert!(
+                Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "core::notify::linux::tests::fallback_preserves_cancellation_checks",
+                        "--exact"
+                    ])
+                    .env("PLASMITE_TEST_NO_FUTEX_WAITV", "1")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            return;
+        }
+
+        let word = AtomicU32::new(0);
+        let sequence = AtomicU64::new(0);
+        let cancel = super::super::CancelSignal::default();
+        let start = std::time::Instant::now();
+        // The ordinary wait still returns at the short flag-check interval.
+        assert_eq!(
+            wait(&word, &sequence, 0, Duration::from_secs(5), Some(&cancel)).unwrap(),
+            WaitOutcome::TimedOut
+        );
+        assert!(start.elapsed() < Duration::from_secs(2));
+        cancel.cancel();
+        assert_eq!(
+            wait(&word, &sequence, 0, Duration::from_secs(5), Some(&cancel)).unwrap(),
+            WaitOutcome::Signaled
+        );
     }
 }

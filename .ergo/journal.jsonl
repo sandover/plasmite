@@ -1140,3 +1140,31 @@
 {"version":1,"task_id":"CB5GMA","kind":"done","at":"2026-11-18T18:32:30.449968Z","agent":"codex@mac","text":"Update the CLI and migration guides, changelog, specs and install examples for 2.0. Preserve historical examples in dated material."}
 {"version":1,"task_id":"VJTFS6","kind":"result","at":"2026-11-18T18:38:41.140714Z","text":"32-byte ASCII validation cut a 64 KiB cold view from 5.9 to 2.1 µs. Small-message timing ranges overlap."}
 {"version":1,"task_id":"TKAGXH","kind":"result","at":"2026-11-18T18:38:41.186655Z","text":"Final npm tarballs passed on Debian arm64 and Windows x64. Both load Plasmite by its ABI 2 library name."}
+{"version":1,"task_id":"PTQ6XF","kind":"created","at":"2026-11-19T00:47:14.605215Z"}
+{"version":1,"task_id":"QKS3RF","kind":"created","at":"2026-11-19T00:47:14.605241Z"}
+{"version":1,"task_id":"J4QABG","kind":"created","at":"2026-11-19T00:47:14.605243Z"}
+{"version":1,"task_id":"B3JY54","kind":"created","at":"2026-11-19T00:47:14.605245Z"}
+{"version":1,"task_id":"C6O5VQ","kind":"created","at":"2026-11-19T00:47:14.605247Z"}
+{"version":1,"task_id":"V6WP4D","kind":"created","at":"2026-11-19T00:47:14.605248Z"}
+{"version":1,"task_id":"QKS3RF","kind":"open","at":"2026-11-19T00:48:40.740205Z","text":"Reviewed by Astra 6.2"}
+{"version":1,"task_id":"J4QABG","kind":"open","at":"2026-11-19T00:48:40.77952Z","text":"Reviewed by Astra 6.2"}
+{"version":1,"task_id":"B3JY54","kind":"open","at":"2026-11-19T00:48:40.818132Z","text":"Reviewed by Astra 6.2"}
+{"version":1,"task_id":"C6O5VQ","kind":"open","at":"2026-11-19T00:48:40.856962Z","text":"Reviewed by Astra 6.2"}
+{"version":1,"task_id":"V6WP4D","kind":"open","at":"2026-11-19T00:48:40.895516Z","text":"Reviewed by Astra 6.2"}
+{"version":1,"task_id":"QKS3RF","kind":"claim","at":"2026-11-19T00:48:41.125984Z","agent":"codex"}
+{"version":1,"task_id":"J4QABG","kind":"claim","at":"2026-11-19T00:48:41.16593Z","agent":"codex"}
+{"version":1,"task_id":"B3JY54","kind":"claim","at":"2026-11-19T00:48:41.205419Z","agent":"codex"}
+{"version":1,"task_id":"C6O5VQ","kind":"claim","at":"2026-11-19T00:48:41.245416Z","agent":"codex"}
+{"version":1,"task_id":"J4QABG","kind":"result","at":"2026-11-19T01:01:05.979464Z","agent":"codex","text":"macOS passed crash recovery; 4-reader p95 0.40 ms, quiet CLI wake-ups 152→8 over 8 s.","file":{"path":"docs/performance/language-boundary-results/wakeups/README.md","sha256":"a92c5dc78064f0c0f3a157ede7941f84cc83779221227b8ed57beba7e184fa89","mtime":"2026-11-19T00:57:31.510114962Z","git_commit":"97442cff981bc84d5c37554dbbde6d92cbf6f9df"}}
+{"version":1,"task_id":"J4QABG","kind":"done","at":"2026-11-19T01:01:06.033699Z","agent":"codex","text":"Kept conditional wake-all after matched macOS runs and weak-link verification"}
+{"version":1,"task_id":"C6O5VQ","kind":"result","at":"2026-11-19T01:04:04.872924Z","agent":"codex","text":"Debian ARM64 full suite; x64 and ARMv7 emulated recovery/timeout pass. Physical power still unmeasured.","file":{"path":"docs/performance/language-boundary-results/wakeups/README.md","sha256":"a92c5dc78064f0c0f3a157ede7941f84cc83779221227b8ed57beba7e184fa89","mtime":"2026-11-19T00:57:31.510114962Z","git_commit":"97442cff981bc84d5c37554dbbde6d92cbf6f9df"}}
+{"version":1,"task_id":"C6O5VQ","kind":"done","at":"2026-11-19T01:04:04.920409Z","agent":"codex","text":"Verified all three Linux architectures with native ARM64 and functional x64 and ARMv7 emulation"}
+{"version":1,"task_id":"B3JY54","kind":"result","at":"2026-11-19T01:07:33.237602Z","agent":"codex","text":"Win x64: 4-reader p95 49.96→2.53 ms; saturated drain 11–15% lower. All 279 library tests passed.","file":{"path":"docs/performance/language-boundary-results/wakeups/README.md","sha256":"b4593685051dab13a9403a04bd97a3b678c65707d20043313c408e51d653fb09","mtime":"2026-11-19T01:07:05.407732076Z","git_commit":"97442cff981bc84d5c37554dbbde6d92cbf6f9df"}}
+{"version":1,"task_id":"B3JY54","kind":"done","at":"2026-11-19T01:07:33.282955Z","agent":"codex","text":"Generation events verified in the Windows VM; kept the measured latency/throughput tradeoff"}
+{"version":1,"task_id":"J4QABG","kind":"result","at":"2026-11-19T01:07:57.930827Z","text":"Quieter rerun: +16–17% writes with zero readers; four-reader p95 0.44 ms; peak RSS change \u003c=0.33 MiB.","file":{"path":"docs/performance/language-boundary-results/wakeups/README.md","sha256":"0d4ff498b65032251d60cd681fba1e3612beea50ddae1830d45ce2d6c9da7af3","mtime":"2026-11-19T01:07:57.880271165Z","git_commit":"97442cff981bc84d5c37554dbbde6d92cbf6f9df"}}
+{"version":1,"task_id":"QKS3RF","kind":"result","at":"2026-11-19T01:07:57.999769Z","agent":"codex","text":"Ran matched one/four-reader delivery, idle, cancellation, drain and per-worker peak memory on three OSes.","file":{"path":"docs/performance/language-boundary-results/wakeups/native-follow.py","sha256":"d960bbbfe285b95c7c618ea9ff0a14b7ebb0acc93d914cf66b09fb5a8856ecca","mtime":"2026-11-19T01:01:36.333914332Z","git_commit":"97442cff981bc84d5c37554dbbde6d92cbf6f9df"}}
+{"version":1,"task_id":"QKS3RF","kind":"done","at":"2026-11-19T01:07:58.055805Z","agent":"codex","text":"Portable harness verified on macOS, Debian ARM64 and Windows x64"}
+{"version":1,"task_id":"V6WP4D","kind":"claim","at":"2026-11-19T01:07:58.105505Z","agent":"codex"}
+{"version":1,"task_id":"J4QABG","kind":"result","at":"2026-11-19T01:08:23.532346Z","text":"The x86-64 macOS release crash-recovery test also passed under Rosetta."}
+{"version":1,"task_id":"V6WP4D","kind":"result","at":"2026-11-19T01:08:23.572661Z","agent":"codex","text":"7 matched runs per build across 5 bindings and 3 workloads; Node replay remains responsive, with 44% less peak memory.","file":{"path":"CHANGELOG.md","sha256":"162ec9512dc748e8067b7ed49d7ff79378bb41b8b313bbf9a372c6df28d0363b","mtime":"2026-11-19T01:07:05.40813212Z","git_commit":"97442cff981bc84d5c37554dbbde6d92cbf6f9df"}}
+{"version":1,"task_id":"V6WP4D","kind":"done","at":"2026-11-19T01:08:23.616986Z","agent":"codex","text":"Published matched measurements in the draft notes and native performance report"}

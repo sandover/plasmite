@@ -4,7 +4,7 @@
 //! Invariants: Wait results are best-effort; callers must fall back to polling.
 //! Invariants: Unavailable notify never blocks progress.
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 use crate::core::notify::open_for_path as core_open_for_path;
 use crate::core::notify::{NotifyError, WaitOutcome};
 use crate::core::pool::{Pool, ProgressWatch};
@@ -19,7 +19,7 @@ pub enum NotifyWait {
 }
 
 enum Source {
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     Semaphore(crate::core::notify::PoolSemaphore),
     Progress {
         watch: ProgressWatch,
@@ -32,16 +32,21 @@ pub struct NotifyHandle {
 }
 
 impl NotifyHandle {
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    pub(crate) fn uses_progress(&self) -> bool {
+        matches!(self.inner, Source::Progress { .. })
+    }
+
     pub fn wait(&mut self, timeout: Duration) -> NotifyWait {
         let observed = match &self.inner {
             Source::Progress { observed, .. } => *observed,
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             Source::Semaphore(_) => 0,
         };
         match self.wait_for_generation(
             observed,
             timeout,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             None,
         ) {
             Ok(WaitOutcome::Signaled) => NotifyWait::Signaled,
@@ -54,16 +59,18 @@ impl NotifyHandle {
         &mut self,
         expected: u64,
         timeout: Duration,
-        #[cfg(target_os = "linux")] cancel: Option<&crate::core::notify::CancelSignal>,
+        #[cfg(any(target_os = "linux", windows))] cancel: Option<
+            &crate::core::notify::CancelSignal,
+        >,
     ) -> Result<WaitOutcome, NotifyError> {
         match &mut self.inner {
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             Source::Semaphore(semaphore) => semaphore.wait(timeout),
             Source::Progress { watch, observed } => {
                 let result = watch.wait(
                     expected,
                     timeout,
-                    #[cfg(target_os = "linux")]
+                    #[cfg(any(target_os = "linux", windows))]
                     cancel,
                 );
                 *observed = watch.generation();
@@ -83,9 +90,9 @@ pub fn open_for_pool(pool: &Pool) -> Option<NotifyHandle> {
             inner: Source::Progress { watch, observed },
         })
     } else {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         return None;
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         core_open_for_path(pool.path())
             .ok()
             .map(|inner| NotifyHandle {
@@ -96,9 +103,9 @@ pub fn open_for_pool(pool: &Pool) -> Option<NotifyHandle> {
 
 /// Some backends require an existing openable pool. Poll if hints are unavailable.
 pub fn open_for_path(path: &Path) -> Option<NotifyHandle> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     return open_for_pool(&Pool::open(path).ok()?);
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     if crate::core::notify::shared_address_available() {
         open_for_pool(&Pool::open(path).ok()?)
     } else {

@@ -203,25 +203,25 @@ Feed writes a record in this order.
 5. Update index slot (when enabled).
 6. Publish header updates and notify waiters.
 
-On macOS 14.4 and later, builds with the shared-address wait APIs publish the
-newest sequence with an aligned atomic store in its existing header location.
-After releasing the writer lock, the writer wakes all processes waiting on that
-word. Readers retain a header-only mapping and compare the generation from
-their empty-cursor check before sleeping. The kernel compares again when it
-registers the wait, so an intervening append cannot hide behind a new wait.
+On Linux, Windows, and macOS 14.4 or later, a reader that reaches the end
+of the pool arms a bit in the mapped header. The writer publishes its sequence
+and clears the bit under the lock. It wakes readers after unlocking when the bit
+was set. The notification word uses reserved header space. Readers still check
+the full sequence and their own position in the held pool.
 
-On Linux, a reader that reaches the end of the pool arms a wake-up bit in
-the mapped header. The writer publishes the next generation and clears the
-bit under the writer lock. After unlocking, it wakes all waiting readers if
-the bit was set. The notification word uses reserved header space, and the
-pool format and full message sequence remain compatible with older builds.
+Linux waits on the notification word. macOS waits on the full sequence with
+Apple's public compare-and-wait operation, which lets an older writer still
+signal a new reader. On Windows readers open a named event for the held
+file's identity and full observed sequence before they arm the bit. The writer
+signals the event for the sequence it replaced. Readers retain the event until
+they finish waiting, so a signal just before a reader parks still reaches it.
 
-Linux readers use a one-second recheck to pick up messages when a writer exits
-before signalling or uses an older backend. The C reader cancellation call can
-wake a blocked reader on kernels with `futex_waitv`. Callers that supply a plain
-cancellation flag, and kernels without that call, retain 50 ms cancellation checks.
-Caller-supplied durations can shorten any wait. Platforms without a
-shared-address backend keep their existing semaphore or polling fallback.
+A bounded recheck recovers commits if a writer exits before signalling or a
+hint fails. Linux and Windows can also wake a native C reader on cancellation
+when the kernel supports the required wait. Plain cancellation flags still
+need a 50 ms check, as do C cancellation on macOS and kernels that fall back
+to a single wait. Caller deadlines can shorten any wait. Older macOS releases
+keep the semaphore fallback.
 
 Invariants:
 

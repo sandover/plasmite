@@ -5,14 +5,43 @@ use std::io;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::AtomicBool;
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+use std::sync::atomic::AtomicU32;
+#[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
+#[cfg(windows)]
+pub(crate) mod windows;
+
+#[cfg(any(target_os = "linux", windows))]
+pub(crate) const FLAG_CHECK: Duration = Duration::from_millis(50);
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) const RECOVERY_CHECK: Duration = Duration::from_secs(1);
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) const ARMED: u32 = 1u32.to_le();
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn publish(word: &AtomicU32, sequence: u64) -> bool {
+    // One bit covers every sleeper. A departing reader can leave at most
+    // one extra wake for the next writer.
+    word.swap(((sequence as u32) << 1).to_le(), Ordering::AcqRel) & ARMED != 0
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn arm(word: &AtomicU32) -> Option<u32> {
+    let before = word.load(Ordering::Acquire);
+    let armed = before | ARMED;
+    if before != armed {
+        word.compare_exchange(before, armed, Ordering::AcqRel, Ordering::Acquire)
+            .ok()?;
+    }
+    Some(armed)
+}
 
 /// Bindings own the cancellation operation, so they can wake a parked local
 /// reader. The flag also serves remote readers and older notification backends.
@@ -21,6 +50,8 @@ pub(crate) struct CancelSignal {
     flag: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(target_os = "linux")]
     event: std::sync::atomic::AtomicU32,
+    #[cfg(windows)]
+    event: std::sync::OnceLock<Option<std::os::windows::io::OwnedHandle>>,
 }
 
 impl CancelSignal {
@@ -32,12 +63,16 @@ impl CancelSignal {
         self.flag.store(true, Ordering::Release);
         #[cfg(target_os = "linux")]
         linux::cancel(&self.event);
+        #[cfg(windows)]
+        if let Some(event) = self.event.get_or_init(windows::cancel_event) {
+            windows::signal(event);
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 // The polling fallback keeps this shared result type but cannot produce semaphore events.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 pub(crate) enum WaitOutcome {
     Signaled,
     TimedOut,
@@ -47,7 +82,7 @@ pub(crate) enum WaitOutcome {
 pub(crate) enum NotifyError {
     Unavailable,
     // Native Unix notification operations can report operating-system errors.
-    #[cfg_attr(not(unix), allow(dead_code))]
+    #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
     Io(io::Error),
 }
 
@@ -68,72 +103,50 @@ pub(crate) fn shared_address_available() -> bool {
         static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *AVAILABLE.get_or_init(|| unsafe { plasmite_address_wait_available() != 0 })
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         true
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         false
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 pub(crate) fn wait_for_sequence(
-    _word: &AtomicU64,
-    _expected: u64,
-    _timeout: Duration,
+    interest: &AtomicU32,
+    word: &AtomicU64,
+    expected: u64,
+    timeout: Duration,
 ) -> Result<WaitOutcome, NotifyError> {
-    #[cfg(target_os = "macos")]
-    {
-        // Touch this mapping before entering the kernel. This also handles a
-        // publication that wins the race after the cursor's empty-state check.
-        if _word.load(std::sync::atomic::Ordering::Acquire) != _expected.to_le() {
-            return Ok(WaitOutcome::Signaled);
-        }
-        if _timeout.is_zero() {
-            return Ok(WaitOutcome::TimedOut);
-        }
-        let nanos = _timeout.as_nanos().min(u64::MAX as u128) as u64;
-        // The borrowed atomic keeps the aligned mapped word alive through this
-        // compare-and-wait; the C bridge reads it and guards OS availability.
-        let ret = unsafe { plasmite_address_wait(_word.as_ptr(), _expected.to_le(), nanos) };
-        if ret >= 0 {
-            return Ok(WaitOutcome::Signaled);
-        }
-        let error = io::Error::last_os_error();
-        match error.raw_os_error() {
-            Some(libc::ETIMEDOUT) => Ok(WaitOutcome::TimedOut),
-            Some(libc::EINTR) => Ok(WaitOutcome::Signaled),
-            _ => Err(map_notify_error_with(error)),
-        }
+    if word.load(Ordering::Acquire) != expected.to_le() {
+        return Ok(WaitOutcome::Signaled);
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err(NotifyError::Unavailable)
+    if timeout.is_zero() {
+        return Ok(WaitOutcome::TimedOut);
+    }
+    if arm(interest).is_none() || word.load(Ordering::Acquire) != expected.to_le() {
+        return Ok(WaitOutcome::Signaled);
+    }
+    // Retain the sequence as the wait address so older writers can wake it.
+    let nanos = timeout.as_nanos().min(u64::MAX as u128) as u64;
+    let result = unsafe { plasmite_address_wait(word.as_ptr(), expected.to_le(), nanos) };
+    if result >= 0 {
+        return Ok(WaitOutcome::Signaled);
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ETIMEDOUT) => Ok(WaitOutcome::TimedOut),
+        Some(libc::EINTR) => Ok(WaitOutcome::Signaled),
+        _ => Err(map_notify_error_with(error)),
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn post_for_pool(
-    _word: &AtomicU64,
-    name: &str,
-    cached: &mut Option<PoolSemaphore>,
-) -> Result<(), NotifyError> {
-    #[cfg(target_os = "macos")]
-    if shared_address_available() {
-        let ret = unsafe { plasmite_address_wake_all(_word.as_ptr()) };
-        if ret >= 0 {
-            return Ok(());
-        }
-        let error = io::Error::last_os_error();
-        return if error.raw_os_error() == Some(libc::ENOENT) {
-            Ok(()) // No waiter currently needs a hint.
-        } else {
-            Err(map_notify_error_with(error))
-        };
-    }
-    post_for_name(name, cached)
+#[cfg(target_os = "macos")]
+pub(crate) fn wake_sequence(word: &AtomicU64) {
+    // The reader's bounded check covers any failed hint.
+    unsafe { plasmite_address_wake_all(word.as_ptr()) };
 }
 
 #[cfg(test)]
@@ -157,9 +170,7 @@ fn map_notify_error_with(err: io::Error) -> NotifyError {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 mod semaphore;
-#[cfg(not(target_os = "linux"))]
-use semaphore::post_for_name;
-#[cfg(not(target_os = "linux"))]
-pub(crate) use semaphore::{PoolSemaphore, open_for_path, pool_semaphore_name};
+#[cfg(not(any(target_os = "linux", windows)))]
+pub(crate) use semaphore::{PoolSemaphore, open_for_path, pool_semaphore_name, post_for_name};

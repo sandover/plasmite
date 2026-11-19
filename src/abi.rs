@@ -1399,10 +1399,10 @@ fn read_state(
     let state = (|| match &handle.pool {
         PoolHandle::Local(source) => {
             let pool = Box::new(source.reopen()?);
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             let options = options.cancel(cancel.flag());
             let state = pool.read_state(options, live)?;
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             let state = state.with_cancel_signal(cancel.clone());
             Ok(StreamState::Local { pool, state })
         }
