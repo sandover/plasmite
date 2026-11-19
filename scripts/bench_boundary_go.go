@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -63,14 +64,19 @@ func run() error {
 		for i := 0; i < count; i++ {
 			call := time.Now()
 			if req.Op == "append" {
-				message, err := pool.Append(req.Items[i], nil)
+				message, err := pool.Feed(req.Items[i], nil)
 				if err != nil {
 					return err
 				}
 				timings = append(timings, time.Since(call).Nanoseconds())
 				sequences = append(sequences, message.Seq)
 			} else {
-				message, err := pool.Get(req.Sequences[i])
+				reader, err := pool.Fetch(local.Since(req.Sequences[i]))
+				if err != nil {
+					return err
+				}
+				message, err := reader.Next(context.Background())
+				reader.Close()
 				if err != nil {
 					return err
 				}

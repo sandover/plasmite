@@ -923,9 +923,8 @@ Plasmite is great for local and small-team IPC, but it's not the answer to every
 
 ## Next Steps
 
-- **Rust API spec**: [spec/api/v0/SPEC.md](../spec/api/v0/SPEC.md)
+- [Plasmite 2.0 API and CLI contract](../spec/v2/SPEC.md)
 - **Go bindings**: [bindings/go/README.md](../bindings/go/README.md)
 - **Node bindings**: [../bindings/node/README.md](../bindings/node/README.md)
-- **CLI spec**: [../spec/v0/SPEC.md](../spec/v0/SPEC.md)
 - **Pattern matching & filtering**: [Live Event Stream](#live-event-stream)
 - **README**: [../README.md](../README.md)

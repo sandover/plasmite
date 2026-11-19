@@ -90,15 +90,17 @@ Server and clients upgrade together. A 2.0 server answers 1.x routes with an err
 
 ### Stream endings
 
-Every read response ends with exactly one control record:
+An HTTP follow keeps the same pool open, including while it waits for new messages. If the output queue stays full for the server's timeout, the server stops reading the pool and frees the stream slot. It sends an `Io` error after the queued messages if the connection can still deliver the error.
+
+When the server ends a read and the connection can deliver the ending, it sends exactly one control record.
 
 | Type | Meaning | Client library behavior |
 | --- | --- | --- |
 | `complete` | A fetch reached its upper bound. | Ends the reader normally. |
 | `error` | The read failed. Carries the standard structured error, such as `RetentionGap` with `missing` and `next_seq`. | Raises the error. |
-| `cutoff` | A server limit ended the response. Carries `next_seq`, the next unexamined sequence, and for a fetch `until`, its original upper bound. | Sends a new request at exactly `next_seq`, adding `until` for a fetch, and continues the reader. |
+| `cutoff` | A fetch reached the server's time limit. Carries `next_seq`, the next unexamined sequence, and `until`, the original upper bound. | Sends a new fetch request with `since=next_seq` and the same `until`. |
 
-The server sends every matching record before it advances past it, so a cutoff never skips one. The next request uses the cutoff's `next_seq` even when the response carried no matching records. A continued fetch keeps its original upper bound instead of taking a new snapshot. `until` is a protocol parameter for continuation only; libraries don't expose it as a read option. A follow on a quiet pool may see repeated cutoffs without new messages. A cutoff never hides a retention gap or turns incomplete history into a successful completion. A response that ends without a control record raises `Io`, unless the caller cancelled or closed the reader.
+The server sends every matching record before it advances past it, so a cutoff never skips one. The next request uses the cutoff's `next_seq` even when the response carried no matching records. A continued fetch keeps its original upper bound. The HTTP protocol uses `until` only to continue a fetch. A cutoff never hides a retention gap or turns incomplete history into a successful completion. A response that ends without a control record raises `Io`, unless the caller cancelled or closed the reader.
 
 Each successful read response carries `Plasmite-Incarnation`, the opaque identity of the opened pool. A client checks that the identity still matches before accepting records from a continuation. A different identity ends the read with `NotFound`. A continuation with a missing identity raises `Io`.
 

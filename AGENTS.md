@@ -63,13 +63,13 @@ docs/
 
 spec/
 ├── README.md                                   — Spec index; start here for contract navigation
-├── v2/SPEC.md                                   — Read when reviewing or implementing the Plasmite 2.0 contract
-├── v0/SPEC.md                                  — Command-line interface (CLI) contract; read before changing CLI behavior
+├── v2/SPEC.md                                   — Current contract; read before changing the CLI, API, HTTP, UDP, or Model Context Protocol
+├── v0/SPEC.md                                  — 1.x CLI contract; read when checking migration behavior
 ├── udp/v0/SPEC.md                              — User Datagram Protocol (UDP) input contract; read when changing UDP messages or listener behavior
 ├── udp/v1/SPEC.md                              — Read when changing UDP feed/follow controls, clients, subscriptions, or delivery events
-├── api/v0/SPEC.md                               — Public API contract; read before changing the API surface
-├── remote/v0/SPEC.md                            — Remote protocol contract; read before changing HTTP endpoints/semantics
-└── mcp/2025-11-25/SPEC.md                       — MCP contract; read before changing local or direct MCP behavior
+├── api/v0/SPEC.md                               — 1.x public API contract; read when checking migration behavior
+├── remote/v0/SPEC.md                            — 1.x HTTP contract; read when checking migration behavior
+└── mcp/2025-11-25/SPEC.md                       — 1.x Model Context Protocol (MCP) contract; read when checking migration behavior
 ```
 
 ## Maintaining the Docs Map

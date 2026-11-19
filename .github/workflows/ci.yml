@@ -368,6 +368,14 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           .\target\release\plasmite.exe --version
+      - name: Test local follower wakeups and recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo test --release --lib core::notify::windows::tests
+          cargo test --release --lib commit_without_notification_is_recovered
+          cargo test --release --lib independent_registered_tail_reads_publications_and_cancels
       - name: Check private state and secure sharing
         shell: pwsh
         run: |

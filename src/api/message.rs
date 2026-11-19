@@ -1166,6 +1166,34 @@ pub fn message_json_from_frame(frame: &FrameRef) -> Result<Vec<u8>, Error> {
     frame_json(frame, None).map(|bytes| bytes.expect("unfiltered JSON"))
 }
 
+pub(crate) fn select_frame_json(
+    frame: FrameRef,
+    required: &[String],
+) -> Result<Option<Vec<u8>>, Error> {
+    frame_json(&frame, (!required.is_empty()).then_some(required))
+}
+
+impl<T: serde::Serialize> crate::interface_wire::MessageWire<crate::core::lite3::JsonValue<'_>, T> {
+    pub(crate) fn to_json_bytes(&self, estimated_size: usize) -> serde_json::Result<Vec<u8>> {
+        if estimated_size < 4096 {
+            return serde_json::to_vec(self);
+        }
+        // Keep the same field order as MessageWire's Serde implementation.
+        // The direct writer scans long strings in blocks.
+        let mut out = Vec::with_capacity(estimated_size);
+        out.extend_from_slice(b"{\"seq\":");
+        serde_json::to_writer(&mut out, &self.seq)?;
+        out.extend_from_slice(b",\"time\":");
+        serde_json::to_writer(&mut out, &self.time)?;
+        out.extend_from_slice(b",\"meta\":");
+        serde_json::to_writer(&mut out, &self.meta)?;
+        out.extend_from_slice(b",\"data\":");
+        self.data.write_json(&mut out)?;
+        out.push(b'}');
+        Ok(out)
+    }
+}
+
 fn frame_json(frame: &FrameRef, required: Option<&[String]>) -> Result<Option<Vec<u8>>, Error> {
     let doc = Lite3DocRef::new(&frame.payload);
     let (tags_offset, count) = meta_tags(doc)?;
@@ -1183,9 +1211,13 @@ fn frame_json(frame: &FrameRef, required: Option<&[String]>) -> Result<Option<Ve
     } else {
         crate::core::lite3::JsonValue::new(doc, offset)?
     };
-    let wire =
-        crate::interface_wire::MessageWire::new(frame.seq, format_ts(frame.time)?, tags, data);
-    serde_json::to_vec(&wire)
+    let wire = crate::interface_wire::MessageWire::new(
+        frame.seq,
+        format_frame_time(frame.time)?,
+        tags,
+        data,
+    );
+    wire.to_json_bytes(frame.payload.len())
         .map(Some)
         .map_err(payload_json_error)
 }
@@ -1227,18 +1259,18 @@ fn payload_json_error(err: serde_json::Error) -> Error {
 }
 
 fn meta_tags(doc: Lite3DocRef<'_>) -> Result<(usize, u32), Error> {
-    let meta_type = doc
-        .type_at_key(0, "meta")
-        .map_err(|err| err.with_message("missing meta"))?;
-    if meta_type != sys::LITE3_TYPE_OBJECT {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
-    }
-
     let meta_ofs = doc
-        .key_offset("meta")
+        .key_offset_cstr_at(0, c"meta")
         .map_err(|err| err.with_message("missing meta"))?;
+    match doc.bytes().get(meta_ofs) {
+        Some(&sys::LITE3_TYPE_OBJECT) => {}
+        None | Some(&sys::LITE3_TYPE_INVALID) => {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("missing meta"));
+        }
+        _ => return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object")),
+    }
     let tags_ofs = doc
-        .key_offset_at(meta_ofs, "tags")
+        .key_offset_cstr_at(meta_ofs, c"tags")
         .map_err(|err| err.with_message("missing meta.tags"))?;
     let tags_count = doc
         .count_at(tags_ofs)
@@ -1247,12 +1279,6 @@ fn meta_tags(doc: Lite3DocRef<'_>) -> Result<(usize, u32), Error> {
 }
 
 fn meta_tag<'a>(doc: Lite3DocRef<'a>, ofs: usize, index: u32) -> Result<&'a str, Error> {
-    let item_type = doc.array_item_type(ofs, index).map_err(|_| {
-        Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-    })?;
-    if item_type != sys::LITE3_TYPE_STRING {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array"));
-    }
     doc.array_str_at(ofs, index)
         .map_err(|_| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array"))
 }
@@ -1302,6 +1328,34 @@ pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
             .with_message("timestamp format failed")
             .with_source(err)
     })
+}
+
+fn format_frame_time(timestamp_ns: u64) -> Result<String, Error> {
+    let ts =
+        time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128).map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("invalid timestamp")
+                .with_source(err)
+        })?;
+    let (year, month, day) = ts.date().to_calendar_date();
+    let (hour, minute, second, nanos) = ts.time().as_hms_nano();
+    // The u64 nanosecond range spans 1970 through 2554. Every timestamp
+    // fits the same four-digit year and nine-digit fractional second.
+    let mut text = *b"0000-00-00T00:00:00.000000000Z";
+    fn digits(mut value: u32, out: &mut [u8]) {
+        for digit in out.iter_mut().rev() {
+            *digit = b'0' + (value % 10) as u8;
+            value /= 10;
+        }
+    }
+    digits(year as u32, &mut text[..4]);
+    digits(u32::from(u8::from(month)), &mut text[5..7]);
+    digits(day.into(), &mut text[8..10]);
+    digits(hour.into(), &mut text[11..13]);
+    digits(minute.into(), &mut text[14..16]);
+    digits(second.into(), &mut text[17..19]);
+    digits(nanos, &mut text[20..29]);
+    Ok(String::from_utf8(text.to_vec()).expect("timestamp contains only ASCII"))
 }
 
 #[cfg(test)]
@@ -1831,6 +1885,53 @@ mod tests {
         assert!(
             crate::view::MessageView::encode_legacy_value(&json!({"ok":true}), &labels).is_ok()
         );
+    }
+
+    #[test]
+    fn large_json_messages_and_receipts_match_the_standard_serializer() {
+        use super::{format_ts, message_json_from_frame};
+        use crate::core::lite3::ParsedJson;
+        use crate::interface_wire::MessageWire;
+
+        let dir = tempdir().unwrap();
+        let mut pool =
+            Pool::create(dir.path().join("large.plasmite"), PoolOptions::new(65536)).unwrap();
+        let escapes = (0..32)
+            .map(|code| char::from(code as u8))
+            .collect::<String>();
+        for prefix in 0..8 {
+            let data = json!({
+                "log": format!("{}{}\"\\é🔥\n{}", "x".repeat(prefix), escapes, "y".repeat(4096)),
+                "samples": [{"short":"a\nb","number":-0.0}, 0.125, null, true],
+            });
+            let tags = vec!["line\n💡".to_owned()];
+            let payload = encode_message(&tags, &data).unwrap();
+            let seq = pool.append_with_timestamp(payload.as_slice(), 123).unwrap();
+            let frame = pool.get(seq).unwrap();
+            assert!(frame.payload.len() >= 4096);
+            let time = format_ts(123).unwrap();
+            let input = serde_json::to_vec(&data).unwrap();
+            let parsed = ParsedJson::parse(&input).unwrap();
+            let receipt = MessageWire::new(seq, time.clone(), &tags, parsed.value());
+            let expected = serde_json::to_vec(&MessageWire::new(seq, time, &tags, data)).unwrap();
+            assert_eq!(message_json_from_frame(&frame).unwrap(), expected);
+            assert_eq!(receipt.to_json_bytes(input.len()).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn fixed_width_timestamps_match_iso8601() {
+        use super::{format_frame_time, format_ts};
+
+        let boundaries = [0, 1, 999_999_999, 1_000_000_000, u64::MAX - 1, u64::MAX];
+        let samples = (0..512).map(|n: u64| n.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        for timestamp in boundaries.into_iter().chain(samples) {
+            assert_eq!(
+                format_frame_time(timestamp).unwrap(),
+                format_ts(timestamp).unwrap(),
+                "{timestamp}"
+            );
+        }
     }
 
     #[test]

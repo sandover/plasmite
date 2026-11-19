@@ -62,7 +62,7 @@ def main():
                         if variant == "native-view":
                             pool.feed_view(value)
                         else:
-                            pool.append_identity(value)
+                            pool.feed_receipt(value)
                 command = [
                     sys.executable,
                     str(driver),

@@ -13,9 +13,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from bench_transport_comparison import HttpsMcp, PROTOCOL_VERSION, native_request, serialized_payload, summary
+from bench_transport_comparison import HttpsMcp, PROTOCOL_VERSION, mcp_fetch_one, native_request, serialized_payload, summary
 
 
 class Worker:
@@ -68,14 +68,14 @@ class CWorker(Worker):
 class HttpPool:
     def __init__(self, origin, pool, key, ca, browser=False):
         parts = urlsplit(origin)
-        self.path = f"/v0/pools/{pool}"
+        self.path = f"/v2/pools/{quote(pool, safe='')}"
         self.origin = origin
         self.headers = {}
         if parts.scheme == "https":
             self.connection = http.client.HTTPSConnection(parts.hostname, parts.port,
                 context=ssl.create_default_context(cafile=ca), timeout=60)
             if browser:
-                response, headers = self.request("POST", "/v0/browser/session", {"access_key": key},
+                _, headers = self.request("POST", "/v0/browser/session", {"access_key": key},
                                                 {"Origin": origin})
                 self.headers = {"Cookie": headers["set-cookie"].split(";", 1)[0], "Origin": origin}
             else:
@@ -83,21 +83,34 @@ class HttpPool:
         else:
             self.connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=60)
 
-    def request(self, method, path, value=None, headers=None):
+    def request(self, method, path, value=None, headers=None, first_record=False):
         body = None if value is None else json.dumps(value, separators=(",", ":"))
         self.connection.request(method, path, body=body,
             headers={"Content-Type": "application/json", **self.headers, **(headers or {})})
-        response = self.connection.getresponse()
-        raw = response.read()
-        if response.status != 200:
-            raise RuntimeError(f"{method} {path} returned {response.status}: {raw[:300]!r}")
-        return json.loads(raw), {name.lower(): value for name, value in response.getheaders()}
+        with self.connection.getresponse() as response:
+            if response.status != 200:
+                raw = response.read()
+                raise RuntimeError(f"{method} {path} returned {response.status}: {raw[:300]!r}")
+            if first_record:
+                # Stop after the requested message, just as binding readers do.
+                try:
+                    raw = response.readline()
+                finally:
+                    self.connection.close()
+            else:
+                raw = response.read()
+            return raw, {name.lower(): value for name, value in response.getheaders()}
 
     def append(self, item):
-        return self.request("POST", self.path + "/append", {"data": item, "tags": [], "durability": "fast"})[0]["message"]
+        raw, _ = self.request("POST", self.path + "/feed", {"data": item, "tags": [], "durability": "fast"})
+        return json.loads(raw)["message"]
 
     def get(self, seq):
-        return self.request("GET", self.path + f"/messages/{seq}")[0]["message"]
+        raw, _ = self.request("GET", self.path + f"/fetch?since={seq}", first_record=True)
+        message = json.loads(raw)
+        if message.get("seq") != seq:
+            raise RuntimeError(f"unexpected HTTP fetch result for sequence {seq}: {message!r}")
+        return message
 
     def close(self):
         if "Cookie" in self.headers:
@@ -113,7 +126,7 @@ class McpPool:
         return self.client.tool("plasmite_feed", {"pool": self.pool, "data": item, "create": False})["message"]
 
     def get(self, seq):
-        return self.client.tool("plasmite_fetch", {"pool": self.pool, "seq": seq})["message"]
+        return mcp_fetch_one(self.client, self.pool, seq)
 
     def close(self):
         self.client.close()
@@ -207,11 +220,10 @@ class PythonPool:
 
     def append(self, item):
         import plasmite
-        return json.loads(self.pool.append_json(json.dumps(item, separators=(",", ":")).encode(), [], plasmite.Durability.FAST))
+        return json.loads(self.pool.feed_json(json.dumps(item, separators=(",", ":")).encode(), [], plasmite.Durability.FAST))
 
     def get(self, seq):
-        message = self.pool.get(seq)
-        return {"seq": message.seq, "data": message.data}
+        return json.loads(self.pool._get_json(seq))
 
     def close(self):
         self.pool.close()
@@ -306,7 +318,7 @@ def main():
         "configuration": {"pool_dir": args.pool_dir, "pool": args.pool, "server": args.server,
             "local_server": args.local_server, "sizes": args.sizes, "messages": args.messages,
             "repeats": args.repeats, "durability": "fast", "concurrency": 1, "lanes": lanes,
-            "timing": "Warm single append/exact-fetch calls. CLI includes a fresh process per call. Other clients persist. Excludes authorization, model time, and UI rendering. Lite3 encode/decode occurs outside individual call latency."},
+            "timing": "Warm single append/exact-fetch calls. CLI includes a fresh process per call. Other clients persist. HTTP fetch closes after the requested message and can reopen its connection. Excludes authorization, model time, and UI rendering. Lite3 encode/decode occurs outside individual call latency."},
         "setup_ms": {}, "runs": []}
     clients = {}
     access_home = tempfile.TemporaryDirectory(prefix="plasmite-access-bench-")

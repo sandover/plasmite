@@ -92,7 +92,7 @@ bindings-contract-smoke:
 ui-smoke:
 	node --test scripts/ui_smoke.cjs
 
-# Check benchmark OAuth cleanup without live credentials or a server.
+# Check benchmark fetch requests and OAuth cleanup without a server.
 benchmark-harness-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_bench_transport_comparison.py
 

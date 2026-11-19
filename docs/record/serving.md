@@ -380,6 +380,11 @@ above it must retry. These limits apply before access-key checks. Put an
 Internet-facing server behind a proxy or firewall that also limits connection
 rates.
 
+Each HTTP follow stays open while the pool is quiet. If its output queue stays
+full for 30 seconds, Plasmite ends the read and frees the stream slot. Set
+`--max-tail-timeout-ms` to change that duration. The same setting limits read
+opening time and the duration of each fetch response.
+
 OAuth registration and authorization pages share a limit of 30 requests per
 minute for each TCP source address. One client can hold eight pending
 approvals; one source address can hold 32. A reverse proxy shares its source

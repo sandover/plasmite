@@ -62,7 +62,7 @@ async function main() {
     const options = mode === "https" ? { token: readSecret(keyFile) } : {};
     client = new RemoteClient(serverOrDir, options);
     pool = await client.openPool(poolName);
-    await client.poolInfo(poolName); // Warm the HTTP connection before timed calls.
+    await pool.info(); // Warm the HTTP connection before timed calls.
   }
 
   async function handle(request) {
@@ -83,9 +83,7 @@ async function main() {
           throw new Error("append items must be JSON objects");
         }
         const callStarted = now();
-        const message = mode === "local"
-          ? pool.append(item, [], Durability.Fast)
-          : await pool.append(item, [], "fast");
+        const message = await pool.feed(item, { durability: Durability.Fast });
         latencies.push(elapsed(callStarted));
         sequences.push(number(message.seq, "sequence"));
       }
@@ -102,7 +100,15 @@ async function main() {
         const seq = sequences[index];
         if (!Number.isSafeInteger(seq) || seq < 0) throw new Error("sequences must be safe nonnegative integers");
         const callStarted = now();
-        const message = mode === "local" ? pool.get(seq) : await pool.get(seq);
+        const reader = await pool.fetch({ since: seq });
+        let message;
+        try {
+          const item = await reader.next();
+          if (item.done) throw new Error(`no record at sequence ${seq}`);
+          message = item.value;
+        } finally {
+          await reader.return();
+        }
         latencies.push(elapsed(callStarted));
         if (number(message.seq, "sequence") !== seq || !isDeepStrictEqual(message.data, expected[index])) {
           throw new Error(`readback mismatch for sequence ${seq}`);

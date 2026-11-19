@@ -171,6 +171,10 @@ class SourceWithViewHeader(sdist):
 
 extensions = []
 if native_views:
+    if sys.platform == "darwin":
+        # A universal Python can build either slice. Wheels ship a single SDK
+        # architecture, so default to the architecture running the build.
+        os.environ.setdefault("ARCHFLAGS", f"-arch {platform.machine()}")
     limited = sys.version_info >= (3, 11)
     extensions.append(
         Extension(

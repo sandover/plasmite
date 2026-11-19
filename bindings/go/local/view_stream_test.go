@@ -112,7 +112,7 @@ func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { _, err := stream.Next(context.Background()); done <- err }()
 	time.Sleep(time.Millisecond)
-	stream.Close()
+	go stream.Close()
 	select {
 	case err = <-done:
 		if !isUsage(err) {

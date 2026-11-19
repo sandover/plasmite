@@ -355,16 +355,9 @@ jobs:
           done
       - name: npm pack + install smoke (linux-x64 runtime)
         run: |
-          tarball="$(cd bindings/node && npm pack --ignore-scripts --silent)"
-          workdir="$(mktemp -d)"
-          trap 'rm -rf "$workdir"; rm -f "bindings/node/${tarball}"' EXIT
-          cd "$workdir"
-          npm init -y >/dev/null
-          npm install "${GITHUB_WORKSPACE}/bindings/node/${tarball}" >/dev/null
-          node -e 'const { Client, Durability, RemoteClient } = require("plasmite"); const os = require("node:os"); const fs = require("node:fs"); const path = require("node:path"); const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plasmite-node-release-")); const c = new Client(dir); const p = c.createPool("smoke", 1024*1024); p.appendJson(Buffer.from("{\"kind\":\"smoke\"}"), ["smoke"], Durability.Fast); p.close(); c.close(); const rc = new RemoteClient("http://127.0.0.1:9700"); if (!rc) throw new Error("missing remote");'
-          npx plasmite --version >/dev/null
-          mkdir -p "${GITHUB_WORKSPACE}/bindings/node/dist"
-          cp "${GITHUB_WORKSPACE}/bindings/node/${tarball}" "${GITHUB_WORKSPACE}/bindings/node/dist/"
+          mkdir -p bindings/node/dist
+          tarball="$(cd bindings/node && npm pack --ignore-scripts --silent --pack-destination dist)"
+          ./scripts/node_pack_smoke.sh "bindings/node/dist/${tarball}"
       - name: Build npm publish artifact
         run: ls -la bindings/node/dist
       - uses: actions/upload-artifact@v4

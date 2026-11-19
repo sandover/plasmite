@@ -1,5 +1,8 @@
 # Plasmite 1.0.0 access on Windows
 
+Use the source revision recorded with these runs to reproduce the 1.x results.
+The benchmark workers on current main use the 2.0 API.
+
 The timing tables measure the 1.0.0 interfaces. Rows named "Remote MCP process
 over HTTPS" use the local bridge removed in 1.1.0. Current shared-pool MCP
 setup uses direct HTTPS; see the

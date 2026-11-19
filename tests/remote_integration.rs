@@ -1222,7 +1222,7 @@ fn remote_mcp_origin_header_validation() -> TestResult<()> {
 }
 
 #[test]
-fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()> {
+fn http_follow_keeps_the_same_response_open_on_a_quiet_pool() -> TestResult<()> {
     let temp = tempfile::tempdir()?;
     let server = TestServer::start_with_args_and_scheme(
         temp.path(),
@@ -1230,54 +1230,18 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
         "http",
     );
     let client = server.client()?;
-    client.create_pool(&PoolRef::name("bounded"), PoolOptions::new(1024 * 1024))?;
-    let url = format!("{}/v2/pools/bounded/follow", server.local_url);
-    let began = Instant::now();
-    let body = ureq::get(&url)
-        .timeout(Duration::from_secs(3))
-        .call()?
-        .into_string()?;
-    assert_eq!(
-        serde_json::from_str::<Value>(body.trim())?,
-        json!({"type": "cutoff", "next_seq": 1})
-    );
-    assert!(began.elapsed() >= Duration::from_millis(400));
-    assert!(began.elapsed() < Duration::from_secs(2));
-
-    let pool = client.open_pool(&PoolRef::name("bounded"), false)?;
-    let mut follow = pool.follow(ReadOptions::new())?;
-    sleep(Duration::from_millis(650));
-    let saved = pool.feed(&json!({"after": "cutoff"}), Feed::new())?;
-    assert_eq!(follow.next_message()?, Some(saved));
-
-    Ok(())
-}
-
-#[test]
-fn follow_rejects_a_same_name_replacement_after_cutoff() -> TestResult<()> {
-    let temp = tempfile::tempdir()?;
-    let server = TestServer::start_with_args_and_scheme(
-        temp.path(),
-        &["--max-tail-timeout-ms", "150"],
-        "http",
-    );
-    let client = server.client()?;
-    let name = PoolRef::name("events");
-    let original = client.create_pool(&name, PoolOptions::new(65536))?;
-    original.feed(&json!({"pool": "original"}), Feed::new())?;
-    let mut follow = original.follow_lite3(ReadOptions::new())?;
-    sleep(Duration::from_millis(450));
-    client.delete_pool(&name)?;
-    let replacement = client.create_pool(&name, PoolOptions::new(65536))?;
+    let pool = client.create_pool(&PoolRef::name("events"), PoolOptions::new(65536))?;
+    let url = format!("{}/v2/pools/events/follow", server.local_url);
+    let response = ureq::get(&url).timeout(Duration::from_secs(3)).call()?;
+    let mut lines = BufReader::new(response.into_reader()).lines();
     for n in 1..=2 {
-        replacement.feed(&json!({"pool": "replacement", "n": n}), Feed::new())?;
+        sleep(Duration::from_millis(650));
+        let saved = pool.feed(&json!({"n": n}), Feed::new())?;
+        let line = lines.next().expect("follow remains open")?;
+        let record: Value = serde_json::from_str(&line)?;
+        assert_eq!(record["seq"], saved.seq, "{record}");
+        assert_eq!(record["data"], saved.data);
     }
-    let error = follow
-        .next_frame()
-        .expect_err("replace the old reader explicitly");
-    assert_eq!(error.kind(), ErrorKind::NotFound);
-    assert_eq!(error.message(), Some("pool was replaced during the read"));
-    assert_eq!(fetch_frame(&replacement, 2)?.seq, 2);
     Ok(())
 }
 

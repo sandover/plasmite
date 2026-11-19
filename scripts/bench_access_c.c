@@ -6,9 +6,6 @@
 
 #include "plasmite.h"
 
-/* Private entry point for measuring the direct JSON acquisition cost. */
-int plsm_internal_pool_get_json(plsm_pool_t *, uint64_t, plsm_buf_t *, plsm_error_t **);
-
 #include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -164,9 +161,17 @@ static int run_request(const char *operation, size_t count, plsm_pool_t *pool, u
         } else {
             uint64_t seq;
             (void)parse_u64(lines[i], &seq);
-            rc = plsm_internal_pool_get_json(pool, seq, &messages[i], &err);
+            plsm_read_options_t options = {sizeof(options), PLSM_READ_SEQUENCE, seq, NULL, 0};
+            plsm_stream_t *stream = NULL;
+            rc = plsm_pool_fetch(pool, &options, &stream, &err);
             if (rc != 0) {
-                result = fail("plsm_internal_pool_get_json", err);
+                result = fail("plsm_pool_fetch", err);
+                goto done;
+            }
+            rc = plsm_stream_next_wait(stream, UINT64_MAX, &messages[i], &err);
+            plsm_stream_free(stream);
+            if (rc != 1) {
+                result = fail("plsm_stream_next_wait", err);
                 goto done;
             }
         }
