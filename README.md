@@ -21,7 +21,7 @@ What would make it pleasant and predictable for programs (and agents) to communi
 
 So, there's **Plasmite**.
 
-Programs send JSON messages into a channel called a *pool*. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. There are 3 basic verbs in the API and CLI:
+Programs (Rust, C, Python, Go, or JS) send JSON messages into a channel called a *pool*. A pool is a ring buffer on disk: it keeps the most recent messages and overwrites the oldest when it fills. There are 3 basic verbs in the API and CLI:
 - `feed` sends a message
 - `follow` waits for new messages (like `tail`)
 - `fetch` reads specific messages
