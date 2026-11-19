@@ -8,7 +8,7 @@ docs/
 │
 │   Top-level reference
 ├── building.md                                — Build system + vendoring; read when touching build/release tooling
-├── cli.md                                     — CLI operating model; read when resolving pool refs, input/output modes, or exits
+├── cli.md                                     — CLI guide; read when predicting how reads start, gaps, input/output formats, or exit codes
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
 ├── performance/README.md                      — Read when choosing a performance report or measuring a change
 ├── performance/udp-transport.md               — Read when assessing UDP versus HTTP delivery, measured latency, or maximum datagram support

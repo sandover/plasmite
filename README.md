@@ -16,37 +16,78 @@ Three verbs cover almost everything:
 - `follow` waits for new messages, like `tail -f`.
 - `fetch` reads what the pool holds and exits.
 
-Local pools need no server or broker. The CLI and the Rust, Python, Go, Node and C libraries share one model, so a shell script can feed a pool that a Python service follows. To share pools across machines, see [Share pools across machines](docs/record/serving.md).
+Local pools need no server or broker. The CLI and the Rust, Python, Go, Node and C libraries share one model, so a shell script can feed a pool that a Python service follows. `pls` is a short alias for `plasmite`.
 
-## Try it
+#### Local IPC
 
-Open two terminals:
+<table width="100%">
+  <tr>
+    <th align="left">Alice</th>
+    <th align="left">Bob (a local reader)</th>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>Alice creates a channel (aka a pool)</b><br/>
+      <code>pls pool create channel</code>
+      <br/><br/>
+      <b>Alice sends a message</b><br/>
+      <code>pls feed channel '{"from":"A","msg":"hello world"}'</code>
+    </td>
+    <td valign="top">
+      <b>Bob starts watching, after Alice sent</b><br/>
+      <code>pls follow channel --last 1</code>
+      <br/><br/>
+      <b>Bob sees it on stdout, then waits for more</b><br/>
+      <code>{"data":{"from":"A","msg":"hello world"}, ...}</code>
+    </td>
+  </tr>
+</table>
 
-```bash
-plasmite pool create chat
-plasmite follow chat --format json                           # terminal 1: waits
-plasmite feed chat '{"from": "build-bot", "msg": "tests passed"}'   # terminal 2
-```
+#### Remote IPC
 
-Terminal 1 prints the message as soon as terminal 2 sends it:
+Replace `alice.example.test` with a hostname Carol can reach.
 
-```json
-{"data":{"from":"build-bot","msg":"tests passed"},"meta":{"tags":[]},"seq":1,"time":"2026-11-19T16:47:59.428590000Z"}
-```
+<table width="100%">
+  <tr>
+    <th align="left">Alice</th>
+    <th align="left">Bob</th>
+    <th align="left">Carol (remote)</th>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>Alice starts the server</b><br/>
+      <code>pls serve https://alice.example.test:9743</code>
+      <br/><br/>
+      <b>Alice invites Carol</b> (in another terminal)<br/>
+      <code>pls access invite Carol</code>
+      <br/><br/>
+      She sends Carol the address and the printed key privately.
+      <br/><br/>
+      <b>Alice sends</b><br/>
+      <code>pls feed channel '{"from":"A","msg":"hi all"}'</code>
+    </td>
+    <td valign="top">
+      <i>Bob never quit his <code>follow</code>, so he's still watching the same pool.</i>
+      <br/><br/>
+      <b>Bob sees it</b><br/>
+      <code>{"data":{"from":"A","msg":"hi all"}, ...}</code>
+    </td>
+    <td valign="top">
+      <b>Carol connects and watches</b><br/>
+      <code>pls access connect https://alice.example.test:9743</code><br/>
+      <code>pls follow https://alice.example.test:9743/channel</code>
+      <br/><br/>
+      <b>Carol sees it</b><br/>
+      <code>{"data":{"from":"A","msg":"hi all"}, ...}</code>
+    </td>
+  </tr>
+</table>
 
-The message stays in the pool, so a reader who arrives later can still see it:
-
-```bash
-plasmite fetch chat --last 5                    # the last 5 messages, then exit
-plasmite follow chat --since 10m                # the last 10 minutes, then keep waiting
-plasmite follow chat --tag deploy --one         # wait for one deploy message, then exit
-```
-
-`pls` is a short alias for `plasmite`; both commands run the same program.
+Carol pastes the key at a hidden prompt. The key grants full access to Alice's pools, so treat it like a password. `feed`, `fetch`, `follow` and `duplex` work the same way on remote pools as on local ones. Carol can also open the address in a browser, AI clients can connect over the Model Context Protocol (MCP), and on a trusted network the server can accept small messages over UDP. The [serving guide](docs/record/serving.md) covers all of it.
 
 ## How it works
 
-A pool is one `.plasmite` file holding a ring buffer, 1 MiB unless you choose a size. Pools live in `~/.plasmite/pools/` unless you pass `--dir`. Many processes can feed and follow the same pool at once; file locks keep their messages whole and in order.
+A pool is one `.plasmite` file holding a ring buffer, 1 MiB unless you choose a size. Pools live in `~/.plasmite/pools/` unless you pass `--dir`. Many processes can feed and follow the same pool at once, and each message arrives whole and in order.
 
 Every message has four fields:
 
@@ -55,24 +96,18 @@ Every message has four fields:
 - `meta.tags`: labels you attach with `--tag`, for cheap filtering.
 - `data`: your JSON object.
 
-Every read starts at a position: `--since` a sequence, `oldest`, a duration such as `5m`, or an RFC 3339 time; or `--last N` to start N messages back. Without a position, `follow` waits for the next new message. Add `--tag` to keep only messages that carry that tag.
-
-Local and HTTP readers report a `RetentionGap` when the pool overwrites a requested sequence. The error gives the first missing sequence and `next_seq`, where the reader can resume. The CLI's `fetch` exits with the error. Its `follow` prints the error to stderr and carries on from `next_seq`. To resume after a restart, save the last `seq` you handled and start from the one after it.
-
-Output is readable in a terminal and compact JSON in a pipe, so `jq` and other tools work on it directly. Piping `fetch` or `follow` into `feed` copies messages to another pool with their data and tags.
-
-## Share pools across machines
-
-`plasmite serve` shares a directory of pools over HTTPS, and each remote user gets a named access key:
+Every read starts at a position. Without one, `follow` waits for the next new message and `fetch` reads everything the pool holds:
 
 ```bash
-plasmite serve https://pools.example.net:9743          # on the server
-plasmite access invite laptop                          # on the server; prints a key
-plasmite access connect https://pools.example.net:9743 # on the laptop; paste the key
-plasmite follow https://pools.example.net:9743/chat    # on the laptop
+pls fetch channel --last 5            # the last 5 messages, then exit
+pls follow channel --since 10m        # the last 10 minutes, then keep waiting
+pls follow channel --since 42         # from sequence 42 on
+pls follow channel --tag deploy --one # wait for one message tagged deploy, then exit
 ```
 
-`feed`, `follow`, `fetch` and `duplex` take the same options for remote pools as for local ones. Browsers and AI clients that speak the Model Context Protocol (MCP) can connect too. On a trusted network, the server can also accept small messages over UDP with no keys or acknowledgement. The [serving guide](docs/record/serving.md) covers all three, including [UDP](docs/record/serving.md#send-and-read-over-udp).
+A reader that falls behind never loses messages silently. If the pool has overwritten messages a reader asked for, the reader gets a `RetentionGap` error naming the first missing sequence and `next_seq`, where it can resume. `fetch` exits with the error, `follow` reports it on stderr and carries on from `next_seq`, and the libraries raise it. To resume after a restart, save the last `seq` you handled and start from the one after it.
+
+Output is readable in a terminal and compact JSON in a pipe, so `jq` and other tools work on it directly. Piping `fetch` or `follow` into `feed` copies messages to another pool with their data and tags.
 
 ## When to use it
 
@@ -91,8 +126,6 @@ Plasmite fits messaging on one machine or between a few nearby ones: CI gates, l
 Plasmite keeps recent history and forgets the rest; it does not hold work until a consumer finishes it. If you need cluster replication, schema registries, or workflow orchestration, see [When Plasmite isn't the right fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
 
 ## Install
-
-This guide describes Plasmite 2.0. Until the 2.0 packages are available, build the CLI from this checkout with `cargo install --path . --locked` or use the [1.3.0 guide](https://github.com/sandover/plasmite/tree/v1.3.0#readme) for the published 1.x packages.
 
 **Homebrew** (macOS and Linux x86_64) installs the CLI and the SDK (library, C header, pkg-config):
 
