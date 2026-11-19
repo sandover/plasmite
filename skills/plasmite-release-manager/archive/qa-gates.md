@@ -1,7 +1,6 @@
 # Pre-Release QA Gates
 
-> Archived reference. The authoritative operator runbook is `skills/plasmite-release-manager/SKILL.md`.
-> If instructions conflict, follow `SKILL.md`.
+> Historical checklist for early releases. Use [Prepare the exact candidate](../SKILL.md#prepare-the-exact-candidate) and the [testing guide](../../../docs/record/testing.md) for current gates and commands.
 
 For each gate:
 - collect evidence

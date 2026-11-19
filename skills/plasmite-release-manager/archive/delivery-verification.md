@@ -1,7 +1,6 @@
 # Delivery Verification
 
-> Archived reference. The authoritative operator runbook is `skills/plasmite-release-manager/SKILL.md`.
-> If instructions conflict, follow `SKILL.md`.
+> Historical checklist for early releases. Use [Verify public delivery](../SKILL.md#verify-public-delivery) for current releases and recovery. The current procedure checks exact versions, including the major-versioned Go module.
 
 Use this after release workflows finish.
 

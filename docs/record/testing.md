@@ -14,6 +14,8 @@ Run the cheapest check that covers your change while you work, then widen the ne
 
 `just check` runs `cargo clean` first when `target/` has grown past 2 GB.
 
+For local checks, install `just`, `jq`, Python 3 and the Rust and C toolchains from the [build guide](../building.md). Run `npm ci` in `bindings/node` before the integration checks. Install `cargo-audit` before `just audit`, and give it network access to refresh the advisory database.
+
 ## Rust test targets
 
 `cargo test --lib` runs the library's unit tests: frame encoding, append planning, pool I/O and locking, cursor overwrite safety, error mapping, Lite3 validation, views and the C ABI. `cargo test --bin plasmite` runs the unit tests for the CLI and server modules.

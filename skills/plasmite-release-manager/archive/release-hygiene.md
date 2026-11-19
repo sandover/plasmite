@@ -1,7 +1,6 @@
 # Release Hygiene (Mechanical Flow)
 
-> Archived reference. The authoritative operator runbook is `skills/plasmite-release-manager/SKILL.md`.
-> If instructions conflict, follow `SKILL.md`.
+> Historical checklist for early releases. Use [Build, rehearse and publish](../SKILL.md#build-rehearse-and-publish) for current commands. The current workflow uses npm trusted publishing and updates the live Homebrew tap after verifying public SDK downloads.
 
 Run this only after all required QA gates pass and no blocker tasks remain.
 

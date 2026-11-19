@@ -29,6 +29,9 @@ complete OAuth authorization. Local MCP does not use OAuth.
 The process reads newline-delimited JSON-RPC from standard input, writes only
 JSON-RPC messages to standard output, and exits when standard input closes.
 
+The server's local administration listener also exposes `/mcp` for trusted
+processes on the same machine. This loopback HTTP endpoint needs no credentials.
+
 ## Remote HTTPS
 
 The MCP endpoint is the exact configured `https://HOST[:PORT]/mcp` URL. Each

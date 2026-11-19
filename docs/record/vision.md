@@ -30,11 +30,11 @@ These are invariants, not preferences. Each states what would violate it.
 
 **One model.** Every interface offers the same verbs and options under the same names, spelled in each language's style. An operation or option that exists in one interface with no counterpart in the others is a violation. The CLI is one more caller of the library: its text handling, warnings, exit codes and shorthand belong to it as a program and add no new concepts.
 
-**Small pieces, loosely joined.** Plasmite offers an option only when the pool can do the job better than the caller: finding a position, checking tags without unpacking messages, forcing its file to disk. Stopping after a few messages, giving up after a wait, retrying, filtering on fields and recovering from loss belong to the caller, the shell or the language. CLI commands compose with ordinary Unix tools, and `follow` exits as soon as the command downstream stops reading. A flag that repeats what a pipe or a loop already does is a violation.
+**Small pieces, loosely joined.** Plasmite offers options where the pool can do the work better than the caller, such as finding a position, checking tags without unpacking messages, and flushing its file to disk. The caller chooses when to stop, when to retry and how to recover from loss. CLI commands compose with shell tools. When the OS reports a closed output pipe, `follow` exits. `follow --one` also works in shells that keep the pipe open after taking one message.
 
 **`seq` is the truth; `time` is an observation.** The pool assigns `seq`, and it alone defines identity and order. `time` records what the clock said, and Plasmite never adjusts it. A guarantee that depends on clock behavior is a violation.
 
-**No silent loss.** A reader that falls behind a pool's retention learns exactly which messages it missed and where it can continue. Readers of local and HTTP pools receive every loss as an error; UDP readers receive every skip the server announces. Skipping lost messages without telling the reader is a violation.
+**No silent loss.** A local or HTTP reader whose position falls behind retention reports the missing sequence range and where to continue. A UDP reader reports any skip or retention error it receives from the server. The network can drop these notices or the messages themselves.
 
 **JSON-first.** Every interface provides a stable plain-JSON path for reading and writing messages. CLI commands print readable output in a terminal and compact JSON in a pipe or file, and a global format choice overrides that rule. Binary formats are optional paths for speed. No normal message workflow may require understanding a binary format.
 

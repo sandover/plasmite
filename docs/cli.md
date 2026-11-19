@@ -154,7 +154,7 @@ plasmite follow sensors --format lite3 | plasmite feed archive
 plasmite fetch sensors 1 --format lite3-raw > reading.lite3
 ```
 
-Bash and Zsh preserve bytes in a binary pipe. PowerShell 7.4 and later preserves bytes between native commands and when redirecting native stdout to a file. For older PowerShell, run the binary pipeline in `cmd.exe`.
+Bash and Zsh preserve bytes in a binary pipe. PowerShell 7.4 and later preserves bytes between native commands and when redirecting native stdout to a file. Keep stderr separate in a binary pipeline. For older PowerShell, run the binary pipeline in `cmd.exe`. See [PowerShell redirection](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_redirection#example-7-redirecting-binary-data-from-a-native-command).
 
 ## Duplex
 

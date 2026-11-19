@@ -122,7 +122,8 @@ run IDs**, not the newest workflow run. Recheck the remote tag and exact-SHA CI.
    wheels; it does not define Python support. Check the released manifest before
    selecting Linux PyPI; without supported wheels or an SDK, use `npm,crates`.
    Homebrew is separate: install the formula on macOS and require the exact version.
-5. For the 2.x Go module, extract the verified SDK for your host and run
+5. For the 2.x Go module, use macOS or Linux with Go, a C compiler and
+   `pkg-config`. Extract the verified SDK for your host and run
    `bash scripts/go_module_smoke.sh <release_target> /path/to/sdk`. The script
    downloads that exact module version into a fresh project and runs a round trip
    with the installed SDK. Record the Go tag, its source SHA and the smoke result.

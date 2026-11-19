@@ -9,10 +9,9 @@ arriving after its writer exits, and a recording of the browser map.
 The writer finishes before the reader starts. The reader exits after the
 first retained message.
 
-`ipc/local-ipc.cast` contains the terminal's original bytes and timings, plus
-the CLI version and binary SHA-256. `ipc/local-ipc.png` is the final still.
-The recording measures 1220 × 370 pixels. The cast identifies the candidate
-version and exact CLI binary.
+`ipc/local-ipc.cast` contains the terminal's original bytes and timings, the
+version reported by `pls` and the SHA-256 of the `pls` executable on `PATH`.
+`ipc/local-ipc.png` is the final still. The recording measures 1220 × 370 pixels.
 The renderer uses the terminal bytes, without inventing or replacing output.
 
 After the 2.0 release, install Plasmite 2.0.0 on macOS and run from the repo root.

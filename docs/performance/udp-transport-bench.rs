@@ -1,9 +1,9 @@
 //! Loopback Lite3 feed/follow comparison. See udp-transport.md for the command.
-//! Build this standalone file against the release library; it changes no crate targets.
+//! Build this historical harness against the library at fd3823c, as the report describes.
 
 use plasmite::api::{
-    Durability, LocalClient, PoolOptions, PoolRef, RemoteClient, FollowOptions, UdpClient, UdpEvent,
-    Read, lite3,
+    Durability, LocalClient, PoolOptions, PoolRef, RemoteClient, TailOptions, UdpClient, UdpEvent,
+    UdpFollowOptions, lite3,
 };
 use std::error::Error;
 use std::fs;
@@ -141,7 +141,7 @@ fn run(
         let client = UdpClient::new(&server.udp)?;
         let pool = client.open_pool(&pool_ref)?;
         for _ in 0..fans {
-            let mut follow = pool.follow(Read::new())?;
+            let mut follow = pool.follow(UdpFollowOptions::new())?;
             let tx = ready_tx.clone();
             let done = done.clone();
             let messages = messages.clone();
@@ -164,7 +164,7 @@ fn run(
                                 seen.frames.push((seq - 1, at));
                             }
                         }
-                        Ok(Some(UdpEvent::Skip { first, last, .. })) => {
+                        Ok(Some(UdpEvent::Gap { first, last, .. })) => {
                             seen.gaps += (last - first + 1) as usize
                         }
                         Ok(_) => (),
@@ -202,7 +202,7 @@ fn run(
             }
             let start = Instant::now();
             sends.lock().unwrap()[i] = Some(start);
-            match pool.feed_lite3(message, plasmite::api::Feed::new()) {
+            match pool.send_lite3(message) {
                 Ok(()) => (),
                 Err(error) => {
                     eprintln!("UDP send error: {error}");
@@ -228,11 +228,11 @@ fn run(
         let client = RemoteClient::new(&server.http)?;
         let pool = client.open_pool(&pool_ref)?;
         for _ in 0..fans {
-            let mut opts = FollowOptions::new();
-            opts.start = plasmite::api::FollowStart::Sequence(1);
+            let mut opts = TailOptions::new();
+            opts.since_seq = Some(1);
             opts.max_messages = Some(COUNT);
             opts.timeout = Some(Duration::from_secs(4));
-            let mut tail = pool.follow_lite3(opts)?;
+            let mut tail = pool.tail_lite3(opts)?;
             let tx = ready_tx.clone();
             let messages = messages.clone();
             handles.push(thread::spawn(move || {
@@ -386,8 +386,8 @@ fn max_probe(server: &Server) -> Result<(), Box<dyn Error>> {
     if largest.is_empty() || rejected.is_empty() {
         return Err("max-size probe did not bracket the limit".into());
     }
-    let mut follow = pool.follow(Read::new())?;
-    pool.feed_lite3(&largest, plasmite::api::Feed::new())?;
+    let mut follow = pool.follow(UdpFollowOptions::new())?;
+    pool.send_lite3(&largest)?;
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut received = false;
     while Instant::now() < deadline {
@@ -400,7 +400,7 @@ fn max_probe(server: &Server) -> Result<(), Box<dyn Error>> {
         }
     }
     follow.close();
-    let oversized_rejected = pool.feed_lite3(&rejected, plasmite::api::Feed::new()).is_err();
+    let oversized_rejected = pool.send_lite3(&rejected).is_err();
     println!(
         "max_datagram=65507 data_header=40 lite3_bytes={} follow_datagram_bytes={} received_exact={} next_lite3_bytes={} oversized_rejected={}",
         largest.len(),

@@ -358,22 +358,11 @@ jobs:
 
           ### Manual install
           Linux ARM64 and ARMv7 SDK tarballs are preview builds.
-          Download the appropriate tarball for your platform, extract it, and install the SDK layout:
-          \`\`\`bash
-          tar xzf plasmite_*_<your-platform>.tar.gz
-          sudo install -d /usr/local/bin /usr/local/lib /usr/local/include /usr/local/lib/pkgconfig
-          sudo cp -f bin/plasmite bin/pls /usr/local/bin/
-          sudo cp -f include/plasmite.h /usr/local/include/
-          sudo cp -f lib/pkgconfig/plasmite.pc /usr/local/lib/pkgconfig/
-          # macOS
-          sudo cp -f lib/libplasmite.2.dylib /usr/local/lib/ 2>/dev/null || true
-          # Linux
-          sudo cp -f lib/libplasmite.so.2 /usr/local/lib/ 2>/dev/null || true
-          \`\`\`
+          Download the SDK archive for your platform and verify it against \`sha256sums.txt\` before extracting it. See the [distribution guide](https://github.com/${{ github.repository }}/blob/${TAG}/docs/record/distribution.md) for platform requirements and SDK setup.
 
           ### From source
           \`\`\`bash
-          cargo install --git https://github.com/${{ github.repository }} --tag ${TAG} plasmite
+          cargo install --locked --git https://github.com/${{ github.repository }} --tag ${TAG} plasmite
           \`\`\`
           BODY
           # Trim leading whitespace from heredoc indentation.

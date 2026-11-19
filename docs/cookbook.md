@@ -121,6 +121,7 @@ Run this in two terminals and type a message such as `{"from": "ana", "text": "h
 
 ```bash
 # On the server:
+plasmite pool create builds
 plasmite serve https://pools.example.net:9743
 plasmite access invite laptop        # in a second terminal; prints an access key
 
@@ -166,7 +167,7 @@ sudo systemctl enable --now sensor-collector.service
 journalctl -u sensor-collector.service -n 20
 ```
 
-Here `collect.sh` is your program, such as `read-sensor | plasmite feed sensors --create`. Run it as the account that owns the pools so `~/.plasmite/pools` resolves to the same directory every time. A restart starts a fresh process: it can't tell whether the write in flight when the old one died reached the pool, so `fetch sensors --last 1` before resending if duplicates matter. To serve the pools at boot too, use [the server installer](record/serving.md#start-a-server-at-boot).
+Create an executable `/home/sensors/collect.sh` for the `sensors` account. Its commands can pipe readings to `plasmite feed sensors --create`. Use absolute paths for binaries if the service's search path differs from your shell's. A restarted process may have to resend a reading whose write was interrupted. If duplicates matter, give each reading an application ID and check retained history for that ID before resending. To serve the pools at boot too, use [the server installer](record/serving.md#start-a-server-at-boot).
 
 ## Record TouchOSC messages
 

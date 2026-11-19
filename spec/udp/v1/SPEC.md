@@ -135,7 +135,7 @@ replay. No per-message acknowledgement or confirmation of complete delivery.
   it already accepted. DATA still in flight may go unread; completion gives
   no assurance of complete delivery. Add no grace period or repair exchange.
 
-Explicit oversized/pressure skips produce structured `udp-skip` notices and cause a range fetch to exit 1. When the pool drops part of the selected range, the server sends a terminal `RetentionGap` error and repeats it in response to renewals. The reader reports it once and closes. CLI `fetch` exits 9. CLI `follow` reports the gap and opens a new subscription at `next_seq`.
+Explicit oversized/pressure skips produce structured `udp-skip` notices and cause a completed range fetch to exit 1. When the pool drops part of an open subscription's selected range, the server sends a terminal `RetentionGap` error and repeats it in response to renewals. If the chosen sequence has already expired at opening, the server rejects the subscription with the same error. CLI `fetch` exits 9. CLI `follow` reports the gap and opens a new subscription at `next_seq`.
 
 A finite read with terminal progress and no observed server skip or error can still miss datagrams. A positional `fetch POOL SEQ` only succeeds if it receives that sequence. An unavailable peer eventually produces `Io`.
 

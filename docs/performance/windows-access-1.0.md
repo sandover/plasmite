@@ -1,6 +1,6 @@
 # Plasmite 1.0.0 access on Windows
 
-Use the source revision recorded with these runs to reproduce the 1.x results.
+Use the checkout named in [Reproduce](#reproduce) to rerun the 1.x workloads.
 The benchmark workers on current main use the 2.0 API.
 
 The timing tables measure the 1.0.0 interfaces. Rows named "Remote MCP process
@@ -122,7 +122,10 @@ A separate direct-MCP check rejects every client subprocess and every import of 
 
 Use a dedicated pool and disposable access key. Keep the key file owner-only. The request runner creates a private saved-connection store and removes it after clients stop, so it leaves existing saved connections alone. It accepts a JSON key file with an `access_key` field or a plain-text key. Use a CA file that trusts the server's certificate. See [serving](../record/serving.md) for server and trust setup and [building](../building.md) for the Windows compiler prerequisites.
 
-The historical tables include 21 request paths, including the `remote_stdio_mcp` bridge. To reproduce those rows, check out source commit `4fe156a126175ff73732414f68a22f851af53001` listed above. The current runner covers 20 paths and omits that removed bridge.
+Use a disposable checkout at `601e28b`. It adds the benchmark runners to the
+same product source as the measured build at `4fe156a`. Its 21 request paths
+include the former `remote_stdio_mcp` bridge. The runner on current main covers
+20 paths with the 2.0 API, so the build and run commands below use `601e28b`.
 
 From an x64 Visual Studio developer terminal with `clang-cl` on `PATH`, build the CLI, library, and native helpers:
 
@@ -150,7 +153,12 @@ python scripts\bench_access_comparison.py `
   --node $NodeX64 --output access-session1.raw.json
 ```
 
-The current defaults cover all 20 request paths with 100 messages, five repeats, and both sizes. Select individual paths with `--lanes`; for example, `--lanes https_rust_key https_rust direct_https_mcp` compares the in-memory key, saved connection, and direct MCP paths. For direct MCP alone, select `--lanes direct_https_mcp`; that path needs no local CLI, library, or Node build, and `--root` may point at a directory without Plasmite binaries. The common argument parser still accepts the unused pool-directory and local-server values.
+The historical runner defaults to all 21 request paths with 100 messages, five
+repeats and both sizes. Select
+`--lanes https_rust_key https_rust remote_stdio_mcp direct_https_mcp` to repeat
+the main remote comparison. With `--lanes direct_https_mcp`, the runner needs
+only Python and a running server. Its argument parser still requires the
+unused pool directory and local server values.
 
 The batch runner uses the current saved-connection store. Point `PLASMITE_ACCESS_HOME` at a disposable directory, run `plasmite access connect $SecureServer` with the test key, and then run:
 

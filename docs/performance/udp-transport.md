@@ -46,7 +46,7 @@ The [maximum-packet probe](udp-transport-results/max-probe.txt) sent one valid 6
 
 ## Reproduce
 
-Use a disposable checkout at `fd3823c`, which contains the [1.x harness](https://github.com/sandover/plasmite/blob/fd3823cd9701346d4302caadb791866851fdcdb0/docs/performance/udp-transport-bench.rs) and the APIs it calls. The host and binary fingerprints above identify the exact measured build. Run from the checkout root on a host that permits loopback sockets. The harness starts one local Plasmite server with disposable pools and access settings, then stops it and removes its temporary directory.
+Use a disposable checkout at `fd3823c`, which contains the [historical harness](udp-transport-bench.rs) and the APIs it calls. The host and binary fingerprints above identify the exact measured build. Run from the checkout root on a host that permits loopback sockets. The harness starts one local Plasmite server with disposable pools and access settings, then stops it and removes its temporary directory.
 
 ```sh
 cargo build --release --bin plasmite --lib

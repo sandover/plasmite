@@ -379,7 +379,7 @@ INPUT AND OUTPUT
     Duplex {
         #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
-        #[arg(long, help = "Create local pool if missing before following")]
+        #[arg(long, help = "Create a missing local or HTTP(S) pool")]
         create: bool,
         #[arg(long = "last", short = 'n', help = "Print the last N messages first")]
         last: Option<u64>,

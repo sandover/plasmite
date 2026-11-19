@@ -23,7 +23,7 @@ Interface layer  →  Core domain layer  →  Platform layer
 **Interface layer** (`src/main.rs`, `src/cli/`, `src/api/`, `src/serve.rs`, `src/http_v2.rs`, `src/mcp.rs`, `src/udp_input.rs`, `src/abi*.rs`):
 
 - Parses and validates input, invokes core operations and maps results to user-facing formats.
-- Does not duplicate storage correctness logic. One exception: the shared validation report (`src/api/validation.rs` over `src/core/validate.rs`) performs read-only ring and frame checks for `plasmite doctor`.
+- Uses core storage rules. For example, `plasmite doctor` calls `src/api/validation.rs` to assemble a report from the ring and frame checks in `src/core/validate.rs`.
 - May hold bounded subscription state for selection, routing, leases, cancellation and finite completion. Readers own their durable progress.
 - Releases pool mappings and cursors when delivery ends.
 
@@ -48,7 +48,7 @@ The crate builds one library (`src/lib.rs`) and two binaries. `plasmite` (`src/m
 | `src/core/frame.rs` | The fixed 64-byte frame header, frame states and size rules. |
 | `src/core/cursor.rs` | Walks committed frames in the ring; never yields a frame in `Writing` state. |
 | `src/core/validate.rs` | Slow-path ring and frame checks for `doctor` and debug assertions. |
-| `src/core/notify.rs`, `src/core/notify/` | Best-effort wake-ups: Linux shared-file waits, a Windows event per sequence, and named semaphores elsewhere. |
+| `src/core/notify.rs`, `src/core/notify/` | Best-effort wake-ups using Linux shared-file waits, a Windows event per sequence, and macOS address waits or named semaphores. |
 | `src/core/lite3/` | Safe wrappers over the vendored Lite3 C library (`sys.rs` is the raw FFI); JSON ↔ Lite3 conversion and message validation. |
 | `src/core/error.rs` | `ErrorKind`, `Error` and the exit-code mapping. |
 | `src/core/format.rs`, `ring_layout.rs` | Pool format versions; the ring map the web UI draws. |
@@ -79,7 +79,7 @@ The crate builds one library (`src/lib.rs`) and two binaries. `plasmite` (`src/m
 `plasmite follow https://pools.example.net:9743/chat --tag error` shows every layer.
 
 1. **CLI.** `main.rs` parses the arguments with `cli/args.rs` and calls `cli::dispatch`. `cli/stream.rs::follow` turns `--since` or `--last` into a `Read`, and `cli/support.rs::resolve_pool_target` classifies the reference as a local path, an HTTPS pool or a UDP pool.
-2. **HTTP client.** `RemoteClient::open_pool` (`api/remote.rs`) checks that the pool exists. `stream_support::follow_remote` calls `RemotePool::follow_lite3` (`api/remote/read_v2.rs`), which sends `GET /v2/pools/chat/follow?tag=error` with the saved access key from `api/access.rs`. It asks for the binary Lite3 stream, so the CLI can print messages without re-encoding them. A thread watches stdout and cancels the request when the reader closes the pipe.
+2. **HTTP client.** `RemoteClient::open_pool` (`api/remote.rs`) checks that the pool exists. `stream_support::follow_remote` calls `RemotePool::follow_lite3` (`api/remote/read_v2.rs`), which sends `GET /v2/pools/chat/follow?tag=error` with the saved access key from `api/access.rs`. It asks for the binary Lite3 stream. The CLI can pass those bytes through for binary output or decode them for text output. On Unix, a watcher can cancel the request when the downstream reader closes stdout.
 3. **Server.** `serve.rs` authorizes the key against `access_store.rs`, and `http_v2.rs::read` takes a permit from the `--max-tail-concurrency` budget. A `ReadWorker` on Tokio's blocking pool opens the pool and calls the same `Pool::follow_lite3` a local reader uses. It hands frames to the response through a 16-slot channel and returns the pool's identity in the `plasmite-incarnation` header.
 4. **Core.** `api/message.rs` resolves the start position under the read lock with `core/cursor.rs`. Each pull copies the next committed frame, checks sequence continuity (a skipped sequence raises `RetentionGap`), then checks tags. At the end of the pool the reader waits through `core/notify.rs`, with bounded polling as the fallback.
 5. **Back in the CLI.** Each frame reaches `emit_frame`, which writes JSON or Lite3 to stdout. If the reader falls behind retention, `report_read_gap` prints a notice and reopens at the reported `next_seq`.
@@ -181,7 +181,7 @@ On Linux, Windows and macOS 14.4 or later, a reader that reaches the end of the 
 
 A bounded recheck recovers a commit if a writer exits before signalling or a wake-up fails. On Linux and Windows, cancellation can also wake a native C reader when the kernel supports the needed wait. Plain cancellation flags, C cancellation on macOS, and kernels limited to a single wait use a 50 ms check. Caller deadlines can shorten any wait.
 
-Correctness never depends on a wake-up: a reader that never receives one still returns every committed message, and removing wake-ups must not fail any non-timing test.
+Correctness never depends on a wake-up. A reader that never receives one can still read retained messages and detects gaps when writers overtake it. Removing wake-ups must leave non-timing tests passing.
 
 ### Reader handles
 
@@ -193,7 +193,7 @@ Every transport adapts requests into the same core calls. Network code and deliv
 
 ### HTTP
 
-The HTTP adapter runs pool operations on Tokio's blocking pool. A semaphore admits at most `--max-tail-concurrency` storage operations at once; reusing that existing limit avoids a second tuning knob. Admission is immediate: when every permit is taken, the request gets `Busy` instead of waiting in an unbounded queue. This keeps storage pressure off the async workers, so health checks and MCP routing keep moving.
+The HTTP adapter runs pool operations on Tokio's blocking pool. Each listener has separate permit pools for short storage operations, active message streams and MCP requests. All three use `--max-tail-concurrency` as their capacity. The `plasmite_follow` MCP tool also takes a stream permit. Admission to each pool happens immediately. When a pool runs out of permits, the operation returns `Busy`. That lets short operations such as feeds proceed while many follows wait for messages.
 
 An admitted operation holds its permit until it exits, even if the client goes away. A `fetch` has a response deadline. A `follow` holds the pool open while it waits; if its output queue stays full past the timeout, the worker reports an error and releases its permit. Closing the response, revoking the key or stopping the server also ends the read.
 
@@ -207,7 +207,7 @@ An HTTP feed returns the committed message or a numeric receipt.
 
 With `--udp-follow`, the server also serves reads. A subscriber first answers a cookie challenge, which proves the server can reach its return address before any pool opens. A bounded pool of workers then reads through core cursors and sends each message's sequence, timestamp and original Lite3 bytes. Subscribers renew a lease; close or expiry ends the subscription. A finite read releases its pool mapping after its final progress packet, and the receive loop keeps only a small completion record and a file-identity guard until the lease ends, so idle completed reads cost no thread or polling.
 
-The client (`api/udp.rs`) delivers valid matching messages in arrival order, including late and duplicate packets; consumers decide whether to reorder or discard them. Only an explicit skip from the server produces a gap report, because a jump in sequence numbers over UDP can mean loss or reordering. The client never repairs data. The [UDP receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices) defines these rules.
+The client (`api/udp.rs`) delivers valid matching messages in arrival order, including late and duplicate packets. Only the server can report a known skip or retention gap. A jump in sequence numbers over UDP can mean loss or reordering, so the client delivers later arrivals without trying to repair the stream. The [UDP receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices) defines these rules.
 
 ## Server state and access
 
@@ -220,7 +220,7 @@ On Windows, server state and saved connections share the helpers in `windows_pri
 `serve install` saves the `serve` arguments the owner typed in a `Setup` record (`serve_service.rs`). `effective_args` fills defaults and validates them each time a server starts or reports status, so defaults and validation live in one function and the saved job still reads the way the owner wrote it. Each job is named `net.plasmite.<hash of the pool directory>`.
 
 - **Linux and macOS** (`serve_service/unix.rs`): a systemd unit or LaunchDaemon runs the server as the account that owns the pool directory, restarts it on failure and sets a private umask.
-- **Windows** (`serve_service/windows.rs`): the Service Control Manager runs a copy of the executable from a protected directory under Program Files, as a per-pool virtual account `NT SERVICE\net.plasmite.<hash>`, so no password is stored. `server_private.rs` grants that account access to the server state. After a crash, the Service Control Manager restarts the server after 2, 5 and then 10 seconds. Windows can still run a restart it queued before a `stop`, so let crash recovery finish before stopping. An update turns crash restarts off, stages the new executable in the unused of two install slots (`plasmite.exe`, `plasmite.alt.exe`), switches the service to it, and turns crash restarts back on only once the new server reports ready. If the new server fails to start, the update restores the previous executable, setup and identity. If that repair also fails, the service is stopped and disabled with its backups kept for an administrator.
+- **Windows** (`serve_service/windows.rs`): the Service Control Manager runs a copy of the executable from a protected directory under Program Files, as a per-pool virtual account `NT SERVICE\net.plasmite.<hash>`, so no password is stored. `server_private.rs` grants that account access to the server state. After a crash, the Service Control Manager restarts the server after 2, 5 and then 10 seconds. If you start and then stop the service while Windows has a crash restart pending, Windows can still run that restart. See [Start a server at boot](serving.md#start-a-server-at-boot). An update turns crash restarts off, stages the new executable in the unused of two install slots (`plasmite.exe`, `plasmite.alt.exe`), switches the service to it, and turns crash restarts back on only once the new server reports ready. If the new server fails to start, the update restores the previous executable, setup and identity. If that repair also fails, the service is stopped and disabled with its backups kept for an administrator.
 
 ## Extension rules
 

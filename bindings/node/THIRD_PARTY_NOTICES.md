@@ -16,3 +16,8 @@ License: `vendor/lite3/lib/yyjson/LICENSE`
 
 Source: `vendor/lite3/lib/nibble_base64`  
 License: `vendor/lite3/lib/nibble_base64/LICENSE`
+
+## musl
+
+The bundled WebAssembly core includes musl's `memchr` implementation from the
+WASI SDK. See the [copyright notice](portable/COPYRIGHT.musl).

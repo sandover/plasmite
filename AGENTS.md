@@ -56,7 +56,7 @@ docs/
 ├── validation/debian-vm-validation/               — Read when inspecting collector code and raw VM observations
 ├── validation/debian-vm-validation.md              — Read when checking Linux service startup, reboot recovery, failed writes, and sensor guidance
 ├── validation/arm-sdk-ci.md                        — Read when checking what the first Linux ARM SDK CI run established
-├── validation/dependency-audit-2026-02-08.md       — Read when reviewing the 1.x-era dependency and supply-chain risk audit
+├── validation/dependency-audit-2026-02-08.md       — Read when reviewing the February 2026 dependency and supply-chain risk audit
 │
 ├── images/README.md                            — Read when reproducing README diagrams or terminal/browser recordings
 └── images/ui/                                  — UI screenshots; read when updating docs/UI references

@@ -22,7 +22,7 @@ Plasmite shares a directory of pools over HTTPS. The owner runs the server and g
 
 ## Share your first pool
 
-Install Plasmite 2.0 on the server and on each recipient machine; the [installation guide](distribution.md) lists the channels. A 2.0 server rejects 1.x clients. The commands below work in macOS and Linux shells and in Windows PowerShell.
+Install Plasmite 2.0 on the server and on each recipient machine. The server rejects the 1.x HTTP pool protocol. The commands below work in macOS and Linux shells and in Windows PowerShell. See [distribution](distribution.md) for installation options.
 
 Choose a hostname or IP address the recipient can reach, and replace `pools.example.net` in every command with it. Set up DNS if you use a hostname, and let recipients reach TCP port `9743` through your network and firewall. Keep the local administration port `9700` private.
 
@@ -190,12 +190,14 @@ plasmite --dir /srv/shared serve uninstall
 
 Use an absolute `--dir` when you run these from another working directory. They act on the installed service and never on a foreground server. `stop` leaves startup at boot enabled. `uninstall` stops the service and removes startup without deleting pools, keys or certificates.
 
+On Windows, let automatic crash recovery finish before stopping the service. If you start it manually and then stop it while a crash restart is pending, the Service Control Manager can start it again when the delay expires. [Microsoft's service restart documentation](https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-changeserviceconfig2w#remarks)
+
 To change settings, run `serve install` again with the new options. With no options it keeps the saved settings, installs the current Plasmite executable and starts the service, so the same command upgrades Plasmite. The saved listener addresses persist until you pass `--remote-bind`; a new `SERVER` URL changes the advertised address but keeps the saved listener port. On Windows, a failed update restores the previous service. If that restore also fails, the error names the recovery files; finish the recovery in an administrator terminal before you install again.
 
 The service starts before sign-in only if it can reach the pool directory and network at boot:
 
 - An encrypted or removable volume that unlocks or mounts after sign-in delays startup. On a FileVault Mac, someone must unlock the startup disk before macOS boots.
-- A server on Tailscale needs Tailscale's unattended mode so the network is up before sign-in.
+- On Windows, enable Tailscale's unattended mode if clients need tailnet access before sign-in. On Linux, the `tailscaled` system service can run without a login. On macOS, the GUI client needs a user session. See [Tailscale's startup guidance](https://tailscale.com/docs/how-to/run-unattended).
 - To test startup before sign-in, reboot with the owner signed out. A service restart does not test it.
 
 #### Check server status
@@ -268,7 +270,7 @@ plasmite --dir ./shared serve https://node.tail123.ts.net:9743 --remote-bind 127
 tailscale serve --tcp=9743 tcp://127.0.0.1:9743
 ```
 
-Run `tailscale serve` in a separate terminal. It needs no `--front-cert` and provides no browser-trusted certificate. Remove a saved route with `tailscale serve --tcp=9743 off`, which leaves other Serve routes alone, and revoke the Plasmite key to end application access.
+Run `tailscale serve` in a separate terminal and press Ctrl+C there to stop forwarding. Plasmite presents its own certificate through this route. If you add `--bg` for a persistent route, remove it with `tailscale serve --tcp=9743 --bg off`. Revoke the Plasmite key to end application access.
 
 Never forward the local port `9700`. [Funnel](https://tailscale.com/docs/features/tailscale-funnel) publishes a service to the Internet and needs its own review. A Serve setup that terminates HTTPS must pin the frontend certificate, verify backend TLS and preserve `Host`. Before you rely on a tailnet deployment, connect, feed, follow and revoke from a recipient. [Platform validation](../validation/README.md) lists what Plasmite's own checks covered.
 
@@ -313,10 +315,9 @@ For Codex CLI:
 
 ```console
 codex mcp add pools --url https://pools.example.net:9743/mcp --oauth-client-registration dcr --oauth-resource https://pools.example.net:9743/mcp
-codex mcp login pools --oauth-client-registration dcr
 ```
 
-The client opens an authorization page that shows the server, the client, the requested `/mcp` address and the callback. Enter the access key and approve the client; Plasmite then issues it renewable credentials. Ask the client to list pools and read `chat` to confirm access. Changing the server's address requires fresh authorization. If your client's options differ, check `claude mcp --help` or `codex mcp --help`; Claude Code also offers login through `/mcp` in an interactive session.
+The client opens an authorization page that shows the server, the client, the requested `/mcp` address and the callback. Enter the access key and approve the client. Plasmite then issues renewable credentials. Ask the client to list pools and read `chat` to confirm access. Changing the server's address requires fresh authorization. To sign in again for an existing Codex entry, run `codex mcp login pools --oauth-client-registration dcr`. Claude Code also offers login through `/mcp` in an interactive session.
 
 ## Troubleshoot a connection
 

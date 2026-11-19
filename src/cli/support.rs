@@ -67,7 +67,7 @@ pub(crate) fn resolve_pool_target(
 pub(crate) fn udp_unsupported() -> Error {
     Error::new(ErrorKind::Usage)
         .with_message("this command does not support UDP pool refs")
-        .with_hint("Use udp://HOST:PORT/POOL with feed, follow, or duplex.")
+        .with_hint("Use udp://HOST:PORT/POOL with feed, follow, fetch, or duplex.")
 }
 
 pub(crate) fn parse_udp_pool_target(input: &str) -> Result<PoolTarget, Error> {

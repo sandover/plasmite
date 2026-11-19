@@ -7,7 +7,7 @@ These reports predate 2.0. Repeat a check before claiming its result for 2.0.
 - [Windows and Mac services](windows-boot-validation.md): native Windows service startup before sign-in, updates and rollback, and a macOS LaunchDaemon trial (October 2026, `1.1.0-dev`).
 - [Debian VM services](debian-vm-validation.md): startup before login, reboot recovery, connection failures and retained sensor history (November 2026, `1.3.0-dev`).
 - [Linux ARM SDK CI run](arm-sdk-ci.md): the hosted CI run that first built and exercised the ARM64 and ARMv7 archives.
-- [Dependency audit, February 2026](dependency-audit-2026-02-08.md): a 1.x-era review of dependency and supply-chain risk. Run `just audit` for current advisories.
+- [Dependency audit, February 2026](dependency-audit-2026-02-08.md): a review of dependency and supply-chain risk from the 0.1.0 checkout. Run `just audit` for current advisories.
 
 ## Recording a check
 

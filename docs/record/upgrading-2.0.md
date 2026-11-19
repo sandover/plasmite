@@ -11,7 +11,9 @@ Plasmite 2.0 opens existing pool files in place. Upgrade HTTP clients and server
 | `--json`, `--jsonl`, `--format jsonl` | `--format json`, or omit it: pipes and files get JSON by default |
 | `--yaml` | `--format yaml` |
 | `--data-only` | `jq -c '.data'` |
-| `feed --in FORMAT` | `feed --input-format FORMAT`, needed only when automatic detection can't tell |
+| `feed --in jsonl`, `feed --in jq` | Omit the flag. Feed detects JSON objects from the input. |
+| `feed --in lite3` | `feed --input-format lite3-raw` for a single attachment |
+| `fetch POOL SEQ --format lite3` on 1.0 or 1.1 | Add `-raw` to keep writing a single raw attachment. In 2.0, `--format lite3` writes a stream. |
 | `feed --data OBJECT` | `feed OBJECT`; ordinary objects are application data |
 | `--errors skip` | Removed; bad input stops the command and earlier messages stay stored |
 | `--timeout` (including on `duplex`) | Stop the process from outside: `timeout 30 plasmite follow chat` on Linux, `gtimeout` from GNU coreutils on macOS, or your process manager |
@@ -20,15 +22,15 @@ Plasmite 2.0 opens existing pool files in place. Upgrade HTTP clients and server
 | `--create-size SIZE` | `--create` at the default size, or `pool create --size SIZE` first |
 | `--retry`, `--retry-delay` | The caller retries |
 | `--replay SPEED` | Your own timer; see [Control playback timing](#control-playback-timing) |
-| `tap -- CMD` | A pipe into `feed --input-format lines`; see [Capture command output](../cookbook.md#capture-command-output) |
-| `--quiet-drops`, `--no-notify` | Removed; reads report every loss as `RetentionGap` |
+| `tap POOL -- CMD` | Run `CMD 2>&1 \| plasmite feed POOL --input-format lines` to combine stdout and stderr in one stream. Add a source field yourself if your reader needs to distinguish them. See [Capture command output](../cookbook.md#capture-command-output). |
+| `--quiet-drops`, `--no-notify` | Remove the flags. Reads report detected retention gaps as `RetentionGap`. |
 | `serve --shared-address URL` | `serve URL` |
 | `serve --token`, `serve init`, `serve check` and other token flags | Named access keys; see [Share pools across machines](serving.md) |
 | `plasmite mcp SERVER_URL` | Connect the MCP client to the server's HTTPS `/mcp` address; see [Connect an AI client](serving.md#connect-an-ai-client) |
 
 `fetch POOL SEQ` and `follow --one` work as before. In Bash, use `set -o pipefail` when a captured command's failure should fail the pipeline.
 
-Framed Lite3 streams (`--format lite3` and `feed --input-format lite3`) start with `PLS2`, and 2.0 rejects the 1.x `PLS1` prefix. To carry a saved `PLS1` stream into 2.0, read it with 1.x as JSON and feed that JSON into 2.0.
+Framed Lite3 streams (`--format lite3` and `feed --input-format lite3`) start with `PLS2`. To import a saved `PLS1` stream, use a 1.2 or 1.3 executable to `feed` it into a scratch pool with `--input-format lite3 --format json`. Feed those JSON receipts into your 2.0 destination. The destination assigns new sequences and times.
 
 ## Library calls
 
@@ -36,19 +38,19 @@ Every binding shares one model: `feed` writes, `follow` waits for new messages, 
 
 - `time` is integer Unix nanoseconds. 1.x gave a `datetime`, `Date`, `time.Time` or RFC 3339 string, plus separate nanosecond fields.
 - A read that falls behind retention raises `RetentionGap` with `missing` and `next_seq`. 1.x skipped lost messages by default.
-- Timeouts and message limits are gone from read options. Leave the loop, cancel, or pass a wait to `next`.
+- Read options select where to start. For the old message cap, count delivered messages and close the reader when you reach the cap. For a timeout, close or cancel the reader at your deadline, or use the binding's bounded wait for each call. `last` selects a starting position.
 - Reading one message by sequence means opening `fetch` at that sequence and taking the first message.
-- Open-or-create helpers become `open_pool(ref, create=True)` or its equivalent.
+- Open-or-create helpers become `open_pool(ref, create=True)` or its equivalent. Use `create_pool` separately if a new pool needs a particular size.
 
 **Python**
 
 | 1.x | 2.0 |
 | --- | --- |
 | `append`, `append_json`, `append_lite3` | `feed`, `feed_json`, `feed_lite3` |
-| `get(seq)`, `get_json`, `get_lite3` | `next(iter(pool.fetch(since=seq)))`, or `fetch_lite3` |
+| `get(seq)`, `get_json`, `get_lite3` | Take the first item in a `with pool.fetch(since=seq) as reader:` block. Use `message.raw` for the JSON bytes or open `fetch_lite3` for a Lite3 frame. |
 | `tail(...)`, `open_stream`, `open_lite3_stream` | `follow(...)` or `fetch(...)`, and their `_lite3` forms |
 | `replay(speed=...)` | `fetch()` and your own timer |
-| `since_seq=N`, `max_messages`, `timeout_ms`, `error_on_gap` | `since=N`, `last=N`; `reader.next(wait=seconds)` |
+| `since_seq=N`, `max_messages`, `timeout_ms`, `error_on_gap` | Use `since=N`, count results yourself and use `reader.next(wait=seconds)` for a bounded wait. Retention gaps always raise an error. |
 | `Client.pool(ref, size)` | `Client.open_pool(ref, create=True)` |
 | `message.time` (`datetime`), `time_rfc3339` | `message.time` (nanoseconds) |
 | `UdpPool.send_json`, `send_lite3` | `UdpPool.feed`, `feed_lite3` |
@@ -58,10 +60,10 @@ Every binding shares one model: `feed` writes, `follow` waits for new messages, 
 
 | 1.x | 2.0 |
 | --- | --- |
-| `append`, `appendJson` | `feed`, `feedJson`, which return promises |
+| `append`, `appendJson`, `appendLite3` | `feed`, `feedJson`, `feedLite3`, which return promises |
 | `get(seq)`, `getJson` | The first message of `await pool.fetch({ since: seq })` |
 | `tail(options)`, `replay(options)`, `openStream` | `follow(options)` or `fetch(options)` |
-| `sinceSeq`, `maxMessages`, `timeoutMs`, `errorOnGap` | `since`, `last`, `signal`; `reader.next(wait)` |
+| `sinceSeq`, `maxMessages`, `timeoutMs`, `errorOnGap` | Use `since`, count results yourself and pass a `signal` or call `reader.next(waitSeconds)`. Retention gaps always raise an error. |
 | `client.pool(ref, size)` | `client.openPool(ref, { create: true })` |
 | `message.time` (`Date`), `timeRfc3339`, `Lite3Frame.timestampNs` | `time` (`bigint` nanoseconds) |
 | `RemotePool.append`, `get`, `tail` | `RemotePool.feed`, `fetch`, `follow` |
@@ -74,7 +76,7 @@ Every binding shares one model: `feed` writes, `follow` waits for new messages, 
 | `Append`, `AppendJSON`, `AppendLite3`, `AppendOption` | `Feed`, `FeedJSON`, `FeedLite3`, `FeedOption` |
 | `Get(seq)`, `GetJSON`, `GetLite3` | The first message of `Fetch(api.Since(seq))` |
 | `Tail`, `TailLite3` (channels), `Replay`, `OpenStream`, `OpenLite3Stream` | `Follow`, `Fetch` and their `Lite3` forms, read with `Next(ctx)` |
-| `TailOptions{SinceSeq, MaxMessages, Timeout}` | `api.Since`, `api.Last`, `api.Tags`; a context deadline |
+| `TailOptions{SinceSeq, MaxMessages, Timeout}` | Use `api.Since`, count results yourself and pass a context deadline to `Next`. |
 | `Client.Pool(ref, size)` | `Client.OpenPool(ref, api.Create(true))` |
 | `Message.Time` (`time.Time`), `TimeRFC3339` | `Message.Time` (`uint64` nanoseconds) |
 | `udp.Pool.SendJSON`, `SendLite3`, `Follow(NewFollowOptions())` | `Feed`, `FeedLite3`, `Follow(opts...)` or `Fetch(opts...)` |
@@ -137,14 +139,14 @@ A clock step can make the next message's timestamp smaller. This loop continues 
 
 | 1.x tool or field | 2.0 |
 | --- | --- |
-| `plasmite_fetch {pool, seq: N}` | `plasmite_fetch {pool, since: N}`, then take the first message |
+| `plasmite_fetch {pool, seq: N}` | `plasmite_fetch {pool, since: N, count: 1}` |
 | `plasmite_read` | `plasmite_fetch` |
 | `plasmite_wait` | `plasmite_follow` |
 | `after_seq: N` | `since: N + 1` |
 | `next_after_seq` | `next_seq`; pass it unchanged as the next `since` |
 | `fell_behind` | A `RetentionGap` error carrying `missing` and `next_seq` |
 
-`plasmite_fetch` kept its name and changed its arguments, so a 1.x prompt or script that sends `{seq: N}` fails with an unknown-argument error. With no `since`, 1.x `plasmite_read` returned the latest 20 messages; 2.0 `plasmite_fetch` starts at the oldest, so pass `last: 20` for the old behavior. Each fetch result carries `ended`: `complete` when it reached the end of what the pool held at opening, `limit` when it hit `count`. A reader that accepts incomplete history can resume at the `next_seq` in a `RetentionGap` error.
+`plasmite_fetch` kept its name and changed its arguments, so a 1.x prompt or script that sends `{seq: N}` fails with an unknown-argument error. With no start or tags, 1.x `plasmite_read` returned the latest 20 messages. Pass `last: 20` to read that window in 2.0. With tags, `last` still counts all records before filtering. Increase the window if you need to search further back. Each fetch result carries `ended`: `complete` when it reaches the opening end, or `limit` when it reaches a batch limit. A reader that accepts incomplete history can resume at the `next_seq` in a `RetentionGap` error.
 
 ## Upgrade HTTP clients and servers together
 
@@ -164,7 +166,7 @@ A 2.0 server answers 1.x routes with an error that names the required protocol v
 | `GET /v0/pools/{p}/tail_lite3` | The same, with `Accept: application/x-plasmite-lite3-stream` |
 | `since_seq`, `max`, `timeout_ms`, `gap_policy` query parameters | `since`, `last`, repeated `tag`; the client closes the response to stop |
 
-Every read ends with one control record. `complete` ends a fetch normally. `error` carries the failure, such as `RetentionGap` with `missing` and `next_seq`. `cutoff` means the server's time limit ended a fetch early: send a new fetch with `since` set to its `next_seq`, the same `until`, and `incarnation` set to the `Plasmite-Incarnation` header from the first response, so the server can confirm the pool wasn't replaced. A response that ends without a control record failed. See the [HTTP contract](../../spec/v2/SPEC.md#http).
+An open read that reaches a server ending carries one control record when the connection can deliver it. `complete` ends a fetch normally. `error` carries the failure, such as `RetentionGap` with `missing` and `next_seq`. `cutoff` means the server reached its time limit. Send a new fetch with `since` set to its `next_seq`, the same `until`, and `incarnation` set to the `Plasmite-Incarnation` header from the first response. A response that ends on its own without a control record failed. See the [HTTP contract](../../spec/v2/SPEC.md#http).
 
 ## Rebuild C callers
 
@@ -186,7 +188,7 @@ Add `/v2` after `bindings/go` in each Plasmite import. For example, change the l
 
 ## Duplex sends and receives ordinary messages
 
-`duplex` uses the same input parser as `feed`, including at a terminal. Enter JSON objects, complete messages, marked YAML or framed Lite3. Duplex delivers every matching message, including its own. Put any application-specific identity in `data` or tags.
+`duplex` uses the same input parser as `feed`, including at a terminal. Enter JSON objects, complete messages, marked YAML or framed Lite3. Remove `--me` and `--echo-self`. The receive stream includes the process's own messages, so put any application-specific identity in `data` or tags and filter on the receiving side.
 
 `plasmite duplex chat` opens its reader before it sends its first message. Input EOF closes sending, so a program can send a request, close stdin, and still read a reply. Stop the process or close stdout when it has what it needs. Use `feed` for a finite copy that exits at input EOF.
 
