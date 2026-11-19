@@ -45,10 +45,10 @@ Median messages per second, from 1.3.0 to the 2.0 draft.
 | Go | 81,600 → 224,300 | 23,100 → 44,500 | 29,200 → 54,100 |
 
 We ran each workload seven times per version on the same Apple M5 Pro Mac
-using the ordinary local APIs. The measured 2.0 development snapshot includes conditional macOS wake-ups
-and pending JSON read optimizations. The publisher wrote 25,000 heartbeats
-and received a complete
-message for each write. The telemetry workload wrote and read back 12,000
+using the ordinary local APIs. The measured 2.0 development snapshot includes
+conditional macOS wake-ups and the direct JSON read optimizations. The publisher
+wrote 25,000 heartbeats and received a complete message for each write. The
+telemetry workload wrote and read back 12,000
 messages with 16 sensor readings each, counting each message once. The
 replay read 4,000 preloaded messages with 16 KiB of text each.
 

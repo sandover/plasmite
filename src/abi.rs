@@ -295,12 +295,7 @@ fn read_stream(
         .state
         .lock()
         .map_err(|_| Error::new(ErrorKind::Internal).with_message("stream state is unavailable"))?;
-    state.next(wait, |frame, tags| {
-        if !crate::api::frame_matches_tags(&frame, tags)? {
-            return Ok(None);
-        }
-        crate::api::message_json_from_frame(&frame).map(Some)
-    })
+    state.next(wait, crate::api::select_frame_json)
 }
 
 fn read_lite3_stream(
@@ -1226,7 +1221,17 @@ pub extern "C" fn plsm_pool_feed_json(
             &tags,
             parsed.value(),
         );
-        write_wire(out, &wire)
+        if len < 4096 {
+            return write_wire(out, &wire);
+        }
+        // Use input size as a hint without reserving space for arbitrarily
+        // large amounts of whitespace that never reach the receipt.
+        let bytes = wire.to_json_bytes(len.min(64 * 1024)).map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("failed to serialize response")
+                .with_source(err)
+        })?;
+        write_json_buf(out, bytes)
     })();
     result.map_or_else(|err| fail(error, err), |()| 0)
 }

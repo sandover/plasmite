@@ -5,7 +5,7 @@
 //! Invariants: All FFI interaction is confined to this module + `sys`.
 #[cfg(test)]
 use std::cell::Cell;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::io;
 
 use serde::Serialize;
@@ -273,6 +273,10 @@ impl<'a> Lite3DocRef<'a> {
         get_key_offset_at(self.bytes, ofs, key)
     }
 
+    pub(crate) fn key_offset_cstr_at(&self, ofs: usize, key: &CStr) -> Result<usize, Error> {
+        get_key_offset_cstr_at(self.bytes, ofs, key)
+    }
+
     pub fn count_at(&self, ofs: usize) -> Result<u32, Error> {
         array_count(self.bytes, ofs)
     }
@@ -384,7 +388,7 @@ impl<'a> Lite3DocRef<'a> {
             return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
         }
 
-        let meta_ofs = match get_key_offset(self.bytes, "meta") {
+        let meta_ofs = match get_key_offset_cstr_at(self.bytes, 0, c"meta") {
             Ok(ofs) => ofs,
             Err(err) => return Err(err.with_message("missing meta")),
         };
@@ -401,7 +405,7 @@ impl<'a> Lite3DocRef<'a> {
             return Err(Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"));
         }
 
-        let tags_ofs = get_key_offset_at(self.bytes, meta_ofs, "tags")
+        let tags_ofs = get_key_offset_cstr_at(self.bytes, meta_ofs, c"tags")
             .map_err(|err| err.with_message("missing meta.tags"))?;
 
         let count = array_count(self.bytes, tags_ofs)?;
@@ -417,7 +421,7 @@ impl<'a> Lite3DocRef<'a> {
 
     pub(crate) fn message_data_offset(&self, data_kind: ErrorKind) -> Result<usize, Error> {
         let offset = self
-            .key_offset("data")
+            .key_offset_cstr_at(0, c"data")
             .map_err(|err| err.with_message("missing data"))?;
         match self.bytes.get(offset) {
             Some(&sys::LITE3_TYPE_OBJECT) => Ok(offset),
@@ -495,13 +499,17 @@ fn get_key_offset(bytes: &[u8], key: &str) -> Result<usize, Error> {
 }
 
 fn get_key_offset_at(bytes: &[u8], ofs: usize, key: &str) -> Result<usize, Error> {
+    get_key_offset_cstr_at(bytes, ofs, &c_key(key)?)
+}
+
+fn get_key_offset_cstr_at(bytes: &[u8], ofs: usize, key: &CStr) -> Result<usize, Error> {
     let mut out_ofs: usize = 0;
     let ret = unsafe {
         sys::plasmite_lite3_get_val_ofs(
             bytes.as_ptr(),
             bytes.len(),
             ofs,
-            c_key(key)?.as_ptr(),
+            key.as_ptr(),
             &mut out_ofs as *mut usize,
         )
     };

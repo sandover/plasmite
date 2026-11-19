@@ -3,6 +3,7 @@ use super::{Lite3DocRef, ParsedJson, sys};
 use crate::core::error::{Error, ErrorKind};
 use base64::Engine as _;
 use serde::ser::{Error as _, Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde_json::ser::{CharEscape, CompactFormatter, Formatter};
 use serde_json::{Map, Number, Value};
 
 #[derive(Clone, Copy)]
@@ -184,6 +185,57 @@ impl<'a> JsonValue<'a> {
         };
         value
     }
+    pub(crate) fn write_json(&self, out: &mut Vec<u8>) -> Result<(), serde_json::Error> {
+        let value = self.view();
+        match value.kind {
+            sys::LITE3_TYPE_STRING if value.text_len >= 1024 => {
+                let bytes =
+                    unsafe { std::slice::from_raw_parts(value.text.cast::<u8>(), value.text_len) };
+                quote_long_string(out, bytes).map_err(serde_json::Error::io)
+            }
+            sys::LITE3_TYPE_ARRAY => {
+                out.push(b'[');
+                for (index, entry) in self
+                    .entries()
+                    .map_err(serde_json::Error::custom)?
+                    .into_iter()
+                    .enumerate()
+                {
+                    if index > 0 {
+                        out.push(b',');
+                    }
+                    self.child(entry.offset).write_json(out)?;
+                }
+                out.push(b']');
+                Ok(())
+            }
+            sys::LITE3_TYPE_OBJECT => {
+                out.push(b'{');
+                let mut entries = self.entries().map_err(serde_json::Error::custom)?;
+                entries.sort_by(|a, b| entry_key(a).cmp(entry_key(b)));
+                let mut first = true;
+                for (index, entry) in entries.iter().enumerate() {
+                    if entries
+                        .get(index + 1)
+                        .is_some_and(|next| entry_key(entry) == entry_key(next))
+                    {
+                        continue;
+                    }
+                    if !first {
+                        out.push(b',');
+                    }
+                    first = false;
+                    serde_json::to_writer(&mut *out, entry_key(entry))?;
+                    out.push(b':');
+                    self.child(entry.offset).write_json(out)?;
+                }
+                out.push(b'}');
+                Ok(())
+            }
+            _ => serde_json::to_writer(out, self),
+        }
+    }
+
     pub(super) fn kind(&self) -> u8 {
         self.view().kind
     }
@@ -242,6 +294,58 @@ impl Serialize for JsonValue<'_> {
             _ => Err(S::Error::custom("invalid JSON value")),
         }
     }
+}
+
+// Find the first byte requiring a JSON escape. Word subtraction can mark an
+// extra byte after a match, so only use the lowest marked byte in each word.
+fn json_escape_offset(bytes: &[u8]) -> usize {
+    const ONES: u64 = u64::MAX / 255;
+    const HIGH: u64 = ONES << 7;
+    let (chunks, tail) = bytes.as_chunks::<8>();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let word = u64::from_le_bytes(*chunk);
+        let quotes = word ^ (ONES * u64::from(b'"'));
+        let slashes = word ^ (ONES * u64::from(b'\\'));
+        let controls = word.wrapping_sub(ONES * 0x20) & !word;
+        let matches = (controls
+            | (quotes.wrapping_sub(ONES) & !quotes)
+            | (slashes.wrapping_sub(ONES) & !slashes))
+            & HIGH;
+        if matches != 0 {
+            return index * 8 + matches.trailing_zeros() as usize / 8;
+        }
+    }
+    bytes.len() - tail.len()
+        + tail
+            .iter()
+            .position(|&byte| byte < 0x20 || matches!(byte, b'"' | b'\\'))
+            .unwrap_or(tail.len())
+}
+
+fn quote_long_string(quoted: &mut Vec<u8>, bytes: &[u8]) -> std::io::Result<()> {
+    let mut formatter = CompactFormatter;
+    formatter.begin_string(quoted)?;
+    let mut bytes = bytes;
+    loop {
+        let end = json_escape_offset(bytes);
+        quoted.extend_from_slice(&bytes[..end]);
+        let Some((&byte, rest)) = bytes[end..].split_first() else {
+            break;
+        };
+        let escape = match byte {
+            b'"' => CharEscape::Quote,
+            b'\\' => CharEscape::ReverseSolidus,
+            b'\x08' => CharEscape::Backspace,
+            b'\x0c' => CharEscape::FormFeed,
+            b'\n' => CharEscape::LineFeed,
+            b'\r' => CharEscape::CarriageReturn,
+            b'\t' => CharEscape::Tab,
+            ctrl => CharEscape::AsciiControl(ctrl),
+        };
+        formatter.write_char_escape(quoted, escape)?;
+        bytes = rest;
+    }
+    formatter.end_string(quoted)
 }
 
 fn corrupt(message: &'static str) -> Error {

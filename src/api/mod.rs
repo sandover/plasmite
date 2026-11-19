@@ -32,7 +32,7 @@ pub use message::{
 pub use message::{ReadStatus, message_json_from_frame};
 pub(crate) use message::{
     TailOutcome, TailState, format_ts, frame_matches_tags, message_from_udp_payload,
-    select_lite3_frame, select_view,
+    select_frame_json, select_lite3_frame, select_view,
 };
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Read, RemotePool, RemoteRead};
 pub use udp::{
