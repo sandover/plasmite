@@ -493,6 +493,27 @@ mod tests {
     }
 
     #[test]
+    fn fetch_rejects_a_same_name_replacement_after_cutoff() {
+        let (pool, server) = responses([
+            (
+                "/v2/pools/events/fetch",
+                "original",
+                "{\"type\":\"cutoff\",\"next_seq\":2,\"until\":3}\n",
+            ),
+            (
+                "/v2/pools/events/fetch?since=2&until=3",
+                "replacement",
+                "{\"seq\":2,\"time\":\"2026-11-17T00:00:00Z\",\"data\":{},\"meta\":{\"tags\":[]}}\n",
+            ),
+        ]);
+        let mut reader = pool.fetch(Selection::new()).expect("open");
+        let error = reader.next_message().expect_err("pool identity changed");
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        assert_eq!(error.message(), Some("pool was replaced during the read"));
+        server.join().expect("mock server exit");
+    }
+
+    #[test]
     fn a_404_without_a_version_reports_an_old_server() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
