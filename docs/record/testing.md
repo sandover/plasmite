@@ -1,384 +1,100 @@
 # Testing
 
-This repo uses Rust’s built-in test harness (`cargo test`) plus a small set of
-integration tests that exec the `plasmite` CLI binary.
+Run the cheapest check that covers your change while you work, then widen the net before you push, merge and release.
 
-## Local iteration
+## What to run
 
-Start with a compile check, then run the smallest test target that exercises the
-changed behavior:
+| When | Command | What it adds |
+| --- | --- | --- |
+| While editing | `cargo check`, then `cargo test --lib <name>` or `cargo test --test <target> <name>` | The one module or target that covers the change. |
+| Before every push | `just check` | Formatting, Clippy with warnings denied, the default Rust test suite, the benchmark-harness and dev-server script tests, version alignment, release-target checks and Lite3 integrity. Pull requests run the same command. |
+| When a change touches bindings, the C ABI, packaging or cookbook examples | `just integration` | The OSC example, cookbook examples, C ABI smoke and misuse checks, all binding suites, the native-library contract smoke, cross-language artifact checks and the browser UI smoke. Needs Go, Node, Python and `uv`. |
+| Before merging, tagging or publishing | `just release-gate` | `check` plus `integration`, a release build of the shared library and the Python wheel install smoke. CI runs it on main and on a schedule, on Linux and macOS. |
+| Before a release | `just audit` | RustSec advisories, using a database kept under `.scratch/`. `just release-check` runs `release-gate` and `audit` together. |
+
+`just check` runs `cargo clean` first when `target/` has grown past 2 GB.
+
+## Rust test targets
+
+`cargo test --lib` runs the library's unit tests: frame encoding, append planning, pool I/O and locking, cursor overwrite safety, error mapping, Lite3 validation, views and the C ABI. `cargo test --bin plasmite` runs the unit tests for the CLI and server modules.
+
+The integration targets in `tests/` run the real `plasmite` binary or the public Rust API. They share process, terminal, JSON, temporary-pool and server helpers in `tests/support/`. Tests that launch a server can use an OS-assigned port to avoid collisions.
+
+| Target | Covers |
+| --- | --- |
+| `cli_pool` | Pool lifecycle, metadata, `doctor`, permissions and corrupt files. |
+| `cli_feed_fetch` | Local and remote `feed`, input framing, receipts and exact lookup. |
+| `cli_follow_duplex` | Local and remote `follow`, filters, positions and cancellation. |
+| `cli_duplex` | `duplex` input, independent replies and session end. |
+| `cli_history` | Finite history selection and local/remote parity. |
+| `cli_pipes` | Complete-message pipes between commands, closed pipes and stream failures. |
+| `cli_binary_pipes` | Exact Lite3 payloads through local and HTTP streams. |
+| `cli_yaml`, `cli_yaml_stream` | YAML reports and messages, and live YAML delivery. |
+| `cli_syntax`, `cli_global_options` | Accepted spellings and the placement of shared options. |
+| `cli_help_output` | Help, completions, color, JSON output, error envelopes and exit codes. |
+| `cli_tap` | `tap` is rejected as an unknown command. |
+| `cli_remote_inspection` | Local and remote pool inspection. |
+| `cli_access_output` | `access` output and offline connection discovery. |
+| `cli_service`, `cli_service_logs` | Foreground and installed servers, and `serve logs`. Windows upgrade tests are opt-in; see below. |
+| `serve_status` | `serve status` discovery, stale entries and private registry files. |
+| `secure_serving` | Server validation, limits, TLS, response headers and MCP over stdio. |
+| `secure_sharing` | An access key across a server restart and a fresh client. |
+| `access_lifecycle` | Key listing, revocation of open streams and persistence. |
+| `browser_access` | Browser sessions against the same access records. |
+| `oauth_access` | OAuth for the HTTPS MCP endpoint across a restart. |
+| `remote_integration` | The HTTP protocol and Rust remote client, including errors and continuation across server limits. |
+| `udp_input`, `udp_client`, `udp_transport`, `udp_transport_cli` | UDP input, the client, the full transport through a lossy proxy, and the CLI over UDP. |
+| `conformance_v2` | The shared 2.0 read cases through the CLI and the Rust API. |
+| `owned_view_streams` | Retained view snapshots across ring overwrite. |
+| `lock_smoke` | Several `feed` processes on one pool serialize their writes. |
+| `build_version`, `build_version_cargo` | Build identity from Git tags, commits and local changes. |
+
+## Contract checks
+
+`tests/fixtures/conformance/reads.json` defines the 2.0 read cases: starting history, a `since` or `last` selection, optional tags, messages added after the reader opens, and the expected sequences or error kind. `just conformance` runs them through the CLI and the Rust API. The Go, Python and Node suites read the same file. One case opens `tests/fixtures/pool-v1.3.0.plasmite`, a pool written by Plasmite 1.3.0, to prove 2.0 reads the existing format. Copy that fixture to a temporary directory before writing to it.
+
+`tests/fixtures/owned_views.json` states the intended input rules for message views, and `uv run python tests/owned_view_contract.py` checks that the cases agree with each other. No binding suite reads this file yet; each binding tests views through its own cases. Measurements live in the [language-boundary results](../performance/language-boundary-results/owned-views/README.md).
+
+## Bindings and the C ABI
+
+Each binding loads the major-versioned native library (`libplasmite.so.2`, `libplasmite.2.dylib` or `plasmite2.dll`). The `just` recipes build the library and stage that name with `scripts/stage_versioned_library.sh`, so run binding tests through them:
 
 ```bash
-cargo check
-cargo test --lib <module-or-test-name>
-cargo test --test <integration-test-name> <test-name>
-```
-
-## Validation hierarchy
-
-There are three top-level commands, ordered by cost and coverage:
-
-- `just check`: formatting, linting, Rust tests, version alignment, and Lite3
-  integrity. Run it when handing work off and before every push; pull requests
-  run the same command.
-- `just integration`: cookbook, ABI, cross-artifact, browser-script, and language
-  binding checks. It requires Go, Node, Python, and `uv`.
-- `just ui-smoke`: exact browser sequence IDs, bounded history loading,
-  session/clipboard recovery, and access setup guidance in a deterministic Node harness.
-- `just release-gate`: `check` + `integration` + Python wheel installation
-  smoke. Run it before merging, tagging, or publishing; main and scheduled CI
-  run it on Linux and macOS.
-
-### Plasmite 2.0 contract checks
-
-The [shared read cases](../../tests/fixtures/conformance/reads.json) specify pool contents, read options and expected sequences. The Rust and CLI runner uses `cargo test --test conformance_v2`. It also opens a pool written by Plasmite 1.3.0. The binding test commands run the corresponding read cases:
-
-```sh
 just bindings-go-test
 just bindings-python-test
-just bindings-node-test
-cargo test --test remote_integration
-just abi-test abi-smoke
+just bindings-node-test      # also packs the npm package and runs the remote-only smoke
+just bindings-test           # all three plus the Node type check
+just bindings-go-contract-test   # Go API contracts without cgo
 ```
 
-The remote suite checks that HTTP reports errors and continues across server limits. The C tests check option layout, ownership, cancellation and retention-gap details.
-### Linux ARM release archives
+Each suite covers message data and tags, structured errors, retention gaps, views, streams and its UDP client against a child server. Node's suite also checks that runtime exports match `types.d.ts`, and `npm run test:portable` in `bindings/node` checks the bundled WebAssembly core.
 
-The GitHub SDK preview targets are `aarch64-unknown-linux-gnu` and
-`armv7-unknown-linux-gnueabihf`. The passing
-[ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
-built and packaged both targets, then extracted each archive, compiled and
-linked a C SDK consumer, and exercised the CLI and HTTPS restart path. It ran
-the `cli_pool`, `secure_serving`, `secure_sharing`, `oauth_access`,
-`access_lifecycle`, and `remote_integration` suites on each target. ARM64 ran on
-`ubuntu-22.04-arm` with glibc 2.35. ARMv7 cross-built on Ubuntu 22.04 against a
-glibc 2.35 hard-float sysroot and ran under QEMU; the target requires Armv7-A,
-VFPv3-D16 hard-float, and Thumb-2, with NEON optional. The run also passed
-64-bit to ARMv7 and ARMv7 to 64-bit shared-pool handoffs. These CI checks do not
-establish behavior on physical Raspberry Pi hardware.
+`just cross-artifact-smoke` runs after the bindings and CLI are built: Go creates a pool, Node streams a message written by a separate CLI process, and Node, Python and the CLI read each other's messages from one file.
 
-The run retains the verified archives for 30 days as
-`ci-sdk-aarch64-unknown-linux-gnu` and
-`ci-sdk-armv7-unknown-linux-gnueabihf`. Each includes `sha256sums.txt` and
-`ci-build.json` with the SDK tarball. The 1.0.0 GitHub release publishes both
-ARM archives as preview assets; see [distribution](distribution.md) for
-installation.
+`just abi-smoke` links a small C program against the library and runs `tests/abi_adversarial.c`, which checks documented failure and cleanup behavior such as null arguments and repeated cleanup. On Linux, `just test-lite3-sanitizers` runs the same harness against an AddressSanitizer and UndefinedBehaviorSanitizer build at `-O0` and `-O2`. The harness does not probe invalid addresses, stale handles, wrong nonzero lengths or double frees: `include/plasmite.h` makes those the caller's obligation, and they are undefined behavior before the library can check them.
 
-Record physical Raspberry Pi checks separately from CI results. Include the
-Pi model, OS and architecture, archive version, CLI/server commands, and the
-pool sizes exercised. On ARMv7, the maximum pool file length is 2,147,483,647
-bytes (2 GiB minus one byte); Plasmite rejects creation of a larger pool or
-mapping of a larger existing pool. A smaller mapping can still fail under
-memory pressure. Do not describe an archive as built, published, or Pi-validated
-until evidence exists for that specific boundary.
+## Windows
 
-### Boot-installed servers
+To run the Windows private-state and secure-sharing checks locally, use PowerShell:
 
-Unit and integration tests can check saved settings, command scope,
-status output, and error recovery. They do not prove startup before login.
-Record a separate check on each supported host:
-
-1. Install as the account that owns the pool and access keys. On Windows,
-   approve the User Account Control prompt with that pool-owning administrator
-   account. Check `serve status --all`, the public URL, the listener, and a
-   client request.
-2. On a host whose storage mounts without sign-in, reboot and leave the
-   owner signed out. From another machine, reach the HTTPS server and read
-   a pool through a saved connection. If a disk requires a person to unlock
-   it, test recovery after that unlock and record the narrower result.
-3. Sign in as the owner. Check `serve status --all` and `serve logs`;
-   exercise `stop`, `start`, `restart`, and `uninstall` for that directory.
-
-Run this on physical Raspberry Pi hardware for the Pi claim, on macOS for
-the LaunchDaemon claim, and on Windows for the Windows Service Control
-Manager claim. Hosted Linux CI, a local service restart, and a physical reboot
-establish different facts.
-
-On 2026-10-02, a live macOS trial ran the installed LaunchDaemon through
-`install`, `stop`, `start`, `restart`, `logs`, and `uninstall` under the owning
-account. The server wrote its private log as that account; uninstall removed
-the native job and saved setup. Grouped install and uninstall each needed one
-administrator approval. This trial did not reboot the Mac or verify service
-availability before login. On 2026-10-05, the Mac recovered its installed
-server after the owner restarted and signed in normally with FileVault
-enabled. This establishes recovery after disk unlock and login. The Windows
-service also passed a fresh guest reboot before interactive sign-in, including
-automatic recovery when its selected network address appeared late. See the
-[Windows and Mac validation report](../validation/windows-boot-validation.md) for source,
-artifact and environment boundaries. No physical Linux or Raspberry Pi boot
-trial has passed yet.
-
-The main CI gate gives Go a stable runner-local build cache that
-`actions/setup-go` restores and saves. Test scripts honor an existing
-`GOCACHE`; local runs default to repository-local scratch directories.
-
-### Cookbook smoke checks
-
-Run:
-
-```bash
-bash scripts/cookbook_smoke.sh
+```powershell
+cargo test --release --lib windows_private::tests -- --test-threads=1
+cargo test --release --bin plasmite serve_service::windows::tests -- --test-threads=1
+cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access -- --test-threads=1
 ```
 
-The script validates a focused set of end-to-end cookbook examples using only local
-and loopback operations:
-
-- CI Gate
-- Live Build Progress
-- Multi-Writer Event Bus
-- Replay & Debug
-- Remote Pool Access
-
-Policy constraints:
-
-- Prefer deterministic tests; avoid flaky timing assumptions.
-- Keep checks runnable on local macOS and standard GitHub CI runners.
-
-## Test suites
-
-### Unit tests (`src/`)
-
-Run library unit tests (core correctness + invariants):
-
-```bash
-cargo test --lib
-```
-
-Run binary unit tests (CLI parsing helpers, etc.):
-
-```bash
-cargo test --bin plasmite
-```
-
-What they cover (high level):
-- Ring/frame encoding + validation (`src/core/frame.rs`)
-- Pure append planning invariants (`src/core/plan.rs`)
-- Pool I/O + mmap + locking behavior (`src/core/pool.rs`)
-- Cursor iteration / overwrite safety (`src/core/cursor.rs`)
-- Error kinds + exit-code mapping (`src/core/error.rs`)
-- Canonical Lite3 payload validation (`src/core/lite3/`)
-
-### Integration tests (`tests/`)
-
-The black-box CLI suites share process, terminal, JSON, temporary-pool, server,
-and MCP helpers under `tests/support/`. Run every command-family target:
-
-```bash
-cargo test --test cli_pool
-cargo test --test cli_feed_fetch
-cargo test --test cli_follow_duplex
-cargo test --test secure_serving
-cargo test --test secure_sharing
-cargo test --test access_lifecycle
-cargo test --test cli_tap
-cargo test --test cli_help_output
-```
-
-The targets are divided by behavior:
-
-- `cli_pool`: pool lifecycle, metadata, diagnostics, permissions, and corrupt
-  file behavior.
-- `cli_feed_fetch`: local and remote ingestion, input framing, retries,
-  receipts, and exact lookup.
-- `cli_follow_duplex`: local and remote streaming, filters, replay, timeouts,
-  duplex send/receive, and cancellation.
-- `secure_serving`: server validation, limits, TLS, response headers, and MCP stdio.
-- `secure_sharing`: invitation, pinned connection, access, and identity checks.
-- `access_lifecycle`: key listing, active stream revocation, and persistence.
-- `cli_tap`: child lifecycle, stream capture and passthrough, tags, signals,
-  and exit propagation.
-- `cli_help_output`: command discovery, completions, adaptive color and JSON,
-  error envelopes, and exit codes.
-
-Run the HTTP protocol and remote-client suite separately:
-
-```bash
-cargo test --test remote_integration
-```
-
-Server-backed HTTP CLI and remote tests use an operating-system-assigned port
-published by the child after binding. They do not probe and release candidate
-ports or serialize the suite behind a global port lock.
-
-Run UDP server, client, and CLI proofs together:
-
-```sh
-cargo test --test udp_input --test udp_client --test udp_transport --test udp_transport_cli
-```
-
-These tests cover legacy input, send/store/follow byte preservation at the exact
-65,507-byte maximum, separate read opt-in, capacity, expired cookies and leases,
-quiet-pool renewal, replaced pools, finite retention failure, and live retention
-notices. A small proxy drops, duplicates, and reorders packets through the real
-server. CLI tests check receipt-free sends, finite reads, filters, timeout, and
-duplex. The language binding tests each run their UDP client against a child
-server. Node also checks that an opening handshake lets timers and close run.
-The Windows and ARM runtime CI suites include all four Rust UDP targets.
-
-Run the multi-process lock smoke test:
-
-```bash
-cargo test --test lock_smoke
-```
-
-What it covers:
-- Spawns multiple `plasmite feed` processes against one pool
-- Asserts writes are serialized (bounds reflect all writes)
-
-## Security/advisory checks
-
-The CI runs RustSec audits via `cargo audit`. To run locally (keeping the
-advisory database under `.scratch/` to avoid `~/.cargo` write permissions):
-
-```bash
-cargo install cargo-audit --locked
-mkdir -p .scratch
-if [ -d .scratch/advisory-db/.git ]; then
-  git -C .scratch/advisory-db pull --ff-only
-else
-  git clone https://github.com/RustSec/advisory-db.git .scratch/advisory-db
-fi
-cargo audit --db .scratch/advisory-db --no-fetch
-```
-
-## Windows service upgrades
-
-Run these tests in an administrator terminal on Windows. They register and
-remove disposable native services using temporary pool directories.
+The service upgrade tests register and remove disposable native services, so they need an administrator terminal:
 
 ```powershell
 cargo test --test cli_service windows_upgrade:: -- --ignored --test-threads=1
 ```
 
-Set `PLASMITE_WINDOWS_PREVIOUS_EXE` to the absolute path of an earlier
-Plasmite executable to test an upgrade from that version.
+Set `PLASMITE_WINDOWS_PREVIOUS_EXE` to an earlier `plasmite.exe` to test an upgrade from that version.
 
-## Binding contracts
+## What automated tests cannot show
 
-Run `just bindings-test` for the Go, Node, and Python tests. Each binding's
-suite tests message data and tags, structured errors, and both retention gap
-policies through its own API. Rust API tests run with `cargo test`.
+Tests can check saved service settings, status output and error recovery, but not that a server starts before anyone logs in after a reboot, or that an archive works on physical Raspberry Pi hardware. Those claims need a dated manual check; [validation reports](../validation/README.md) describe how to run and record one.
 
-Run `just cross-artifact-smoke` after building the bindings and CLI. Go
-creates a pool, Node opens a stream that reads a message from a separate
-CLI process, and Node, Python, and the CLI read each other's messages from
-the same file.
+## Benchmarks
 
-### Plasmite 2.0 conformance
-
-Run `just conformance`. The runners read `tests/fixtures/conformance/reads.json`. Each read case names its selection through `since` or `last`, optionally sets `tags`, and lists the expected sequences or error kind. `seed` sets up the starting history. `after_open` adds messages after the reader opens but before it pulls its first result. `cli_error` records when the CLI's exact sequence shorthand reports a different result from an empty stream.
-
-The Rust runner verifies the opening boundary, live reads and filtered retention errors. The CLI runner checks finite reads and the exact sequence shorthand.
-
-### Pool file compatibility
-
-`tests/fixtures/pool-v1.3.0.plasmite` is a 16 KiB pool written by the `v1.3.0` source at `04db8c011e78d8bef562e6ce2c5fd3030e5fb2d2`. It contains sequence 1 with data `{"point":[10,20],"tool":"pen"}` and tags `gfx` and `scope:sharedCanvas`, followed by sequence 2 with data `{"ready":true}` and tag `system`. Copy the fixture to a temporary directory before writing to it in an upgrade test.
-
-### Owned-view contracts
-
-Use matching native assets when running the view suites. The shared fixtures in `tests/fixtures/owned_views.json` cover strict input rules; runtime tests also check actual acquisition, exact i64 values, native bytes, negative zero, retained children, ring overwrite and explicit conversion. Go checks that children survive reassignment of their message wrapper. Streams check cancellation, tag/gap policy, explicit batch bounds and retained results after close. UDP checks keep arrival order, duplicates and late packets rather than inferring loss.
-The binding suites include Python `test_views.py`, `test_append_views.py` and
-`test_view_streams.py`; Go local view/input/stream tests and UDP tests; and Node
-view, native-input, portable and HTTP tests. Node's `npm run test:portable`
-also verifies the bundled WebAssembly artifact and package contents. These tests
-check semantics; performance comparisons and fixed-build provenance live under
-[`language-boundary-results/owned-views`](../performance/language-boundary-results/owned-views/README.md).
-A fast selected read does not establish a full-conversion or transport win.
-
-### C ABI boundary checks
-
-Run the happy-path link smoke and focused supported-misuse harness:
-
-```bash
-just abi-smoke
-```
-
-The adversarial harness checks documented safe failure and cleanup behavior,
-including null arguments and repeated cleanup of reset output structs. On Linux,
-`just test-lite3-sanitizers` also runs this harness against an AddressSanitizer
-and UndefinedBehaviorSanitizer instrumented library at `-O0` and `-O2`. The
-Rust boundary tests cover valid wide/nested objects, malformed internal child
-offsets, and public C append rejection without consuming a sequence. The harness
-does not probe arbitrary invalid addresses, stale handles, incorrect nonzero lengths, or
-handle/error double-free: those violate the caller obligations in
-`include/plasmite.h` and are undefined behavior before the library can validate
-them.
-
-## Binding tests
-
-The recommended way to run all binding tests is via the Justfile:
-
-```bash
-just bindings-test
-```
-
-### Go
-
-```bash
-just bindings-go-test
-```
-
-CI also enforces a no-CGO API-contract validation:
-
-```bash
-cd bindings/go
-CGO_ENABLED=0 go test ./api/...
-```
-
-Or manually:
-
-```bash
-cd bindings/go
-cargo build -p plasmite  # build libplasmite first
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
-  PKG_CONFIG="/usr/bin/true" \
-  CGO_CFLAGS="-I$(pwd)/../../include" \
-  CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
-  go test ./...
-```
-
-### Python
-
-```bash
-just bindings-python-test
-```
-
-Or manually:
-
-```bash
-cd bindings/python
-cargo build -p plasmite
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" python3 -m unittest discover -s tests
-```
-
-### Node.js
-
-```bash
-just bindings-node-test
-```
-
-Or manually:
-
-```bash
-cd bindings/node
-cargo build -p plasmite
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
-```
-
-The Node suite includes `npm run check:type-surface`, which verifies runtime
-exports stay aligned with `bindings/node/types.d.ts`.
-
-## Notes
-
-- Toolchain: pinned in `rust-toolchain.toml` (includes `clippy` + `rustfmt`).
-- C toolchain: builds vendor Lite3 via `build.rs` (you need a working C compiler).
-- Failure artifacts: some debug-only validation paths write snapshots to `.scratch/`
-  (safe to delete).
-
-## Benchmarks (not tests)
-
-The repo includes a lightweight benchmark harness:
-
-```bash
-cargo run --example plasmite-bench -- --help
-```
+Benchmarks are not tests. `just bench` runs the core benchmark harness in release mode; [performance](../performance/README.md) explains which report to use.

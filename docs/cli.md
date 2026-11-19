@@ -1,26 +1,16 @@
 # CLI operating model
 
-This guide explains the behavior shared across Plasmite commands. Use
-`plasmite --help` to choose a command, `plasmite <command> --help` for its
-exact arguments, and the [cookbook](cookbook.md) for complete workflows.
+This guide explains how Plasmite commands find a pool, read, write and report errors, so you can predict what a script will do. Run `plasmite <command> --help` for exact arguments, use the [cookbook](cookbook.md) for complete tasks, and see the [2.0 contract](../spec/v2/SPEC.md#cli) for the specification.
 
 ## Pool references
 
-Local commands accept a pool name such as `events` or an explicit
-`.plasmite` path. Names resolve beneath the pool directory, which defaults to
-`~/.plasmite/pools`. Global `--dir` and `--color` work before or after a
-command. One directory applies to the entire invocation, including `mcp`;
-conflicting repeated directory values are rejected:
+A local pool reference is a name such as `events` or a path such as `./data/events.plasmite`. A name resolves inside the pool directory: `~/.plasmite/pools` unless you pass `--dir`. Global options (`--dir`, `--format`, `--color`) work before or after the command. One `--dir` applies to the whole invocation, including `mcp`, and conflicting repeats fail.
 
 ```console
 plasmite --dir ./pools follow events
 ```
 
-Commands with remote support accept `https://host:port/pool`. This shorthand
-names a pool; do not append remote API paths. The loopback-only HTTP listener
-is for credential-free use on the server machine.
-
-`feed`, `fetch`, `follow`, and `duplex` accept `udp://HOST:PORT/POOL`. Give an explicit port and one pool name. UDP feed confirms local socket admission. UDP reads deliver datagrams in arrival order, including late messages and duplicates. A fetch ends at terminal progress and can leave messages in flight. Only an explicit server announcement reports loss. The maximum datagram size is 65,507 bytes, including routing and framing. [UDP receive policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
+`https://host:port/pool` names a pool on a shared server and uses the connection you saved with `access connect`. While `plasmite serve` runs, `http://127.0.0.1:9700/pool` reaches its pools from the same machine without credentials. `udp://host:port/pool` sends and receives datagrams that may be lost, duplicated or reordered; see [UDP messages](record/serving.md#send-and-read-over-udp).
 
 | Command | Local name/path | HTTP(S) URL | UDP URL |
 | --- | --- | --- | --- |
@@ -33,250 +23,170 @@ is for credential-free use on the server machine.
 | `duplex` | yes | yes | yes |
 | `doctor` | yes | no | no |
 
-## Serving and startup
+To serve pools, install a server at boot or manage access keys, see [Share pools across machines](record/serving.md).
 
-`plasmite --dir ./shared serve https://pools.example.net:9743` runs in the
-foreground. The positional URL names the public HTTPS origin and sets the
-default remote listener port. Without a URL, the HTTPS listener remains at
-`0.0.0.0:9743`. A URL without an explicit port uses HTTPS port 443.
-`--remote-bind` overrides the listener when a proxy uses a different
-backend port or a specific interface. The URL hostname never selects the
-bind interface. The local administration listener stays on loopback.
+## Messages
 
-For small messages whose senders accept possible loss, `--udp` adds an
-append-only UDP listener alongside HTTP and HTTPS. It binds to
-`127.0.0.1:9701` by default; use `--udp=IP:PORT` to choose another address.
-`--udp-follow` enables both input and follow at that address. Existing `--udp`
-settings keep input only until you opt into reads. Both capabilities apply to
-all pools in the selected directory. A reachable sender can append without
-credentials; with follow enabled it can also read those pools. Bind only on a
-network whose rules limit access. See
-[UDP messages](record/serving.md#send-udp-messages) for the access and delivery
-contract.
+Every stored message has four fields:
 
-The older `--shared-address SERVER` form still names the public origin but
-keeps the 1.0 listener default of `0.0.0.0:9743`. Use `--remote-bind` to
-change its listener. Supply the public origin through one form only.
+```json
+{"seq":42,"time":"2026-11-19T09:00:00.123456789Z","meta":{"tags":["deploy"]},"data":{"service":"api"}}
+```
 
-The command below installs startup before login and starts the server for
-the selected pool:
+`seq` identifies the message and orders it within its pool; it starts at 1 and never repeats. `time` records when the pool stored the message, in UTC with nine fractional digits. Clocks can step, so `time` can repeat or go backward; keep a measurement's own time in `data` when it matters. `meta.tags` lists strings that readers can filter on. `data` holds your object.
+
+A pool keeps a fixed amount of history. When it fills, each new message overwrites the oldest ones.
+
+## Reading
+
+`follow` waits for new messages and runs until you stop it. `fetch` reads what the pool holds and exits. Both choose a starting position. Local and HTTP reads deliver in sequence order. UDP reads deliver in arrival order and can include duplicates.
 
 ```console
-plasmite --dir ./shared serve install https://pools.example.net:9743
+plasmite follow events                        # wait for the next new message
+plasmite fetch events                         # every retained message, then exit
+plasmite follow events --since oldest         # every retained message, then keep waiting
+plasmite fetch events --since 42              # sequence 42 onward
+plasmite fetch events --since 5m              # start at the first record at or after five minutes ago
+plasmite fetch events --since 2026-11-19T09:00:00Z
+plasmite follow events --last 20              # the 20 newest, then keep waiting
 ```
 
-On Linux and macOS, the service runs under the account that owns the pool.
-On Windows, Plasmite registers an automatic Windows service under a
-pool-specific virtual account. Install, update, and uninstall need approval
-through User Account Control (UAC) from the administrator who owns the pool. Plasmite stores
-no login password. The executable and service setup live under
-`Program Files\Plasmite\Services`; shared service state and retained logs
-live in `.plasmite-serve` inside the pool directory. Saved client credentials
-remain private to the account that saved them.
+With no position, `follow` starts at the next new message and `fetch` starts at the oldest retained message. `--since` takes a sequence, `oldest`, a duration such as `5m` or `2h`, or an RFC 3339 time. `--last N` (or `-n N`) starts N messages back from the newest. A read takes one starting position, so combining `--since` and `--last` fails with `Usage`.
 
-The service can list parent-folder names along its pool path so Windows can
-prevent those folders from moving during private-state access.
+A sequence start below the oldest retained message raises `RetentionGap`. Zero and values beyond the next unwritten sequence fail with `Usage`. A time or duration start finds the first retained message at or after the requested time, or starts at the next unwritten sequence if none qualifies. Gap checks begin at the selected position. Later records can carry earlier timestamps if the clock moved backward.
 
-The service can start before an interactive sign-in when Windows can access
-the pool and its storage at boot. If the server uses Tailscale, enable
-Tailscale unattended mode for network access before sign-in. An encrypted or
-removable volume that unlocks or mounts only after sign-in delays the server.
-Pool paths may contain spaces or Unicode. Use an absolute `--dir` path for
-lifecycle commands run from another working directory:
+`--tag` filters after Plasmite chooses the start. `--last 100 --tag error` looks at the 100 newest messages and keeps the ones tagged `error`, so it can return fewer than 100. Repeat `--tag` to require every listed tag. Pipe to `jq` to filter on fields inside `data`:
 
 ```console
-plasmite --dir ./shared serve start
-plasmite --dir ./shared serve stop
-plasmite --dir ./shared serve restart
-plasmite --dir ./shared serve logs
-plasmite --dir ./shared serve uninstall
+plasmite fetch events --last 100 --tag error
+plasmite follow events --tag deploy | jq -c 'select(.data.service == "api")'
 ```
 
-`stop` leaves startup enabled. `uninstall` stops the service and removes
-startup without deleting pools, access keys, or certificates. On Windows,
-updates stop the service before replacing its executable and setup; a failed
-update restores the prior service while preserving its identity, certificates,
-and keys. These commands target the installed setup; they do not control a
-foreground server. Run
-`serve install` with new options to update a saved setup. The positional
-URL chooses the default listener port on first install. Later URL changes
-keep the saved listener unless you supply `--remote-bind`. With no new
-options, `install` keeps the saved settings, installs the current Plasmite
-executable, and starts the service. Updates retain the installed listener
-addresses unless `--remote-bind` changes them. UDP settings also persist across
-updates and restarts. Use `serve install --no-udp` to remove the saved UDP
-listener and follow capability; leaving UDP options off an update keeps the
-saved settings. `serve install --udp-follow` enables reads;
-`serve install --no-udp-follow` removes reads and keeps input.
-
-## Server status
-
-`plasmite serve status` shows Plasmite servers running for your current OS
-user, including the pool directory and local and remote addresses. It finds
-servers started with different `--dir` values, so the top-level `--dir` option
-does not narrow this list. If no server is running, it prints
-`No Plasmite servers running.`
-
-Only servers started with this version register. Restart older running servers
-to make them appear. Stopped servers do not appear in the list.
+`fetch` stops at the newest message present when it started, even while writers continue. `follow --one` exits after the first matching message, which makes it a wait in scripts:
 
 ```console
-plasmite serve status
-plasmite serve status --format json
+plasmite follow builds --tag ci --one
 ```
 
-The JSON form is an array. Each object has `pid`, `pool_dir` (an absolute
-path), `local_url`, and `remote_url`. `remote_url` uses the positional server
-URL, `--shared-address`, or a loopback HTTPS bind. It is `null` when the
-client-facing HTTPS address is unknown. Secure serving still has a remote
-listener.
+`fetch POOL SEQ` reads exactly one message:
 
-`serve status --all` also lists installed setups that stopped or failed.
-It remains global: `--dir` does not narrow it. Its JSON rows have
-`pool_dir`, nullable `pid`, `local_url`, nullable `remote_url`,
-`managed`, `startup`, `state`, nullable `problem`, and nullable `setup`.
-States include `running`, `starting`, `stopped`, and `failed`.
-The setup object holds the saved directory, executable, account, home, and
-serve options. An installed setup's addresses may describe saved settings
-rather than live listeners.
+| SEQ is | Result | Exit code |
+| --- | --- | --- |
+| Retained | Prints the message | 0 |
+| Already overwritten | `RetentionGap` | 9 |
+| The next unwritten sequence | `NotFound` | 3 |
+| Beyond the next unwritten sequence, or zero | `Usage` | 2 |
 
-## Saved connections
+Exact fetch over UDP also exits 3 if the subscription completes without receiving that sequence. Omit `--since`, `--last` and `--tag` when passing a positional sequence.
 
-`access list` lists this user's saved server destinations without contacting
-them. Use `access list --format json` for an array of objects with a `destination`
-field. `access status SERVER_URL` checks one destination's reachability and
-authorization. It prints the report and exits nonzero when the server is
-unreachable or rejects access.
+### Gaps
 
-An access key grants full access to every pool in the server’s pool directory:
-it can list, read, and append messages, and create or delete pools. For native
-remote access, the owner creates a key with `access invite NAME`; the recipient runs
-`access connect SERVER_URL` and enters the key at the hidden prompt. The client
-saves the connection for the current OS user. Remote `feed`, `follow`, and
-`duplex`, remote `fetch`, and remote pool inspection use saved credentials
-selected by destination. Use
-`access status SERVER_URL` to check the connection and `access disconnect SERVER_URL` to
-forget it locally, even while the server is offline. Disconnect does not
-revoke the server key. See [Share your first pool](record/serving.md#share-your-first-pool)
-for setup, and the [serving guide](record/serving.md) for access recovery and
-browser or MCP connections.
+A reader that falls behind can find that writers overwrote messages it hasn't read. Plasmite never skips them silently. It reports `RetentionGap` with `missing`, the first sequence you missed, and `next_seq`, the oldest sequence still retained:
 
-For shared pools, configure the harness to connect directly to the server's
-HTTPS `/mcp` address. The harness completes OAuth authorization in the browser;
-the local Plasmite CLI and its saved native connections are not involved. Local
-and direct HTTPS MCP follow the 2025-11-25 handshake and share the same tools
-and resources. See the [serving guide](record/serving.md#connect-an-ai-client)
-for setup and the [MCP contract](../spec/mcp/2025-11-25/SPEC.md) for message
-and HTTP details.
-
-## Messages and pipes
-
-`feed`, `fetch`, `follow`, and `duplex` use complete messages. A JSON message
-contains an object `data` and `meta.tags`, a list of strings. Stored messages
-also contain `seq` and `time`. When `feed` copies a message, it preserves the
-contents and tags and assigns a new destination sequence and time.
-
-```bash
-# Copy new messages, including their tags.
-plasmite follow source | plasmite feed destination
-
-# Change one field and preserve the rest.
-plasmite follow source |
-  jq -c '.data.temperature += 1' |
-  plasmite feed destination
-
-# Save retained messages and load them later.
-plasmite fetch source --last 100 > messages.jsonl
-plasmite feed destination < messages.jsonl
+```json
+{"error":{"hint":"Reopen at the next available sequence or rebuild from an authoritative source.","kind":"RetentionGap","message":"messages 1-187 are no longer retained; the next available message is 188","missing":1,"next_seq":188,"seq":1}}
 ```
 
-`feed` writes the complete newly appended message to stdout. This makes
-`feed first | feed second` a copying chain. Errors and notices go to stderr.
-A successful append remains stored if stdout later fails; Plasmite stops
-without retrying that append.
+`fetch` prints this on stderr and exits 9. `follow` prints it on stderr and continues at `next_seq`. Local and HTTP readers check for gaps before applying `--tag`. In UDP, the server checks for retention gaps before the client applies tags. A missing datagram produces no gap by itself. A UDP range fetch that completes after receiving an oversized or pressure skip notice exits 1.
 
-## Creating messages
+To resume after a restart, save the `seq` of the last message you handled and start the next run at `--since` that sequence plus one. The [cookbook](cookbook.md#resume-after-a-restart) shows the pattern.
 
-Ordinary JSON or YAML objects are application data; no flag is needed:
+## Writing
 
-```bash
-plasmite feed events '{"temperature":21}'
-plasmite feed events --tag sensor '{"temperature":21}'
-jq -c '.[]' readings.json | plasmite feed events
-```
-
-Pass a positional argument or redirect input to stdin. A complete message has exactly four fields, `seq`, `time`, `meta`, and `data`, with only `tags` inside `meta`. Source `seq` must be a positive unsigned integer, `time` can be any valid RFC 3339 timestamp, `meta.tags` must list strings, and `data` must be an object. Invalid messages with that exact shape produce `Usage`. Objects with partial envelopes or extra fields count as application data.
-
-`--tag` adds tags to application objects. Complete messages supply their own tags and reject `--tag`. Non-object application data produces `Usage`.
-
-Use `feed --create` to create a missing pool at the default size. To choose
-a size, run `pool create --size SIZE` first.
-
-## Formats
-
-Global `--format pretty|json|yaml|lite3|lite3-raw` chooses output before or after a command. With no flag, a terminal gets readable output and a pipe or file gets compact JSON. `--format` controls output only.
-
-| Format | Output and input |
-| --- | --- |
-| `pretty` | Readable JSON messages; JSON input accepts them |
-| `json` | One compact JSON message per line; input also accepts multiline objects |
-| `yaml` | One YAML document per message, starting with `---` and ending with `...` |
-| `lite3` | A binary stream with a versioned prefix and a length for each message |
-| `lite3-raw` | One raw attachment through EOF; fetch output only |
-
-`feed` detects JSON, marked YAML, and framed Lite3 from their syntax as soon as the first message arrives. It never guesses a message's meaning from application keys. `--input-format auto|json|yaml|lines|lite3|lite3-raw` selects an explicit input encoding. Explicit YAML also accepts one unmarked document through EOF. YAML input accepts JSON-compatible values and rejects custom tags, aliases, non-string keys, and non-finite numbers.
-
-Use `--input-format lines` to store each UTF-8 line as `{"line":"..."}`. It keeps blank lines and the last line even if it lacks a newline.
-
-```bash
-plasmite follow source --format yaml | plasmite feed destination
-plasmite follow source --format lite3 | plasmite feed destination
-plasmite fetch source 1 --format lite3-raw > heartbeat.lite3
-plasmite feed destination --input-format lite3-raw < heartbeat.lite3
-```
-
-Framed Lite3 starts with the four bytes `PLS2`. Each record starts with `M` and a four-byte body length. The body holds an eight-byte sequence, an eight-byte timestamp in nanoseconds and the original Lite3 payload. Integers use big-endian byte order. Raw attachments have no prefix or record header. Copying preserves the original Lite3 payload bytes.
-
-Each Lite3 payload may occupy at most 256 MiB and must fit the destination pool. The text reader permits encoding overhead rather than imposing the old 1 MiB record limit. Remote servers keep their configured request-body limit (1 MiB by default); use `serve --max-body-bytes` when larger messages need remote delivery. Truncated or malformed input stops the command and returns nonzero. Earlier successful appends remain. Empty input streams succeed without appending anything.
-
-Reports use the same JSON/YAML formatting rule but remain reports. Binary formats require message commands; raw output requires `fetch`. Help and completion remain text. `mcp` keeps JSON-RPC. `duplex` accepts the same messages as `feed` on terminal and piped stdin and streams received complete messages, including its own appends. Input EOF closes sending while reception continues. Stop the process or close stdout to end the receive session. Use `feed` for finite copying. See the [2.0 upgrade guide](record/upgrading-2.0.md) for migration.
-
-Bash and Zsh preserve binary pipes. PowerShell 7.4 and later preserves native binary redirection; earlier versions need `cmd.exe` redirection.
-
-## Reading history
-
-`follow POOL` waits for new messages. Use `--last N` to read N retained messages before waiting for new ones. `--since` accepts `oldest`, an inclusive sequence, an RFC 3339 time or a duration such as `5m`. Use `--one` to wait for one matching message and exit in any shell.
-
-`fetch POOL` reads retained history and exits. It takes the same start and tag options. Supply a sequence as a positional argument to fetch one message.
+`feed POOL [OBJECT]` appends one message per object, taken from the argument or piped through stdin. Local and HTTP feeds print each stored message to stdout. UDP feed prints a notice to stderr and returns without a storage receipt.
 
 ```console
-plasmite fetch events
-plasmite fetch https://pools.example.net:9743/events --since 5m --format json
-plasmite follow events --since 101 --tag gfx --one
+plasmite feed events '{"step": "test", "status": "ok"}'
+plasmite feed events --tag deploy --tag api '{"sha": "f4e5d6c"}'
+jq -c '.[]' readings.json | plasmite feed sensors
 ```
 
-UDP follows use their separate [arrival-order delivery policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices).
+`data` must be an object. Other values fail with `Usage`. `--create` creates a missing local or HTTP pool at the default size of 1 MiB. Run `pool create POOL --size SIZE` on the server or the local machine to choose another size. UDP requires an existing pool. Invalid input stops `feed` with a nonzero exit, and earlier appends stay in the pool. Empty input succeeds and appends nothing.
 
-A fetch stops at the last sequence that existed when the read opened. `--last` counts retained messages before filtering. Repeat `--tag` to require every specified tag. Use `jq` after Plasmite to filter on data fields.
+### Input formats
 
-If the pool overwrites a live reader's next message, `follow` reports the lost range on stderr and continues at the first sequence still retained. `fetch` reports a `RetentionGap` and exits nonzero.
+By default `feed` detects the stream's format from its opening bytes. It accepts JSON objects separated by whitespace (one object may span lines), YAML documents marked with `---` and `...`, and framed Lite3 starting with `PLS2`. `--input-format json|yaml|lite3|lite3-raw|lines` names one format. Explicit `yaml` also accepts a single unmarked document. YAML input requires JSON-compatible values with string keys and rejects custom tags, aliases, duplicate keys and non-finite numbers. `lite3-raw` reads one Lite3 attachment through end of input. Both explicit Lite3 input modes require stdin and take their tags from the messages.
 
-## Errors and exits
+### Lines
 
-Errors and notices go to stderr. They follow the selected text format: readable
-text in a terminal, compact JSON in a pipe or file, or marked YAML with
-`--format yaml`. Binary output uses readable diagnostics. Help stays readable text.
-General exit codes are mapped by error kind; these command workflows
-also have specific meanings:
+`--input-format lines` stores each UTF-8 line of text as `{"line": "..."}`. It keeps blank lines, removes a trailing `\r`, and stores a final line that lacks a newline. Invalid UTF-8 fails with `Usage` at that line, after the earlier lines are stored.
 
-- `feed` stops on invalid input; earlier successful appends remain stored.
-- `pool delete` is nonzero if any requested deletion fails.
-- `doctor` is nonzero if any inspected pool is corrupt.
+```console
+make 2>&1 | plasmite feed builds --input-format lines
+```
 
-For examples, see the [cookbook](cookbook.md). For stable scripting contracts,
-see the [2.0 CLI contract](../spec/v2/SPEC.md#cli).
+### Forwarded messages
+
+An object with exactly `seq`, `time`, `meta` (holding only `tags`) and `data` is a complete message. `feed` keeps its data and tags and gives it a new sequence and time in the destination pool. This lets the output of `fetch` or `follow` flow straight into `feed`:
+
+```console
+plasmite follow events | plasmite feed archive
+```
+
+A complete message brings its own tags, so adding `--tag` fails with `Usage`. An object with that exact shape but an invalid field (a zero `seq`, a bad timestamp, non-string tags or non-object `data`) also fails with `Usage`. Objects with only some of those fields, or extra ones, are ordinary data.
+
+### Durability and size
+
+`--durability fast`, the default, returns once the message is in the pool. `--durability flush` also waits for storage to flush it to disk.
+
+The encoded message payload can hold up to 256 MiB and the full record must fit in the pool. An HTTP server accepts request bodies up to 1 MiB unless it runs with `serve --max-body-bytes`. UDP accepts datagrams up to 65,507 bytes, including routing and framing, and supports only fast durability.
 
 ### Retrying writes
 
-A local flush or remote connection can fail after the pool stores the message.
-Check the pool before sending it again.
+A local flush or remote connection can fail after the pool stores the message. Check the pool before sending it again.
+
+## Output formats
+
+With no `--format`, a terminal gets readable output and a pipe or file gets compact JSON. `--format` sets the output encoding only; `--input-format` sets the input.
+
+| Format | Output |
+| --- | --- |
+| `pretty` | Readable, indented JSON |
+| `json` | One compact JSON message per line |
+| `yaml` | One YAML document per message, starting with `---` and ending with `...` |
+| `lite3` | A binary stream: the bytes `PLS2`, then each message with its length |
+| `lite3-raw` | One message's raw Lite3 bytes; `fetch POOL SEQ` only |
+
+You can pipe JSON, YAML and framed Lite3 directly into `feed`. Use `--input-format lite3-raw` to import a raw attachment. If you force `--format pretty`, also pass `--color never` to produce plain JSON. Reports such as `pool info` follow the same JSON and YAML rules. Binary formats apply to messages only. The [binary stream contract](../spec/v2/SPEC.md#binary-stream) gives the Lite3 layout.
+
+```console
+plasmite follow sensors --format lite3 | plasmite feed archive
+plasmite fetch sensors 1 --format lite3-raw > reading.lite3
+```
+
+Bash and Zsh preserve bytes in a binary pipe. PowerShell 7.4 and later preserves bytes between native commands and when redirecting native stdout to a file. For older PowerShell, run the binary pipeline in `cmd.exe`.
+
+## Duplex
+
+`duplex POOL` sends and receives in one session. It detects JSON, marked YAML and framed Lite3 on stdin, including when you type input at a terminal. Duplex opens its reader before it sends the first message, so its own appends are eligible for output along with messages from other writers. Retention can still overtake the reader, and UDP can lose datagrams.
+
+```console
+plasmite duplex chat --create --last 20
+```
+
+End of input stops sending. Reception continues until you stop the process, the read fails, or Plasmite detects that the downstream command closed the pipe. Use `feed` to copy a finite input and exit. Duplex takes `--since` or `--last` and supports `--create` for local and HTTP pools.
+
+## Errors and exit codes
+
+Errors and notices go to stderr. They use the selected output format for text commands and readable text for binary commands. With no `--format`, Plasmite chooses readable text or JSON based on whether stdout is a terminal.
+
+| Exit code | Error kind | Typical cause |
+| --- | --- | --- |
+| 0 | | Success |
+| 1 | `Internal` | An unexpected failure, including a server error |
+| 2 | `Usage` | Bad arguments or invalid input |
+| 3 | `NotFound` | Missing pool, or `fetch POOL SEQ` for the next unwritten sequence |
+| 4 | `AlreadyExists` | `pool create` for an existing pool |
+| 5 | `Busy` | Another process holds the pool, directory or resource |
+| 6 | `Permission` | The OS or server refused access |
+| 7 | `Corrupt` | Pool file damage |
+| 8 | `Io` | A disk or network failure |
+| 9 | `RetentionGap` | The read needed messages the pool already overwrote |
+
+Some outcomes that scripts depend on:
+
+- An empty `fetch` exits 0. Text output is empty and framed Lite3 output contains only `PLS2`.
+- `follow --one` exits 0 after printing its message.
+- On Linux and macOS, `follow` exits 0 when the downstream command closes the pipe, as in `plasmite follow events | head -1`, even while the pool is quiet. Use `--one` in scripts that must also work in PowerShell.
+- `follow` reports a retention gap on stderr and keeps running; `fetch` exits 9.
+- `pool delete` exits nonzero if any requested deletion fails, and `doctor` exits nonzero if any inspected pool is corrupt.

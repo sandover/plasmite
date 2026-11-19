@@ -1,7 +1,7 @@
 # Checked portable Node views
 
-Remote-only installations use the same checked Lite3 snapshots and input builder
-as native bindings. The private JavaScript adapter supplies the existing Proxy
+The JavaScript HTTP client uses the same checked Lite3 snapshots and input
+builder as native bindings. The private JavaScript adapter supplies the Proxy
 protocols; it does not parse or write the physical format. The packaged Wasm
 module needs no native addon, compiler, WASI runtime, files, network or clock
 imports. The host loader targets Node 24+.
@@ -61,6 +61,7 @@ link into the module. The final import check enforces that boundary. The package
 includes the upstream musl copyright notice for the standalone `memchr` code.
 
 ```sh
+cd bindings/node
 rustup target add wasm32-unknown-unknown
 WASI_SDK_PATH=/path/to/wasi-sdk-34.0-arm64-macos npm run build:portable
 npm run check:portable
@@ -92,10 +93,6 @@ Explicit tags rebuild one owner. Successful requests leave release to the
 returned view's lifetime. The encoded-only helper still releases its temporary
 owner immediately.
 
-The final shared-source refresh produces SHA
-`648b62f63d3e2cd196fcc2b3e85bd4c814afaeb19ea56bdca7a02d7907e01aff`.
-Two independent release builds produce the same 114,270 bytes. Compared with the
-measured `96de040...` artifact, one data byte changes the panic source line from
-251 to 255 after a shared helper adds four lines. Executable code and all other
-sections match. The package manifest now tracks the integrated shared source;
-historical performance evidence keeps its original artifact and source archive.
+The [package manifest](../portable/manifest.json) records the current artifact's
+size, checksum and source hashes. The [performance report](../../../docs/performance/language-boundary-results/portable-views/README.md)
+records the artifact and source archive used for the historical measurements.

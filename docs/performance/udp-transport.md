@@ -7,7 +7,7 @@ approved on 2026-11-11. Keep these measurements as historical evidence.
 
 On this Mac, both transports delivered about 195–199 useful messages per second when one sender offered 200 per second. That rate comes from the fixed workload, so it says nothing about either transport's maximum throughput. UDP delivered 8,997 of 9,000 expected follower copies. HTTP delivered 9,000 of 9,000. The three UDP skips occurred with 16 KiB data and four followers. Every send returned success in the final run, which shows why a successful UDP send cannot stand in for delivery or storage confirmation.
 
-The Rust API uses separate paths. `UdpPool::send_lite3` returns when the operating system accepts a datagram. `RemotePool::append_lite3` returns a committed sequence from the HTTP server. UDP follow uses its connected UDP socket; it does not call HTTP. The table measures send start to receipt of the full, exact Lite3 attachment by a follower. It does not use the pool timestamp as a commit clock.
+The measured Rust client used `UdpPool::send_lite3`, which returned when the operating system accepted a datagram, and `RemotePool::append_lite3_now`, which returned a committed sequence from the HTTP server. The table measures time from the start of the send to the follower's receipt of the full Lite3 attachment, using the local monotonic clock.
 
 ## Measured results
 
@@ -46,7 +46,7 @@ The [maximum-packet probe](udp-transport-results/max-probe.txt) sent one valid 6
 
 ## Reproduce
 
-Run from the repository root on a host that permits loopback sockets. The harness starts one local Plasmite server, creates disposable pools under the system temporary directory, then stops the server and removes that directory. It makes no changes to saved access settings.
+Use a disposable checkout at `fd3823c`, which contains the [1.x harness](https://github.com/sandover/plasmite/blob/fd3823cd9701346d4302caadb791866851fdcdb0/docs/performance/udp-transport-bench.rs) and the APIs it calls. The host and binary fingerprints above identify the exact measured build. Run from the checkout root on a host that permits loopback sockets. The harness starts one local Plasmite server with disposable pools and access settings, then stops it and removes its temporary directory.
 
 ```sh
 cargo build --release --bin plasmite --lib

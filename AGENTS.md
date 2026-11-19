@@ -12,7 +12,7 @@ docs/
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
 ├── performance/README.md                      — Read when choosing a performance report or measuring a change
 ├── performance/udp-transport.md               — Read when assessing UDP versus HTTP delivery, measured latency, or maximum datagram support
-├── performance/udp-transport-bench.rs          — Read when reproducing the matched UDP and HTTP transport measurements
+├── performance/udp-transport-bench.rs          — Read with the UDP transport report for the historical benchmark and its matching checkout
 ├── performance/udp-transport-results/          — Read when checking the raw runs and host setup behind the UDP measurements
 ├── performance/transport-comparison.md        — Measured transport throughput; read when comparing native API and MCP paths
 ├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
@@ -45,18 +45,18 @@ docs/
 ├── record/architecture.md                      — Implementation architecture; read when changing internals or layering
 ├── record/testing.md                           — Test strategy + commands; read when adding/fixing tests
 ├── record/releasing.md                         — Release policy + versioning; read for what/why (mechanics live in release skill)
-├── record/upgrading-2.0.md                    — Read when moving 1.x applications, scripts and HTTP clients to 2.0
-├── record/upgrading-1.2.md                     — Read when migrating CLI scripts to complete-message pipes and shared formats
-├── record/upgrading-1.0.md                     — Read when updating scripts, remote configuration, or Rust clients to 1.0
+├── record/upgrading-2.0.md                    — Read when moving any 1.x application, script, HTTP or MCP client to 2.0
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
 ├── record/serving.md                           — Read when sharing pools, setting browser trust, or operating a secure server
 │
 │   Dated platform checks
 ├── validation/README.md                       — Read when finding dated platform checks and their support limits
-├── validation/windows-boot-validation.md           — Read when assessing native Windows service checks and their support boundary
+├── validation/windows-boot-validation.md           — Read when assessing Windows service and macOS LaunchDaemon checks and their limits
 ├── validation/debian-vm-validation/               — Read when inspecting collector code and raw VM observations
 ├── validation/debian-vm-validation.md              — Read when checking Linux service startup, reboot recovery, failed writes, and sensor guidance
+├── validation/arm-sdk-ci.md                        — Read when checking what the first Linux ARM SDK CI run established
+├── validation/dependency-audit-2026-02-08.md       — Read when reviewing the 1.x-era dependency and supply-chain risk audit
 │
 ├── images/README.md                            — Read when reproducing README diagrams or terminal/browser recordings
 └── images/ui/                                  — UI screenshots; read when updating docs/UI references

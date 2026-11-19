@@ -217,7 +217,7 @@ serve-dev: _serve-kill
 	@echo "serve-dev: server running (pid $(cat {{_dev_pid}}))"
 	@echo "serve-dev: http://{{_dev_bind}}/ui"
 	@echo "serve-dev: log at {{_dev_log}}"
-	@echo "serve-dev: HTTPS access: {{_dev_bin}} --dir {{_dev_pool_dir}} access invite --name <client>"
+	@echo "serve-dev: HTTPS access: {{_dev_bin}} --dir {{_dev_pool_dir}} access invite <client>"
 	@echo "serve-dev: find its HTTPS address with {{_dev_bin}} serve status"
 	@echo "serve-dev: sandbox-safe one-shot: just serve-with '<command>'"
 	@echo "serve-dev: stop with 'just serve-stop'"

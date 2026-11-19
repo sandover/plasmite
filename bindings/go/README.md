@@ -1,373 +1,212 @@
-# Plasmite Go Bindings
+# Plasmite for Go
 
-These bindings wrap the `libplasmite` C ABI via cgo and expose typed Go contracts.
-`Feed` returns the committed `*Message`. `Follow` reads new messages and `Fetch`
-reads retained history. Use the view methods for selected reads, typed decoding
-and forwarding encoded data.
-Owned views keep immutable encoded bytes in Go memory and need no per-message
-`Close`. These bindings operate on local pools and UDP endpoints; they do
-not expose the Rust/CLI secure native access-key client. Messages disappear
-when the bounded ring fills, independent of consumer progress.
+Plasmite stores JSON messages in pools: bounded ring buffers on disk that many processes can write and read at once. `Feed` writes a message, `Follow` waits for new ones, and `Fetch` reads what the pool holds and stops. Each message carries a sequence number (`Seq`), a time, tags and a JSON object as `Data`. When a pool fills, the oldest messages make room for new ones. These packages open local pools, pools on a shared HTTPS server and UDP endpoints. The [project README](https://github.com/sandover/plasmite#readme) explains the model and the CLI.
 
-See [distribution and SDK setup](https://github.com/sandover/plasmite/blob/main/docs/record/distribution.md) for native
-prerequisites and the [1.0 upgrade guide](https://github.com/sandover/plasmite/blob/main/docs/record/upgrading-1.0.md)
-for CLI and sharing changes.
-
-## Package Layout
-
-- `github.com/sandover/plasmite/bindings/go/local` — cgo-backed local client and pool operations.
-- `github.com/sandover/plasmite/bindings/go/api` — pure Go contracts and shared model types.
-- `github.com/sandover/plasmite/bindings/go/udp` — cgo-backed UDP sender and follower.
-
-Install the local binding package in a downstream module:
+## Install
 
 ```bash
-go get github.com/sandover/plasmite/bindings/go/local
+go get github.com/sandover/plasmite/bindings/go/v2/local@v2.0.0
 ```
 
-## Build Requirements
-- Go 1.22+
-- `pkg-config` (`pkgconf`) available on PATH
-- `libplasmite` SDK installed (recommended on macOS: `brew install sandover/tap/plasmite`)
+The bindings use cgo and need Go 1.22 or newer, `pkg-config` and the Plasmite 2.x SDK. On macOS, `brew install sandover/tap/plasmite` installs the SDK; [distribution](https://github.com/sandover/plasmite/blob/main/docs/record/distribution.md) covers other platforms.
 
-## Build & Test
-From the repo root:
+For an SDK unpacked into a private directory, point `PKG_CONFIG_PATH` at its `lib/pkgconfig` directory. For programs that ship with a fixed SDK path, set `CGO_LDFLAGS="-Wl,-rpath,$(pkg-config --variable=libdir plasmite)"` at build time so the system loader can find the shared library. You can also set `LD_LIBRARY_PATH` on Linux or `DYLD_LIBRARY_PATH` on macOS when running the program.
 
-```bash
-cargo build -p plasmite
-```
+| Package | Contents |
+| --- | --- |
+| `bindings/go/v2/local` | Clients and pools, local or HTTPS |
+| `bindings/go/v2/udp` | UDP sender and follower |
+| `bindings/go/v2/api` | Shared types such as `Message` and `Error`, with no cgo |
 
-Canonical repo-root command:
+## Quick start
 
-```bash
-just bindings-go-test
-```
-
-Equivalent system-SDK command (from `bindings/go`):
-
-```bash
-go test ./...
-```
-
-Development override (repo-local library without Homebrew install):
-
-```bash
-cargo build -p plasmite
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
-PKG_CONFIG=/usr/bin/true \
-CGO_CFLAGS="-I$(pwd)/../../include" \
-CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
-go test ./...
-```
-
-`just bindings-go-test` runs this override automatically for CI and local development.
-
-## Usage
+Record a temperature reading, watch for it, then read recent history. The examples in this README use the `must` helper shown here to keep error handling short.
 
 ```go
 package main
 
 import (
-    "context"
-    "fmt"
-    "time"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
 
-    plasmite "github.com/sandover/plasmite/bindings/go/local"
+	plasmite "github.com/sandover/plasmite/bindings/go/v2/local"
 )
+
+func must[T any](value T, err error) T {
+	if err != nil {
+		log.Fatal(err)
+	}
+	return value
+}
 
 func main() {
-    client, err := plasmite.NewClient("./data")
-    if err != nil {
-        panic(err)
-    }
-    defer client.Close()
+	ctx := context.Background()
+	client := must(plasmite.NewClient("./data"))
+	defer client.Close()
+	pool := must(client.OpenPool("sensors", plasmite.Create(true)))
+	defer pool.Close()
 
-    pool, err := client.OpenPool("events", plasmite.Create(true))
-    if err != nil {
-        panic(err)
-    }
-    defer pool.Close()
+	live := must(pool.Follow(plasmite.Tags("kitchen")))
+	must(pool.Feed(map[string]any{"temp_c": 21.4}, []string{"kitchen"}))
+	fmt.Println(string(must(live.Next(ctx)).Data)) // {"temp_c":21.4}
+	live.Close()
 
-    live, err := pool.Follow(plasmite.Tags("sensor"))
-    if err != nil {
-        panic(err)
-    }
-    defer live.Close()
-
-    stored, err := pool.Feed(map[string]int{"temperature": 23}, []string{"sensor"})
-    if err != nil {
-        panic(err)
-    }
-    ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-    defer cancel()
-    received, err := live.Next(ctx)
-    if err != nil {
-        panic(err)
-    }
-    fmt.Println(received.Seq, received.Time, string(received.Data))
-
-    history, err := pool.Fetch(plasmite.Since(stored.Seq))
-    if err != nil {
-        panic(err)
-    }
-    defer history.Close()
-    replayed, err := history.Next(ctx)
-    if err != nil {
-        panic(err)
-    }
-    fmt.Println(string(replayed.Data))
+	recent := must(pool.Fetch(plasmite.Last(10)))
+	defer recent.Close()
+	for {
+		message, err := recent.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(message.Seq, message.Tags(), string(message.Data))
+	}
 }
 ```
 
-`Follow` opens on new messages. `Fetch` reads retained history and returns
-`io.EOF` after the last message present at opening. Each `Next` takes a
-context. `Pool.Info` reports the currently retained range.
+`Follow` fixes its position before it returns, so it sees the feed that comes after it. `Fetch` returns `io.EOF` after the last message present when it opened. `Message.Data` holds the raw JSON and `Message.Time` counts Unix nanoseconds. `pool.Info()` reports the oldest and newest retained sequence in `Bounds`. `NewDefaultClient()` uses the default directory, `~/.plasmite/pools`. Use `client.CreatePool(ref, sizeBytes)` to choose a size; `Create(true)` makes a 1 MiB pool.
 
-### UDP sender and follower
+## Reading
 
-The `udp` package takes an explicit endpoint and opens a named pool. Sending
-returns an error only for local validation or operating-system send failures;
-a nil error does not confirm storage. A follower yields frames, explicit server
-skip notices, and progress events. Its context cancels a blocked wait within
-50 milliseconds. The
-[receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
-arrival-order delivery, including late messages and duplicates; sequence/progress
-jumps never establish loss or suppress frames. This source change awaits a
-major release.
-Finite follows end on terminal progress and may leave DATA in flight.
+Every read starts at a position. `Follow` starts at the next new message by default; `Fetch` starts at the oldest retained one.
 
 ```go
-import (
-    "context"
-    "encoding/json"
-    "errors"
-    "io"
-    "time"
+plasmite.Since("oldest")                         // everything the pool still holds
+plasmite.Since(42)                               // sequence 42 onward, inclusive
+plasmite.Since(5 * time.Minute)                  // or Since("5m")
+plasmite.Since("2026-11-19T09:00:00Z")           // RFC 3339, or a time.Time
+plasmite.Since(plasmite.At(1795078800000000000)) // the same time as Unix nanoseconds
+plasmite.Last(20)                                // the 20 most recent messages
+plasmite.Tags("error")                           // only messages carrying every listed tag
+```
 
-    "github.com/sandover/plasmite/bindings/go/udp"
-)
+Pass these options to `Fetch` or `Follow`, as in `pool.Fetch(plasmite.Since("oldest"), plasmite.Tags("error"))`. Use `Since` or `Last`, not both.
 
-client, err := udp.NewClient("udp://127.0.0.1:9701")
-if err != nil {
-    panic(err)
+Resume after a restart by saving the next sequence to read. If the pool overwrote messages before you read them, opening the reader or calling `Next` can return `RetentionGap`. This example also uses `os` and `strconv`.
+
+```go
+start := any("oldest")
+saved, err := os.ReadFile("sensors.seq")
+if err == nil {
+	start = must(strconv.ParseUint(string(saved), 10, 64))
+} else if !errors.Is(err, os.ErrNotExist) {
+	log.Fatal(err)
 }
-defer client.Close()
-
-pool, err := client.OpenPool("sensors")
-if err != nil {
-    panic(err)
+save := func(seq uint64) {
+	if err := os.WriteFile("sensors.seq", []byte(strconv.FormatUint(seq, 10)), 0o644); err != nil {
+		log.Fatal(err)
+	}
 }
-defer pool.Close()
 
-follow, err := pool.Follow()
-if err != nil {
-    panic(err)
+read := func() error {
+	reader, err := pool.Follow(plasmite.Since(start))
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	for {
+		message, err := reader.Next(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(message.Data))
+		save(message.Seq + 1)
+	}
 }
-defer follow.Close()
-
-if err := pool.Feed(map[string]any{"temperature": 23}, []string{"sensor"}); err != nil {
-    panic(err)
-}
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
 for {
-    event, err := follow.Next(ctx)
-    if errors.Is(err, io.EOF) {
-        break
-    }
-    if err != nil {
-        panic(err)
-    }
-    if frame, ok := event.(*udp.Frame); ok {
-        var data map[string]any
-        if err := json.Unmarshal(frame.Message.Data, &data); err != nil {
-            panic(err)
-        }
-        _ = data["temperature"]
-        break
-    }
+	err := read()
+	var gap *plasmite.Error
+	if errors.As(err, &gap) && gap.Kind == plasmite.ErrorRetentionGap {
+		log.Printf("lost %d..%d; resuming at %d", gap.Missing, gap.NextSeq-1, gap.NextSeq)
+		save(gap.NextSeq)
+		start = gap.NextSeq
+		continue
+	}
+	log.Fatal(err)
 }
 ```
 
-`Next` returns a `*udp.Frame`, `*udp.Skip`, or `*udp.Progress` through the
-`udp.Event` interface. Frames include the original Lite3 bytes and a decoded
-`*api.Message`. Cancel the context to stop a blocked wait. A UDP follow requires
-the server's explicit `--udp-follow` setting; it never switches to HTTP.
+`gap.Missing` is the first sequence you missed and `gap.NextSeq` the oldest one still retained. Saving `NextSeq` accepts the loss and moves on.
 
-### Concurrent use
+Each `Next` takes a context. Cancelling that context stops the wait and leaves the reader open. A native file operation already waiting on an operating system lock can delay the return. Call `Close` when you finish reading.
 
-Client, pool and reader methods serialize access to each native handle. A reader
-owns a separate handle and can keep reading after its pool closes. A context
-deadline bounds each `Next(ctx)` call, including time spent waiting for another
-call on the same reader.
+## HTTPS pools and UDP
 
-For playback timing, use ordinary streams and an application scheduler; see the
-[2.0 upgrade guide](../../docs/record/upgrading-2.0.md#applications-control-playback-timing).
-
-Native readers transfer their fresh JSON buffer into `Message.Raw` without a
-second copy. `Message.Data` keeps independent storage, so changing Raw does not
-change Data. `api.DecodeMessage` still copies caller-provided raw bytes;
-`api.DecodeOwnedMessage` lets an adapter transfer a fresh buffer explicitly.
-After that transfer, the caller must not mutate or reuse the input slice.
-
-## Numeric feed receipts
+To use a pool on a shared server, connect once with `plasmite access connect https://pools.example.net:9743`, then open the pool by URL. Client-wide `ListPools()` still lists the local directory.
 
 ```go
-receipt, err := pool.FeedReceipt(map[string]any{"temperature": 23.5}, []string{"sensor"})
-// receipt.Seq and receipt.Time are exact uint64 values.
-```
-
-`FeedJSONReceipt` accepts JSON bytes and `FeedLite3Receipt` accepts encoded
-Lite3 bytes. These calls return the committed sequence and time.
-
-## Managed owned views
-
-`FetchView` and `FollowView` give the caller independent immutable Lite3
-snapshots. A view remains valid after the reader closes or the pool overwrites
-the message.
-
-```go
-reader, err := pool.FetchView(plasmite.Since(seq))
-if err != nil { return err }
-defer reader.Close()
-message, err := reader.Next(ctx)
-if err != nil { return err }
-var reading struct {
-    Sensor string `json:"sensor"`
-    Metrics struct { Power int64 `json:"power"` } `json:"metrics"`
-}
-if err := message.Decode(&reading); err != nil { return err }
-
-selection, err := plasmite.Prepare("/sensor", "/metrics/power")
-if err != nil { return err }
-defer selection.Close() // reuse this small prepared plan across messages
-values, err := selection.Read(message)
-if err != nil { return err }
-sensor, sensorPresent := values[0].String()
-power, powerPresent := values[1].Int64()
-fmt.Println(sensor, sensorPresent, power, powerPresent)
-```
-
-Identity uses `message.Seq()` and `message.Time()`, which returns Unix nanoseconds. `Data()` and `Meta()` return child references. `Decode`
-builds an independent ordinary value with `encoding/json` semantics. `DataJSON`
-and `JSON` format the data subtree and canonical complete envelope respectively;
-`Meta().JSON()` keeps all stored metadata fields. `Lite3()` returns a detached
-mutable copy. Strings and bytes extracted from selected values own their data.
-Closing a prepared selector waits for its active reads; message reads need no
-pool lock after acquisition. Children retain their original encoded/proof buffers
-when a caller reassigns `*MessageView`; copying a wrapper copies only immutable
-slice headers, not payload bytes.
-
-The [Go view measurements](../../docs/performance/language-boundary-results/owned-views/go/README.md)
-cover sparse reads, typed decoding, full conversion, cgo crossings, allocation
-counts and the initial-buffer memory tradeoff. Complete exact structs use keyed lookups. Partial ASCII structs scan only
-selected objects and skip unrequested subtrees; Unicode/ambiguous aliases and
-complex Go types keep the standard JSON fallback. The measurements include full
-conversion costs and the small-read buffer retention tradeoff.
-
-## Native producers
-
-`FeedView` walks ordinary Go values into Lite3 and returns their committed
-snapshot. `FeedJSONView` accepts explicit JSON source. Both return Go-managed
-views.
-
-```go
-message, err := pool.FeedView(
-    map[string]any{"sensor": "north", "samples": []byte{0, 127, 255}},
-    []string{"sensor"},
-)
-if err != nil { return err }
-
-// Forward the whole encoding and tags, with a new identity.
-forwarded, err := pool.FeedView(message, nil)
-if err != nil { return err }
-fmt.Println(forwarded.Seq())
-```
-
-Native signed/unsigned integers must fit i64. Finite floats stay binary64;
-float32 promotes its exact value. Native `[]byte` becomes Lite3 bytes: nil becomes
-null and a nonnil empty slice stays empty bytes. Explicit JSON and custom
-`MarshalJSON` output keep their JSON types, including base64 strings. Standard
-JSON exports format native bytes as base64; typed `Decode` and `Value.Bytes`
-produce independent mutable byte slices.
-
-The encoder follows Go's field promotion, tag dominance, `omitempty`, `string`,
-map-key `TextMarshaler` and addressable pointer-method rules. Go 1.24 and newer
-also honor `omitzero`; older supported compilers ignore it as their JSON library
-does. JSON/Text hooks run once in the usual visit order. Map values snapshot
-before sorted-key callbacks; mutable byte values snapshot at visit, so a later
-hook cannot rewrite an earlier value. Custom JSON subtrees parse once, while
-ordinary floats and other fields stay native.
-
-The binding pins immutable strings and private view buffers only during its
-synchronous native call. C retains no Go pointers. It releases the pool mutex
-before copying the checked producer snapshot into aligned Go memory, and reuses
-the construction proof. Closing a pool inside a serializer causes a closed-handle
-error before publication. `json.Marshal(message)` and `json.Marshal(message.Data())`
-use the normal Go marshaler interface for explicit JSON conversion.
-
-
-## Owned local and UDP streams
-
-`FollowView` and `FetchView` return readers with `Next(ctx)` and `Close()`.
-They take the same `Since`, `Last` and `Tags` options as `Follow` and `Fetch`.
-Use the context to set a deadline or cancel a wait. The reader can outlive the
-pool handle.
-
-```go
-stream, err := pool.FollowView(local.Since(first))
-if err != nil { return err }
-defer stream.Close()
-message, err := stream.Next(ctx)
-if err != nil { return err }
-var reading struct { Value int64 }
-if err := message.Decode(&reading); err != nil { return err }
-forwarded, err := destination.FeedView(message, nil)
-```
-
-Whole-message `FeedView(message, nil)` retains the exact payload and tags, commits
-it with fresh destination identity and shares the immutable Go backing storage.
-A nonnil tag slice is an error when forwarding a message. Feed `message.Data()`
-to supply new tags. Independent mutable
-exports still copy. An append option can close the destination or reassign the
-caller's source variable without changing the source snapshot already visited.
-
-`udp.Pool.FollowView` uses the `Follow.Next(ctx)`, `Cancel` and `Close`
-lifecycle. DATA arrives as `*udp.ViewFrame` with an ordinary
-`*local.MessageView` in `View`; Skip and Progress keep their existing types.
-`FollowLite3` returns the exact owned payload. `Follow` also decodes the message.
-All three retain arrival order, late and
-duplicate packets, server skip/progress records and finite completion. No
-receive adapter infers packet loss or adds retransmission.
-
-A native receiver validates each incoming owner once. Go copies its bytes and
-relative duplicate-key proof into aligned private Go allocations, then releases
-the native owner. It performs no second validation and builds no data tree.
-Both the C receiver snapshot and the final Go snapshot copy payload bytes; the
-binding retains Go-managed storage without a per-message Close. Children and
-forwarded messages remain valid after source pool/follow/stream close.
-
-[Go stream benchmark coverage and fixed builds](../../docs/performance/language-boundary-results/owned-views/go/streams/README.md)
-separate receive/copy costs, explicit conversion, forwarding and packet pacing.
-
-## Follow and fetch
-
-Open a reader with `pool.Follow()` for new messages or `pool.Fetch()` for
-retained history. Pass `Since` or `Last` to select a starting point and use
-`Tags` to require tags. `Since` accepts an inclusive sequence, `"oldest"`,
-a duration, or an instant marked by `At`. Each `Next(ctx)` call uses its own
-context and leaves the reader open if the context expires. Call `Close` when
-you finish reading.
-
-### HTTPS pools
-
-Save a connection with `plasmite access connect https://pools.example.net:9743`, then pass the HTTPS pool reference to the same client.
-
-```go
-pool, err := client.OpenPool("https://pools.example.net:9743/events", plasmite.Create(true))
-if err != nil { return err }
+pool := must(client.OpenPool("https://pools.example.net:9743/sensors", plasmite.Create(true)))
 defer pool.Close()
-_, err = pool.Feed(map[string]any{"ready": true}, []string{"status"})
+must(pool.Feed(map[string]any{"temp_c": 21.4}, []string{"kitchen"}))
 ```
 
-`CreatePool` accepts the same reference and an explicit size. Use `WithDurability` on any feed variant to request a flush.
+UDP trades delivery guarantees for low overhead. A nil error from a send means the operating system accepted the datagram. Reads deliver frames in arrival order, including duplicates and late arrivals. Before running this example, create `sensors` with `plasmite pool create sensors` and run `plasmite serve --udp-follow` in another terminal.
+
+```go
+import "github.com/sandover/plasmite/bindings/go/v2/udp"
+
+client := must(udp.NewClient("udp://127.0.0.1:9701"))
+defer client.Close()
+pool := must(client.OpenPool("sensors"))
+defer pool.Close()
+if err := pool.Feed(map[string]any{"temp_c": 21.4}, []string{"kitchen"}); err != nil {
+	log.Fatal(err)
+}
+events := must(pool.Follow(udp.Since("oldest")))
+defer events.Close()
+for {
+	if frame, ok := must(events.Next(ctx)).(*udp.Frame); ok {
+		fmt.Println(frame.Seq, string(frame.Message.Data))
+	}
+}
+```
+
+A UDP read also yields `*udp.Skip` (a range the server skipped) and `*udp.Progress` events. A finished `Fetch` returns `io.EOF`. The [UDP spec](https://github.com/sandover/plasmite/blob/main/spec/udp/v1/SPEC.md) defines delivery and limits.
+
+## Errors and concurrency
+
+Plasmite failures are `*plasmite.Error` values (an alias of `api.Error`). `Kind` holds one of the nine error kinds: `ErrorUsage`, `ErrorNotFound`, `ErrorAlreadyExists`, `ErrorBusy`, `ErrorPermission`, `ErrorCorrupt`, `ErrorIO`, `ErrorRetentionGap` and `ErrorInternal`. `Path`, `Seq` and `Offset` are set when known, and `Missing` and `NextSeq` for a retention gap. Use `errors.As` to reach them.
+
+Clients, pools and readers serialize calls on their own native handle, so goroutines can share them. Separate handles can run concurrently. A reader owns its own handle and keeps working after its pool closes. A context deadline also limits the wait behind another `Next` on the same reader.
+
+## Advanced
+
+These methods avoid conversion work when you forward messages or read a few fields from large ones. The [language interface measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-interfaces.md) show when each one pays off.
+
+**Views.** `FetchView` and `FollowView` open readers that yield immutable `*MessageView` values. `FeedView` returns the view for the message it wrote. A view lives in Go memory, needs no `Close`, and stays valid after the reader closes or the pool overwrites the message.
+
+```go
+reader := must(pool.FetchView(plasmite.Last(1)))
+view := must(reader.Next(ctx))
+reader.Close()
+
+var reading struct {
+	TempC float64 `json:"temp_c"`
+}
+must(0, view.Decode(&reading)) // fills the struct by encoding/json rules
+fmt.Println(view.Seq(), reading.TempC)
+must(pool.FeedView(view, nil)) // forward: new seq and time, same data and tags
+```
+
+`Prepare("/temp_c")` compiles JSON Pointer paths once. Call `selector.Read(view)` to read those fields from each message, then call `selector.Close()` when you finish. `view.JSON()` formats the full envelope and `view.Lite3()` copies the encoded bytes. `FeedView` also accepts Go values that encode as a data object. Inside that object, `[]byte` becomes native bytes. Pass `view.Data()` with new tags to retag a message. `udp.Pool.FollowView` delivers `*udp.ViewFrame` events that carry the same views. See the [Go view measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-boundary-results/owned-views/go/README.md) and [stream measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-boundary-results/owned-views/go/streams/README.md).
+
+**Receipts.** `FeedReceipt`, `FeedJSONReceipt` and `FeedLite3Receipt` return only `Seq` and `Time`, skipping the committed message.
+
+**Lite3.** `FeedLite3`, `FetchLite3` and `FollowLite3` move the binary encoding Plasmite stores. Reads yield `*Lite3Frame` values with `Seq`, `Time` and `Payload`.
+
+**Durability.** For local and HTTPS pools, pass `plasmite.WithDurability(plasmite.DurabilityFlush)` to ask Plasmite to flush the write before reporting success.
+
+## Building from source
+
+From the repo root, build and stage the native library and run the binding tests.
+
+```bash
+just bindings-go-test
+```
+
+With an installed SDK, `go test ./...` in `bindings/go` runs the same tests. The `just` recipe points cgo and the system loader at the repo's build.

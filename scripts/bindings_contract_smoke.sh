@@ -32,7 +32,7 @@ done
 [[ -s "$work/address" ]] || { cat "$work/server.log" >&2; exit 1; }
 address="$(cat "$work/address")"
 origin="https://localhost:${address##*:}"
-key=$("$bin" --dir "$work/pools" access invite --name binding-test --format json | jq -er .access_key)
+key=$("$bin" --dir "$work/pools" access invite binding-test --format json | jq -er .access_key)
 printf '%s\n' "$key" | "$bin" access connect "$origin" >/dev/null
 unset key
 export PLASMITE_TEST_HTTPS_ORIGIN="$origin"

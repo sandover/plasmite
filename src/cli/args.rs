@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 COMMANDS
   Send and read
-    feed POOL [MESSAGE]                 Append an object or read messages from stdin
+    feed POOL [MESSAGE]                 Send a JSON object, or messages from stdin
     follow POOL [--since POSITION | --last N] [--tag TAG] [--one]
                                         Stream new messages by default
     fetch POOL [SEQ | --since POSITION | --last N]
@@ -25,11 +25,11 @@ COMMANDS
     duplex POOL                         Send and receive in one session
 
   Manage pools
-    pool create NAME... [--size SIZE]    Create local pools
-    pool list [SERVER]                   List local or remote pools
+    pool create NAME... [--size SIZE]   Create local pools
+    pool list [SERVER]                  List local or remote pools
     pool info POOL                      Inspect capacity, bounds, and metrics
-    pool delete POOL...                  Delete local pools
-    doctor <POOL | --all>                Check local pool integrity
+    pool delete POOL...                 Delete local pools
+    doctor <POOL | --all>               Check local pool integrity
 
   Share and connect
     serve [SERVER]                      Run a server for this directory
@@ -44,7 +44,7 @@ COMMANDS
     access list                         List saved server destinations
     access status SERVER                Check access, reachability, browser trust
     access disconnect SERVER            Forget saved credentials
-    access untrust SHA256                Remove trust for one certificate
+    access untrust SHA256               Remove trust for one certificate
 
   Integrate and learn
     mcp                                 Run local Model Context Protocol on stdin/stdout
@@ -53,9 +53,7 @@ COMMANDS
     help [COMMAND...]                   Show root or command help
 
 OPTIONS
-{options}
-
-{after-help}
+{options}{after-help}
 "#,
     long_about = None,
     propagate_version = true,
@@ -68,9 +66,7 @@ messages back.
 FIRST LOCAL WORKFLOW
   $ plasmite pool create chat
   $ plasmite follow chat                                      # Terminal 1
-  $ plasmite feed chat '{"from":"alice","msg":"hello"}'       # Terminal 2
-
-"#,
+  $ plasmite feed chat '{"from":"alice","msg":"hello"}'       # Terminal 2"#,
     after_help = r#"OUTPUT
   Readable in a terminal; compact JSON in a pipe or file.
   Use --format pretty|json|yaml|lite3|lite3-raw to choose explicitly.
@@ -95,6 +91,7 @@ pub(crate) struct Cli {
         long,
         global = true,
         action = clap::ArgAction::Append,
+        help_heading = "Global options",
         help = "Directory for local pools and server-side keys (default: ~/.plasmite/pools)",
         value_hint = ValueHint::DirPath
     )]
@@ -104,14 +101,16 @@ pub(crate) struct Cli {
         global = true,
         default_value = "auto",
         value_enum,
-        help = "Colorize stderr diagnostics and pretty JSON output: auto|always|never"
+        help_heading = "Global options",
+        help = "Colorize stderr diagnostics and pretty JSON output"
     )]
     pub(crate) color: ColorMode,
     #[arg(
         long,
         global = true,
         value_enum,
-        help = "Output: pretty|json|yaml|lite3|lite3-raw (default: pretty in a terminal, json in a pipe)"
+        help_heading = "Global options",
+        help = "Output format (default: pretty in a terminal, json in a pipe)"
     )]
     pub(crate) format: Option<super::output::OutputMode>,
 
@@ -143,17 +142,18 @@ pub(crate) enum Command {
     #[command(
         arg_required_else_help = true,
         display_order = 5,
-        about = "Manage pool files",
-        long_about = r#"Create and inspect pool files.
+        about = "Create, list, inspect, and delete pools",
+        long_about = r#"Create, list, inspect, and delete pool files.
 
-Pools are persistent ring buffers: multiple writers, multiple readers, crash-safe."#,
+A pool is a bounded ring buffer on disk. Many processes can write and read it at
+once, and it drops the oldest messages when it fills."#,
         after_help = r#"EXAMPLES
-  $ plasmite pool create foo
-  $ plasmite pool create --size 8M bar baz
-  $ plasmite pool info foo
+  $ plasmite pool create chat
+  $ plasmite pool create --size 8M builds sensors
+  $ plasmite pool info chat
   $ plasmite pool list
-  $ plasmite pool delete foo
-  $ plasmite pool delete foo bar baz
+  $ plasmite pool delete chat
+  $ plasmite pool delete builds sensors
 
 NOTES
   - Default location: ~/.plasmite/pools (override with --dir)"#
@@ -165,17 +165,16 @@ NOTES
     #[command(
         arg_required_else_help = true,
         display_order = 0,
-        about = "Send a message to a pool",
-        long_about = r#"Send JSON or pre-encoded Lite3 messages to a pool.
+        about = "Send JSON messages to a pool",
+        long_about = r#"Send JSON messages to a pool.
 
-Accepts local pool refs (name/path), HTTP(S) refs, and udp://host:port/<pool>,
-inline JSON or streams via stdin (auto-detected).
-Use --input-format lite3-raw for one raw attachment from a file or stdin."#,
+Give one JSON object as an argument, or pipe messages on stdin. Stdin accepts
+JSON, marked YAML, and framed Lite3, detected automatically."#,
         after_help = r#"EXAMPLES
-  $ plasmite feed foo '{"hello":"world"}'             # create a message
-  $ plasmite feed foo --tag alert '{"msg":"check"}'  # create with a tag
-  $ plasmite follow source | plasmite feed destination       # copy messages
-  $ plasmite feed foo < messages.jsonl                      # reload saved messages
+  $ plasmite feed sensors '{"temp_c": 21.4}'                  # send one object
+  $ plasmite feed builds --tag ci '{"step":"test","status":"ok"}'
+  $ plasmite follow builds | plasmite feed archive --create   # copy messages
+  $ plasmite feed events < messages.jsonl                     # reload saved messages
 
 INPUT AND OUTPUT
   - Objects are application data unless they have exactly seq, time, meta.tags, and data
@@ -207,7 +206,7 @@ INPUT AND OUTPUT
             default_value = "auto",
             value_enum,
             help = "Input mode for stdin streams",
-            long_help = "Input encoding: auto recognizes JSON objects, marked YAML documents, and framed Lite3. JSON accepts whitespace-separated objects. YAML accepts marked documents or one unmarked document through EOF. lite3-raw reads one attachment through EOF."
+            long_help = "Input encoding: auto recognizes JSON objects, marked YAML documents, and framed Lite3. JSON accepts whitespace-separated objects. YAML accepts marked documents or one unmarked document through EOF. lines stores each input line as a message with a line field. lite3-raw reads one attachment through EOF."
         )]
         input: InputMode,
     },
@@ -220,12 +219,12 @@ INPUT AND OUTPUT
 Run `plasmite access invite <name>` in another terminal to create a key."#,
         after_help = r#"EXAMPLES
   $ plasmite --dir ./pools serve
-  $ plasmite serve install https://pools.example.com:9743
+  $ plasmite serve install https://pools.example.net:9743
   $ plasmite serve status --all --format json
   $ plasmite --dir ./pools access invite laptop
 
 CONSTRAINTS
-  - Request body, tail timeout, and tail concurrency limits must be positive
+  - Request body, follow timeout, and follow stream limits must be positive
   - The local admin listener stays on loopback; remote clients use HTTPS
   - Installed servers start at boot
   - --udp-follow enables unauthenticated, unencrypted UDP reads and implies UDP input
@@ -277,13 +276,16 @@ to the server's HTTPS /mcp URL and authorize through OAuth.
         about = "Read retained messages and exit",
         long_about = r#"Read a pool's retained history as it stood when the read opened.
 Use --since or --last to choose a starting position, and --tag to select messages.
+--last counts messages before the tag filter: `--last 10 --tag error` starts 10
+messages back, then shows only those tagged error.
 Give a sequence as a positional argument to fetch exactly one message."#,
         after_help = r#"EXAMPLES
-  $ plasmite fetch foo 7
-  $ plasmite fetch foo --last 10
-  $ plasmite fetch foo 7 | plasmite feed bar
-  $ plasmite fetch foo 7 --format yaml
-  $ plasmite fetch foo 7 --format lite3-raw > heartbeat.lite3
+  $ plasmite fetch builds 7
+  $ plasmite fetch builds --last 10 --tag error
+  $ plasmite fetch builds --since 5m
+  $ plasmite fetch builds 7 | plasmite feed archive --create
+  $ plasmite fetch builds 7 --format yaml
+  $ plasmite fetch builds 7 --format lite3-raw > build.lite3
 
 OUTPUT
   Writes complete messages; --format selects the same encoding as follow and feed.
@@ -319,14 +321,15 @@ OUTPUT
 By default, follow waits for new messages. Use --since or --last to begin with
 retained history. Use --one to wait for one matching message and exit."#,
         after_help = r#"EXAMPLES
-  $ plasmite follow foo
-  $ plasmite follow foo --last 10
-  $ plasmite follow foo --tag ready --one
-  $ plasmite follow source | plasmite feed destination
+  $ plasmite follow builds
+  $ plasmite follow builds --last 10 --tag error
+  $ plasmite follow builds --tag deploy --one
+  $ plasmite follow builds | plasmite feed archive --create
 
 LOCAL AND REMOTE
   Use --create to open a missing local or HTTPS pool at the default size.
-  Tags select messages after the starting position is set.
+  --last counts messages before the tag filter: `--last 10 --tag error` starts
+  10 messages back, then shows only those tagged error.
   Use fetch to read retained messages and exit.
   Live reads report retention gaps on stderr and continue.
   UDP delivers messages in arrival order, including late messages and duplicates."#
@@ -394,7 +397,7 @@ INPUT AND OUTPUT
         override_usage = "plasmite doctor [OPTIONS] <POOL|--all>",
         long_about = r#"Validate one pool (or all pools) and emit a diagnostic report."#,
         after_help = r#"EXAMPLES
-  $ plasmite doctor foo
+  $ plasmite doctor chat
   $ plasmite doctor --all
   $ plasmite doctor --all --format json
 
@@ -492,12 +495,12 @@ pub(crate) enum PoolCommand {
         about = "Create one or more pools",
         long_about = r#"Create pool files. Default size is 1MB (use --size for larger).
 
-Pools include an inline sequence index by default for fast `get(seq)` lookups."#,
+Pools include an inline sequence index by default for fast `fetch POOL SEQ` lookups."#,
         after_help = r#"EXAMPLES
-  $ plasmite pool create foo
-  $ plasmite pool create --size 8M bar baz quux
-  $ plasmite pool create --size 8M --index-capacity 4096 indexed
-  $ plasmite pool create --format json foo
+  $ plasmite pool create chat
+  $ plasmite pool create --size 8M builds sensors events
+  $ plasmite pool create --size 8M --index-capacity 4096 builds
+  $ plasmite pool create --format json chat
 
 NOTES
   - Sizes: 64K, 1M, 8M, 1G (K/M/G are 1024-based)"#
@@ -519,15 +522,15 @@ NOTES
         about = "Show pool metadata and bounds",
         long_about = r#"Show local or remote pool size, bounds, and metrics. Readable in a terminal; compact JSON in a pipe; --format json emits JSON and --format yaml emits the same report as YAML."#,
         after_help = r#"EXAMPLES
-  $ plasmite pool info foo
-  $ plasmite pool info foo --format json
+  $ plasmite pool info chat
+  $ plasmite pool info chat --format json
 
 TARGET AND OUTPUT
   Local names/paths and HTTP(S) pool URLs are accepted.
   Readable in a terminal; compact JSON in a pipe; --format json emits one report."#
     )]
     Info {
-        #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
+        #[arg(help = "Pool name/path or http(s)://host:port/<pool>")]
         name: String,
     },
     #[command(
@@ -536,9 +539,9 @@ TARGET AND OUTPUT
         about = "Delete one or more pool files",
         long_about = r#"Delete one or more pool files (destructive, cannot be undone)."#,
         after_help = r#"EXAMPLES
-  $ plasmite pool delete foo
-  $ plasmite pool delete foo bar baz
-  $ plasmite pool delete --format json foo bar
+  $ plasmite pool delete chat
+  $ plasmite pool delete builds sensors events
+  $ plasmite pool delete --format json builds sensors
 
 NOTES
   - Readable output in a terminal; compact JSON in a pipe or file.
@@ -559,7 +562,7 @@ Prints a readable table in a terminal or compact JSON in a pipe or file. Use --f
         after_help = r#"EXAMPLES
   $ plasmite pool list
   $ plasmite pool list --format json
-  $ plasmite pool list https://pools.example.com:9743 --format json
+  $ plasmite pool list https://pools.example.net:9743 --format json
 
 NOTES
   - Readable output in a terminal; compact JSON in a pipe or file.
@@ -596,7 +599,7 @@ pub(crate) enum AccessSubcommand {
             value_name = "NAME",
             required_unless_present = "name",
             conflicts_with = "name",
-            help = "Legacy spelling for the client name"
+            hide = true
         )]
         legacy_name: Option<String>,
     },
@@ -706,8 +709,7 @@ pub(crate) struct ServeRunArgs {
         long = "shared-address",
         value_name = "URL",
         conflicts_with = "server",
-        help = "Legacy public HTTPS URL option",
-        help_heading = "Connection"
+        hide = true
     )]
     pub(crate) shared_address: Option<String>,
     #[arg(
@@ -739,7 +741,7 @@ pub(crate) struct ServeRunArgs {
     #[arg(
         long,
         value_name = "N",
-        help = "Max concurrent tail streams (must be positive)",
+        help = "Max concurrent follow streams (must be positive)",
         help_heading = "Safety"
     )]
     pub(crate) max_tail_concurrency: Option<usize>,

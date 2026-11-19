@@ -1,5 +1,7 @@
 # Security & Dependency Risk Audit (2026-02-08)
 
+This report records the source, dependencies and tooling available on February 8, 2026. See the [current serving guide](../record/serving.md) for HTTPS defaults and the [build guide](../building.md#lite3-vendoring) for the Lite3 pin. Run `just audit` to check the current Rust dependencies against RustSec advisories.
+
 ## Scope
 
 This audit covers dependency and supply-chain risk for:

@@ -1,5 +1,7 @@
 # Plasmite Remote Protocol v0 (HTTP)
 
+This document preserves the HTTP contract from Plasmite 1.3.0. See the [2.0 contract](../../v2/SPEC.md#http) for current pool routes and streams.
+
 This document defines the normative remote protocol contract for v0.
 It captures stable wire-level compatibility guarantees only.
 
@@ -96,26 +98,19 @@ It captures stable wire-level compatibility guarantees only.
 
 - `POST /v0/pools/{pool}/append` -> success body `{ "message": ... }`.
 - `POST /v0/pools/{pool}/append_lite3` (`application/x-plasmite-lite3`) -> `{ "message": ... }`.
-- A Lite3 sender may request `Accept: application/x-plasmite-identity` to receive
-  `204 No Content` with exact decimal unsigned `plasmite-seq` and
-  `plasmite-timestamp-ns` headers. This additive v0 response avoids a full-message
-  JSON export; the sender retains its original encoding. Older servers return
-  the existing JSON receipt instead. Clients must accept that receipt or report
-  the missing capability explicitly; they must not repeat the append.
 - Lite3 append validates the complete message before writing; unreadable nested
   data returns `Corrupt` without appending. Successful appends preserve the
-  document bytes and return the new destination identity or complete message,
-  according to the requested response type.
+  document bytes and return the new destination message in the response.
 - `GET /v0/pools/{pool}/messages/{seq}` -> success body `{ "message": ... }`.
-- `GET /v0/pools/{pool}/messages/{seq}/lite3` -> raw Lite3 bytes with `Content-Type: application/x-plasmite-lite3` and decimal unsigned `plasmite-seq` and `plasmite-timestamp-ns` headers. Both identify the same stored frame as the payload. Older servers may omit the timestamp header.
+- `GET /v0/pools/{pool}/messages/{seq}/lite3` -> raw Lite3 bytes with `Content-Type: application/x-plasmite-lite3` and `plasmite-seq` header.
 
 ### Streaming
 
-- `GET /v0/pools/{pool}/follow` -> JSONL stream (`application/jsonl`).
-- `GET /v0/pools/{pool}/follow_lite3` -> Lite3 stream (`application/x-plasmite-lite3-stream`).
+- `GET /v0/pools/{pool}/tail` -> JSONL stream (`application/jsonl`).
+- `GET /v0/pools/{pool}/tail_lite3` -> Lite3 stream (`application/x-plasmite-lite3-stream`).
 - Lite3 tail frame format: `[u64be seq][u64be timestamp_ns][u32be len][len bytes payload]` repeated.
 - Tail requests accept `gap_policy=continue|error`; omission means `continue`.
-- `/follow_lite3` rejects `gap_policy=error` with `Usage` because Lite3 streams
+- `/tail_lite3` rejects `gap_policy=error` with `Usage` because Lite3 streams
   have no terminal error frame.
 
 ## Data + Error Contract
@@ -164,20 +159,16 @@ It captures stable wire-level compatibility guarantees only.
 
 - Delivery ordering is ascending `seq`.
 - Cancellation is by client connection close.
-- Reconnect flows are at-least-once; clients should resume via an explicit inclusive sequence start and de-duplicate by `seq`.
-- On post-start failure, `/follow` may emit one terminal JSON error-envelope line before close.
-- On post-start failure, `/follow_lite3` closes the stream without a JSON body frame.
-- With `gap_policy=error`, `/follow` emits `RetentionGap` before any message after
+- Reconnect flows are at-least-once; clients should resume via `since_seq` and de-duplicate by `seq`.
+- On post-start failure, `/tail` may emit one terminal JSON error-envelope line before close.
+- On post-start failure, `/tail_lite3` closes the stream without a JSON body frame.
+- With `gap_policy=error`, `/tail` emits `RetentionGap` before any message after
   a missing sequence; the envelope's `seq` is the first missing sequence.
 
 ### Server Limits
 
 - Servers may enforce max request body size (`413`).
-- Tail timeout_ms is an upper bound. Servers use the shorter of the requested
-  timeout and configured maximum, or the maximum when omitted. One absolute
-  lifetime covers admission, scheduling, storage reads and backpressure.
-  This replaces the 1.x rejection above the maximum and awaits a major release;
-  see the [upgrade guide](../../../docs/record/upgrading-2.0.md#upgrade-http-clients-and-servers-together).
+- Servers may enforce max tail timeout (`400` when exceeded).
 - Servers may cap concurrent tails (`423`).
 - Body/size limits should be applied consistently to JSON and Lite3 append paths.
 - The server bounds HTTPS connections before authentication and expires
@@ -197,18 +188,3 @@ and authorization contract is in `spec/mcp/2025-11-25/SPEC.md`.
 
 - CLI contract: `spec/v0/SPEC.md`
 - Public API contract: `spec/api/v0/SPEC.md`
-
-## Follow selection
-
-`/follow` and `/follow_lite3` start with new messages when selection is omitted.
-The query accepts `start=new|all|last|since|sequence` and `start_value` for the
-last count, Unix nanoseconds or inclusive sequence. Sequence zero means all
-retained history. `finite=true` stops at the opening history boundary; alone it
-selects all retained history, matching CLI `--no-follow`. Last-N selection counts
-records before tag filters. `since_seq` remains an explicit sequence spelling
-for existing UI/MCP adapters; mixing it with `start` or `start_value` fails.
-New clients require follow-capable servers. Old `/tail` and `/tail_lite3` routes
-return not found; they do not silently acquire the new default. Message framing,
-limits, authorization and delivery guarantees retain their existing contracts.
-The maintainer authorizes this compatibility exception in the forthcoming 1.x
-release. See the [shared API contract](../../api/v0/SPEC.md).

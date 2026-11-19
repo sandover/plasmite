@@ -1,4 +1,4 @@
-//! Purpose: `plasmite` CLI entry point and v0.0.1 command dispatch.
+//! Purpose: `plasmite` CLI entry point and command dispatch.
 //! Role: Binary crate root; parses args, runs commands, emits JSON on stdout.
 //! Invariants: Commands emit stable stdout formats (human or JSON by command/flags).
 //! Invariants: Errors are readable text unless structured output is explicitly requested.
@@ -303,7 +303,7 @@ mod tests {
             ("plasmite access", vec!["format", "help"]),
             ("plasmite access connect", vec!["format", "help"]),
             ("plasmite access disconnect", vec!["format", "help"]),
-            ("plasmite access invite", vec!["format", "help", "name"]),
+            ("plasmite access invite", vec!["format", "help"]),
             ("plasmite access keys", vec!["format", "help"]),
             ("plasmite access list", vec!["format", "help"]),
             ("plasmite access revoke", vec!["format", "help"]),
@@ -355,7 +355,6 @@ mod tests {
                     "max-tail-concurrency",
                     "max-tail-timeout-ms",
                     "remote-bind",
-                    "shared-address",
                     "tls-cert",
                     "tls-key",
                     "udp",
@@ -375,7 +374,6 @@ mod tests {
                     "no-udp",
                     "no-udp-follow",
                     "remote-bind",
-                    "shared-address",
                     "tls-cert",
                     "tls-key",
                     "udp",

@@ -5,11 +5,7 @@ the unchanged [v0 append format](../v0/SPEC.md). UDP provides no acknowledgement
 of stored writes, retransmission of messages, authentication, or encryption.
 Use loopback or a separately protected controlled network.
 
-**Source status (2026-11-11):** Clients implement the arrival-order policy below.
-This unreleased change replaces 1.x late/duplicate suppression and inferred gaps.
-It keeps the packet format; shipping the changed client behavior requires a
-major release under the product's
-[compatibility policy](../../../docs/record/releasing.md#versioning-policy).
+This document describes the 2.0 transport. The [1.3.0 UDP contract](https://github.com/sandover/plasmite/blob/v1.3.0/spec/udp/v1/SPEC.md) records the earlier receive policy and control records.
 
 ## Enablement and targets
 
@@ -18,7 +14,7 @@ reads and input, using the saved/configured UDP address or 127.0.0.1:9701.
 Installed settings default follow to false; omitted options preserve settings.
 `serve install --no-udp-follow` withdraws reads; `--no-udp` removes both.
 
-Feed/follow/duplex accept `udp://HOST:PORT/POOL`. Port is explicit. Decode one
+Feed, fetch, follow and duplex accept `udp://HOST:PORT/POOL`. Port is explicit. Decode one
 pool-name segment and apply ordinary named-pool validation. Reject credentials,
 queries, fragments, encoded/native separators, and arbitrary paths. Resolve a
 host once, preferring IPv4 when both address families exist to match the default
@@ -27,7 +23,7 @@ send and follow from the client. Other commands
 reject this scheme with Usage.
 
 A send returns only local validation/OS submission success. Feed emits no
-receipt or stdout. It rejects create, retry, and flush options. New clients send
+receipt or stdout. It rejects create and flush options. Clients send
 prepared Lite3 bytes and verify both routed append size and follow DATA size.
 The whole datagram maximum remains 65,507 bytes, including application framing
 and excluding IP/UDP headers. No application fragmentation or reassembly.
@@ -71,8 +67,7 @@ return reachability, responses never exceed the triggering request length.
 
 SUBSCRIBE: optional `selection` and `cookie`. An absent selection means renew,
 not create. Selection contains `pool` (validated name), `start`, and `live`.
-Start has a `kind` of `new`, `last`, `since`, or `sequence`; kinds other than new
-require unsigned u64 `value` (message count, timestamp ns, or sequence).
+Start has a `kind` of `new`, `last`, `since`, `ago`, or `sequence`. Kinds other than `new` require unsigned u64 `value` (message count, Unix nanoseconds, duration in nanoseconds, or sequence).
 Cookie contains `expires_ms` (server monotonic time) and `mac` (base64url,
 without padding, HMAC-SHA256). CHALLENGE contains `cookie`.
 
@@ -98,14 +93,9 @@ five-second deadline. Duplicate creation requests with identical selection
 share preparation or receive existing progress; they never restart a cursor.
 Conflicting selection returns Usage. Verified capacity failure returns Busy.
 
-Start New selects after the opening newest sequence. Last chooses up to N
-retained records. Since scans the opening retained range for the first matching
-timestamp; no match selects after the upper bound. Sequence begins at the
-specified sequence, with retained-gap accounting. Empty pools begin at 1.
-Finite streams fix the opening upper bound; live streams keep following.
-A core cursor performs reads/retention checks. Preparation must not block the
-UDP receive loop. Timestamp filtering continues client-side on each received
-message; timestamps need not increase with sequence.
+Start `new` selects after the opening newest sequence for a live subscription and selects the oldest retained sequence for a finite one. `last` chooses up to N retained records, with zero starting at the next unwritten sequence. `since` scans the opening retained range for the first qualifying timestamp. `ago` resolves to a timestamp using the server clock at opening. If no record qualifies, the reader starts after the opening upper bound. Timestamp selection sets the start once. Later records can carry earlier timestamps. `sequence` starts at the requested sequence, with retained-gap accounting. Sequence zero on the wire selects the oldest retained record. Empty pools begin at 1.
+
+Finite streams fix the opening upper bound and live streams keep following. A core cursor performs reads and retention checks. Workers prepare subscriptions off the receive loop.
 
 Opening PROGRESS precedes DATA in server send order, but arrivals may reorder.
 The client accepts DATA before PROGRESS. Later progress describes server attempts
@@ -141,7 +131,7 @@ replay. No per-message acknowledgement or confirmation of complete delivery.
   later-arriving DATA packet ineligible. Oversized messages produce SKIP;
   the server never truncates them. Filters never create skip notices.
 - Keep subscription setup, renewal, expiry, and close behavior.
-- A finite follow ends on the first valid terminal PROGRESS and drains events
+- A finite read ends on the first valid terminal PROGRESS and drains events
   it already accepted. DATA still in flight may go unread; completion gives
   no assurance of complete delivery. Add no grace period or repair exchange.
 
@@ -167,8 +157,4 @@ sockets. Saved HTTPS keys and revocation do not govern UDP.
 
 ## Shared follow selection vocabulary
 
-Language clients use the shared follow selection vocabulary: new by default,
-last N, since a timestamp, or an inclusive sequence. Selecting sequence zero
-expressly requests all retained history. This vocabulary does not change UDP's
-wire encoding, ordering, finite completion or delivery guarantees. The shared
-[API contract](../../api/v0/SPEC.md) records the authorized 1.x naming transition.
+Language clients use the [shared read selections](../../v2/SPEC.md#reads). Use `oldest` for all retained history. Clients encode it as sequence zero on the wire and require positive numbers for explicit sequence selections. Tag matching happens on the client after it receives a DATA packet.

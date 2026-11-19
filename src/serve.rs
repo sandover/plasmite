@@ -1,9 +1,9 @@
 //! Purpose: Provide the HTTP/JSON remote server for Plasmite.
 //! Exports: `ServeConfig`, `serve_secure_pair`.
-//! Role: Axum-based local and TLS remote servers implementing the remote v0 spec.
-//! Invariants: JSON envelopes match spec/remote/v0/SPEC.md; error kinds remain stable.
+//! Role: Axum-based local and TLS remote servers implementing the HTTP section of spec/v2/SPEC.md.
+//! Invariants: JSON envelopes and stream endings match spec/v2/SPEC.md; error kinds remain stable.
 //! Invariants: Local administration stays on loopback; remote access requires TLS and an access key.
-//! Notes: Streaming uses JSONL or framed Lite3; tail is at-least-once and resumable.
+//! Notes: Streaming uses JSONL or framed Lite3; follow and fetch streams resume after a cutoff.
 
 use axum::body::Body;
 use axum::extract::{

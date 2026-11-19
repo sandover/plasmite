@@ -1,7 +1,6 @@
 # Plasmite UDP Input Spec (v0)
 
-This document defines the UDP input contract for Plasmite 1.x. It covers
-append-only datagrams. The HTTP API keeps its separate contract.
+This document defines the append-only UDP input shared by Plasmite 1.x and 2.0. The [UDP transport contract](../v1/SPEC.md) covers 2.0 reads.
 
 ## Listener
 
@@ -53,6 +52,4 @@ duplicate suppression. The network may lose, duplicate, or reorder datagrams;
 each duplicate that reaches append creates another message. A successful send
 does not confirm reception or storage.
 
-The receiver does not expose reads, pool creation, deletion, or arbitrary path
-selection. Senders that need reliable delivery or larger messages must use the
-existing HTTP interface.
+Append datagrams cannot read pools, create or delete them, or select arbitrary paths. Use the HTTP interface when senders need a storage receipt or larger messages.

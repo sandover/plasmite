@@ -1,135 +1,78 @@
 # Distribution
 
-This document defines what users get from each install channel, supported platforms, and the stable on-disk SDK layout.
+This document says what each install channel provides, which platforms each supports, and how the SDK archive is laid out.
 
-Native target identifiers and per-target channel tiers are owned by
-`release/targets.json`. This document explains the support policy in human
-terms and intentionally repeats important identifiers so readers do not need to
-inspect build data. `scripts/validate_distribution_targets.sh` fails when those
-lists drift apart.
+`release/targets.json` owns the native target identifiers and tiers for the channels in the release matrix. `scripts/validate_distribution_targets.sh` checks the official target list and the cargo-binstall preview list against the manifest.
 
-## Support Tiers
+## Support tiers
 
-A platform/channel combination is `official` only when all of these are true:
-- Users have a documented install command or artifact path, with explicit
-  prerequisites. Native binary channels require no source build; Rust and Go
-  channels use their standard source toolchains.
-- The install path is exercised by automated smoke checks in CI/release workflows.
-- The combination is explicitly marked `official` in the install matrix.
+A platform and channel combination is `official` when all of these hold:
 
-A combination can be `preview` when install metadata/artifacts are wired and at least one release-time smoke gate exists, but full target-matrix coverage is not yet complete.
+- Users have a documented install command or artifact, with explicit prerequisites. Native binary channels need no source build; Rust and Go channels use their standard source toolchains.
+- Automated smoke checks in CI or the release workflows exercise the install path.
+- The install matrix below marks it `official`.
+
+A combination is `preview` when its artifacts and install metadata exist and at least one release-time smoke check covers it, but coverage of its full target matrix is incomplete. Promotion to `official` needs a change to `release/targets.json` and this document, plus delivery evidence; publishing a preview artifact does not promote it.
+
+## Platforms
 
 Official platforms:
 - macOS: `aarch64-apple-darwin`, `x86_64-apple-darwin`
 - Linux: `x86_64-unknown-linux-gnu`
 - Windows: `x86_64-pc-windows-msvc` via npm and PyPI release artifacts
 
-Plasmite 1.3.0 builds Linux x86_64 packages on Ubuntu 22.04 with glibc 2.35.
-This covers Ubuntu 22.04 and Debian 12 without a source build. The Python wheel
-is tagged `manylinux_2_35_x86_64`, and its CLI and library are checked against
-that floor. Check your system with `getconf GNU_LIBC_VERSION`; these GNU/Linux
-packages require glibc and do not target musl/Alpine.
-
-Version 1.2.1's Linux x86_64 SDK/npm packages
-require glibc 2.39 or newer; its Python source package requires a system SDK.
-The ARM preview retains its glibc 2.35 baseline and manual SDK installation.
-
-macOS native artifacts target macOS 10.12 on Intel and macOS 11 on Apple
-Silicon. Python wheel tags describe the extension, bundled CLI and library architecture
-and their minimum OS version; a thin native bundle does not claim `universal2`.
-These compiler deployment targets do not establish runtime testing on every
-older macOS version. Release smoke tests run on the declared CI hosts.
-
 Not currently targeted:
-- Linux distro packages (`apt`, `yum`, `pacman`, etc.)
+- Linux distro packages (`apt`, `yum`, `pacman` and so on), musl and Alpine, ARMv6, and native Windows ARM64. An ARM64 Windows machine runs the x64 build through Windows' emulation.
 
-GitHub SDK preview platforms:
-- Linux ARM64: `aarch64-unknown-linux-gnu` (`linux_arm64`)
-- Linux ARMv7, 32-bit hard-float: `armv7-unknown-linux-gnueabihf` (`linux_armv7`)
+**Linux x86_64.** Ubuntu 22.04 runners build the release SDK, npm native assets and Python wheels against glibc 2.35. Native installs need glibc 2.35 or newer, as on Ubuntu 22.04 and Debian 12. The wheel smoke checks the `manylinux_2_35_x86_64` platform tag and bundled binaries. Check your system with `getconf GNU_LIBC_VERSION`.
 
-These preview archives provide the CLI/server and SDK layout for manual
-installation without Rust. CI builds and smoke-tests both targets. ARM64 uses
-Ubuntu 22.04 with glibc 2.35 as its runtime baseline. ARMv7 uses Armv7-A,
-VFPv3-D16 hard-float, and Thumb-2, with NEON optional, against an Ubuntu 22.04
-glibc 2.35 sysroot. The [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)
-publishes both archives. Physical Raspberry Pi installation and reboot checks
-remain pending, so these targets retain the preview tier. ARMv6 is unsupported.
+**macOS.** Native artifacts target macOS 10.12 on Intel and macOS 11 on Apple Silicon. Python wheel tags state the architecture and minimum OS of the extension, bundled CLI and library; a single-architecture build does not claim `universal2`. These are compiler deployment targets: release smoke tests run only on the CI hosts, not on every older macOS release.
 
-The earlier [ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
-records validation of the CLI, C library, HTTPS recovery, and ARMv7 QEMU
-execution. Its temporary CI artifacts are historical evidence; use the
-published release assets below for installation.
+**Linux ARM preview.** The GitHub release includes SDK archives for two more targets:
 
-## Install Matrix
+- Linux ARM64: `aarch64-unknown-linux-gnu` (`linux_arm64`), ARMv8-A, built natively on Ubuntu 22.04 for ARM64.
+- Linux ARMv7, 32-bit hard-float: `armv7-unknown-linux-gnueabihf` (`linux_armv7`), cross-built with GCC's `arm-linux-gnueabihf` compiler against an Ubuntu 22.04 sysroot. It requires Armv7-A with VFPv3-D16 and Thumb-2 (`-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard`); NEON is optional.
+
+Both need glibc 2.35 or newer. Each archive holds the CLI, server and C SDK, so you can run Plasmite without Rust; npm, PyPI and Homebrew do not cover ARM Linux. Release CI smoke-tests each packaged archive, runs the core and server test suites on each target, and hands a pool between 64-bit and ARMv7 CLIs; ARMv7 runs under QEMU. No check on physical Raspberry Pi hardware has passed yet, so both targets stay in preview. The [ARM SDK CI report](../validation/arm-sdk-ci.md) records the first run.
+
+On ARMv7 a pool file can be at most 2,147,483,647 bytes (2 GiB minus one byte). Plasmite refuses to create or map a larger pool. A smaller pool can still fail to map when memory is short.
+
+## Install matrix
 
 | Channel | Install Command | Provides CLI | Provides Library | Tier | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Homebrew (macOS and x86_64 Linux) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | `official` | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata; post-release macOS install smoke required. |
-| crates.io (Rust) | `cargo install plasmite` | Yes | No | `official` | Installs binaries into Cargo bin dir; source build. |
+| Homebrew (macOS and x86_64 Linux) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | `official` | Installs `bin/`, `lib/`, `include/` and pkg-config metadata. |
+| crates.io (Rust) | `cargo install plasmite` | Yes | No | `official` | Builds from source into Cargo's bin directory. |
 | crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | `official` | Standard Rust dependency. |
-| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Wheel bundles native assets and CLI. Linux wheels start with 1.3.0. |
-| npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Requires Node >=24; bundles addon, native assets, and CLI. |
-| Go module | `go get github.com/sandover/plasmite/bindings/go/local` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK (brew/manual) for cgo; import pure contracts from `/api` when needed. |
-| GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | `official` (manual path) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
-| GitHub release tarball (Linux ARM64) | Download `plasmite_1.3.0_linux_arm64.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published SDK archive with release checksums; physical Pi qualification pending. |
-| GitHub release tarball (Linux ARMv7) | Download `plasmite_1.3.0_linux_armv7.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published 32-bit hard-float SDK archive with release checksums; physical Pi qualification pending. |
-| cargo-binstall (Rust binary installer) | `cargo binstall plasmite --no-confirm` | Yes | No | `preview` (`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) | Uses `package.metadata.binstall` URL mapping to GitHub release SDK tarballs; release-publish smoke gate is currently Linux-only. |
+| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Wheels bundle the native library and CLI. |
+| npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Bundles the add-on, native library and CLI. |
+| Go module | `go get github.com/sandover/plasmite/bindings/go/v2/local@v2.0.0` | No | Yes (Go bindings) | `official` (macOS/Linux) | Install the 2.x SDK through Homebrew or an SDK archive for cgo. Import pure contracts from `github.com/sandover/plasmite/bindings/go/v2/api` to build without cgo. |
+| GitHub release archive | Download from releases | Yes | Yes (SDK layout) | `official` (macOS, Linux x86_64) | Contains `bin/`, `lib/`, `include/` and `lib/pkgconfig/`. |
+| GitHub release archive (Linux ARM64) | Download `plasmite_<version>_linux_arm64.tar.gz` | Yes | Yes (SDK layout) | `preview` | See the ARM preview above. |
+| GitHub release archive (Linux ARMv7) | Download `plasmite_<version>_linux_armv7.tar.gz` | Yes | Yes (SDK layout) | `preview` | See the ARM preview above. |
+| cargo-binstall (Rust binary installer) | `cargo binstall plasmite --no-confirm` | Yes | No | `preview` (`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) | Maps to the GitHub release archives through `package.metadata.binstall`; the release-publish smoke gate is currently Linux-only. |
 
-**Requirements:** Node.js 24 or newer for the npm package and its CLI;
-Python 3.10 or newer for the Python package; Go 1.22 or newer, cgo, and
-pkg-config for Go. Rust source installs need the toolchain and C compiler
-described in the [build guide](../building.md#install-the-cli-from-source).
-
-Install bindings and native libraries from the same major version. The 2.0
-library uses `libplasmite.so.2` on Linux, `libplasmite.2.dylib` on macOS and
-`plasmite2.dll` on Windows. Python, Go and the Node add-on check that the
-loaded library reports major version 2. The npm package places the library
-beside the add-on.
-Node's HTTP `RemoteClient` needs no native addon for views: the npm package
-includes a checked WebAssembly core for encoding and validation. Local pools and
-UDP still need the native addon. The portable backend supports the Node entry
-point, not a browser distribution. Its first use pays module compilation.
-
-Python container views use a native CPython extension over the shared C ABI.
-Builds provide `cp311-abi3` wheels for standard CPython 3.11+, `cp310-cp310`
-wheels for CPython 3.10, and platform-specific `py3-none` fallback wheels.
-The buffer protocol requires the separate 3.10 build. Source archives carry
-the extension source and SDK header; compiling native views needs a C compiler.
-PyPy and free-threaded CPython use the same lazy immutable view API through
-ctypes, with extra encoded copies and slower field access. Free-threaded
-Python skips the extension before import and keeps the GIL disabled. The
-[Python binding guide](../../bindings/python/README.md#runtime-and-wheel-support)
-explains runtime limits and copying. The wheel smoke builds all three variants
-from the source archive, verifies their native payloads and tags, and installs
-and exercises each variant. These checks run on the existing release hosts;
-they do not add supported operating systems.
-
-On platforms without a compatible wheel, Python's source package needs a separate system SDK. For a manually
-extracted SDK, point `PLASMITE_LIB_DIR` at its `lib` directory and add its
-`bin` directory to PATH before running Python or its console command. A
-Linux ARM SDK supplies the CLI and C library, but no npm native addon.
+The npm package needs Node.js 24 or newer. The Python package needs Python 3.10 or newer. Go code needs Go 1.22 or newer, and Go's local and UDP packages also need cgo, a C compiler and pkg-config. Rust source installs need the toolchain and C compiler in the [build guide](../building.md#install-the-cli-from-source).
 
 Read the [2.0 upgrade guide](upgrading-2.0.md) before replacing a 1.x installation.
 
-The `GitHub release tarball` row applies to official macOS and Linux x86_64
-archives. The Linux ARM archives are a separate GitHub SDK preview and do not
-change npm, PyPI, or Homebrew support.
+## Native library versions
+
+Install bindings and the native library from the same major version. The library's file name carries the major version, so a 1.x and a 2.x library can sit side by side: `libplasmite.so.2` on Linux, `libplasmite.2.dylib` on macOS and `plasmite2.dll` on Windows. Python, Go and the Node add-on check that the loaded library reports major version 2 and refuse anything else. The npm package places the library beside the add-on.
+
+## Language notes
+
+**Node.** The HTTP `RemoteClient` works without the native add-on: the npm package includes a checked WebAssembly core for encoding and validating messages. Local pools and UDP still need the add-on. The WebAssembly backend supports the Node entry point, not browsers, and compiles its module on first use.
+
+**Python.** Message views use a native CPython extension over the C ABI. Releases ship `cp311-abi3` wheels for CPython 3.11 and newer, `cp310-cp310` wheels for CPython 3.10 (whose buffer protocol needs a separate build), and platform-specific `py3-none` fallback wheels. PyPy and free-threaded CPython use the same view API through ctypes, with extra copies and slower field access; free-threaded Python skips the extension so the GIL stays disabled. The release wheel smoke builds all three variants from the source archive, checks their native contents and tags, and installs and exercises each one. The [Python binding guide](../../bindings/python/README.md#advanced) explains how the package finds its library and builds wheels.
+
+On a platform without a compatible wheel, Python's source package needs a C compiler and a separate system SDK. For an extracted SDK archive, point `PLASMITE_LIB_DIR` at its `lib` directory and put its `bin` directory on `PATH`.
 
 ## Linux ARM SDK preview install
 
-Choose the archive from the operating system's userspace architecture. Run
-`getconf LONG_BIT` on the Pi to distinguish 32-bit and 64-bit Linux; the kernel
-architecture alone does not establish which userspace archive to use. Both
-targets require glibc 2.35 or newer; check with `getconf GNU_LIBC_VERSION`. The
-intended 32-bit target is a Raspberry Pi 2 running 32-bit Raspberry Pi OS Lite.
-ARM64 requires ARMv8-A; ARMv7 requires Armv7-A with VFPv3-D16 and Thumb-2.
-ARMv6 is unsupported. Physical Pi installation and reboot qualification remain
-pending; the published archives retain the preview tier.
+On a Raspberry Pi, use `getconf LONG_BIT` to check whether the installed OS runs 32-bit or 64-bit programs. For a 32-bit OS, confirm that the CPU and OS meet the ARMv7 hard-float requirements above. The intended 32-bit system is a Raspberry Pi 2 running 32-bit Raspberry Pi OS Lite. Find the archive and `sha256sums.txt` on the [release page](https://github.com/sandover/plasmite/releases).
 
-Choose a 2.0 SDK archive and its checksum file from the [release page](https://github.com/sandover/plasmite/releases). The archive name ends in `linux_arm64.tar.gz` or `linux_armv7.tar.gz`.
-
-On the Linux ARM machine, run these commands in Bash. They select the archive
-by userland width and stop on download or checksum failure before extraction:
+This script downloads the right archive, stops if the download or checksum fails, and extracts it:
 
 ```bash
 set -euo pipefail
@@ -155,37 +98,21 @@ export PATH="$sdk_dir/bin:$PATH"
 plasmite --version
 ```
 
-Each archive extracts `bin/`, `include/`, and `lib/` directly into `sdk_dir`;
-Rust is not required. Add that `bin` path to your shell's startup file for
-future sessions. For C consumers, export
-`PKG_CONFIG_PATH="$HOME/.local/share/plasmite/${version}/lib/pkgconfig"` and use
-`pkg-config --cflags --libs plasmite`. To run a dynamically linked C consumer,
-also export `LD_LIBRARY_PATH="$HOME/.local/share/plasmite/${version}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
-Python's Linux source installation can
-use `PLASMITE_LIB_DIR="$HOME/.local/share/plasmite/${version}/lib"` with the same
-`bin` path on `PATH`; the archive does not add an npm addon or an ARM wheel.
+The archive extracts `bin/`, `include/` and `lib/` into `sdk_dir`. Add the `bin` path to your shell's startup file for later sessions. For C programs, set `PKG_CONFIG_PATH="$sdk_dir/lib/pkgconfig"` and use `pkg-config --cflags --libs plasmite`; to run a dynamically linked program, also add `$sdk_dir/lib` to `LD_LIBRARY_PATH`. A Python source install can use `PLASMITE_LIB_DIR="$sdk_dir/lib"` with the same `bin` path on `PATH`.
 
-Run a foreground server as the operating-system account that owns the pool
-directory. Installed servers use that account on Linux and macOS; Windows
-uses a virtual service account with access to the selected pool directory.
-Follow the [serving guide](serving.md#share-your-first-pool) for directory
-setup and server operation. On ARMv7, pool files can be at most
-2,147,483,647 bytes (2 GiB minus one byte); Plasmite rejects creation of a
-larger pool or mapping of a larger existing pool. Smaller pools can still fail
-to map when system memory is insufficient.
+Run a foreground server as the account that owns the pool directory; installed servers on Linux use that account too. Follow the [serving guide](serving.md#share-your-first-pool) to set up and run a server.
 
-## cargo-binstall Promotion Criteria
+## cargo-binstall promotion criteria
 
-Current tier is `preview`.
+cargo-binstall stays in preview until all of these hold:
 
-Promotion to `official` requires all of:
-- Fail-closed release automation smoke coverage for every intended official target triple (not only Linux).
-- Post-release delivery verification evidence for the same target set.
-- Tier update in this document and corresponding release policy updates in `docs/record/releasing.md`.
+- Release automation smoke-tests every intended official target triple, not only Linux, and fails closed.
+- Post-release delivery checks cover the same targets.
+- This document and the [release policy](releasing.md) record the new tier.
 
-## SDK Layout (Release Artifacts)
+## SDK layout
 
-GitHub release tarballs are the single source of truth for the SDK layout:
+GitHub release archives define the SDK layout:
 
 ```text
 bin/
@@ -195,15 +122,20 @@ include/
   plasmite.h
 lib/
   libplasmite.so.2 or libplasmite.2.dylib
+  libplasmite.a
   pkgconfig/
     plasmite.pc
+LICENSE
+THIRD_PARTY_NOTICES.md
 ```
 
-### pkg-config Contract
+### pkg-config contract
 
 The `plasmite.pc` file must:
-- Be named `plasmite` (not `libplasmite`)
-- Provide `Cflags: -I...` for `include/plasmite.h`
-- Link the shared library for the current major. In 2.0, use
-  `-L... -l:libplasmite.so.2` on Linux or `-L... -lplasmite.2` on macOS.
-- For Linux SDK artifacts, provide `Libs.private: -lpthread -ldl -lm` so `pkg-config --static --libs plasmite` resolves required system libraries.
+
+- Be named `plasmite` (not `libplasmite`).
+- Provide `Cflags: -I...` for `include/plasmite.h`.
+- Link the shared library for the current major version: `-L... -l:libplasmite.so.2` on Linux or `-L... -lplasmite.2` on macOS.
+- On Linux, provide `Libs.private: -lpthread -ldl -lm` for consumers of `libplasmite.a`.
+
+To link the static library, pass the path to `libplasmite.a` explicitly and include the system libraries for your platform. `pkg-config --static --libs plasmite` adds the private dependencies to the same shared-library link line.

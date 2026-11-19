@@ -6,11 +6,12 @@ directly, rather than fetching at build time.
 ## Lite3
 
 Lite3 provides the binary JSON representation stored in Plasmite pool frames.
-Plasmite builds a curated source snapshot directly so normal builds remain
-offline and deterministic.
+Plasmite builds the pinned source from this repository. Cargo still needs its
+own dependencies in the local cache for an offline build.
 
-`lite3.lock.json` records the exact upstream repository, commit, and commit
-date. `lite3.sha256` covers every file in the curated snapshot. Run the offline
+`lite3.lock.json` records the upstream repository, commit, commit date and
+the path to the local reader-safety patch. `lite3.sha256` covers the curated
+snapshot and the patch. Run the offline
 integrity check with:
 
 ```bash
@@ -27,10 +28,10 @@ just update-lite3 <40-character-commit>
 ```
 
 The updater clones upstream into a temporary directory, checks out exactly that
-commit, copies a fixed allowlist of build and license files, rewrites the lock
-and integrity manifest, and verifies the result. It intentionally excludes
-upstream build files, images, examples, and tests that Plasmite does not ship or
-compile.
+commit and copies an explicit list of source files, licenses and the upstream
+README. It applies `lite3-read-safety.patch` before replacing the snapshot. If
+the patch no longer applies, the updater stops before replacing any files.
+Otherwise it rewrites the lock and checksums, then verifies the result.
 
 After an update, review the source diff and run `just check`. Add focused
 Plasmite regression tests for fixes that affect encoding, decoding, validation,

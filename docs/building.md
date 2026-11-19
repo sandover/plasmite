@@ -2,259 +2,109 @@
 
 ## What gets built
 
-- Rust crate: `plasmite` (CLI, library, tests, bindings support)
-- Native C dependency: vendored Lite3 sources under `vendor/lite3/`
-- C shim: `c/lite3_shim.c` exports the narrow ABI used by Rust FFI
-- Darwin notification bridge: `c/notify_shim.c` guards public shared-address waits by SDK and operating-system availability
-- Web UI font: vendored Inconsolata under `ui/fonts/`, embedded in the server binary (source and checksum in `ui/fonts/README.md`)
+- The `plasmite` crate: the Rust library, the `plasmite` and `pls` binaries, and the C library. `Cargo.toml` builds the library as an `rlib` for Rust, a shared library for the bindings and a static archive for C programs.
+- Vendored Lite3 sources under `vendor/lite3/`, compiled by `build.rs`.
+- `c/lite3_shim.c` and `c/lite3_builder.c`, the C helpers Rust uses to read and build Lite3 values.
+- `c/notify_shim.c`, the macOS wake-up bridge, which uses shared-address waits only where the SDK and OS provide them.
+- The web UI font, vendored Inconsolata under `ui/fonts/` and embedded in the server binary (source and checksum in `ui/fonts/README.md`).
 
-`Cargo.toml` declares `build = "build.rs"`, so Cargo always runs the build script when needed.
+Cargo names the shared library `libplasmite.so`, `libplasmite.dylib` or `plasmite.dll`. The bindings load the major-versioned name instead (`libplasmite.so.2`, `libplasmite.2.dylib`, `plasmite2.dll`), so `just abi` and the binding test recipes stage that name next to Cargo's output with `scripts/stage_versioned_library.sh`. [Releasing](record/releasing.md#native-library-major-version) explains the versioning.
 
 ## Install the CLI from source
 
-Use a source build to try changes that have not reached a published release.
-You need Git, the Rust toolchain pinned in `rust-toolchain.toml`, and a C
-compiler. From a checkout of this repository, run:
+Use a source build to try changes that have not reached a release. You need Git, the Rust toolchain pinned in `rust-toolchain.toml` and a C compiler. From a checkout, run:
 
 ```console
 cargo install --path . --locked --force --bin plasmite
-plasmite access --help
+plasmite --version
 ```
 
-This replaces a Cargo-managed Plasmite installation. Cargo installs the
-binary in its bin directory. Put that directory first on `PATH` if your
-shell finds an older npm, Python, or Homebrew installation. If `access`
-still fails, run the binary from Cargo's bin directory directly.
+This replaces a Cargo-managed Plasmite installation. If `plasmite --version` still shows an older version, an npm, Python or Homebrew install comes first on your `PATH`; put Cargo's bin directory ahead of it.
 
-On Windows, use an x64 Visual Studio developer terminal with `clang-cl` on
-`PATH`, the Visual Studio C++ linker, and the Windows SDK. Use the x64 Rust
-toolchain for the supported Windows build, including on ARM64 Windows.
-See [Windows support](#windows-support-policy) for the target and checks.
+On Windows, see [Windows builds](#windows-builds).
 
-## Native build model (Lite3 vendoring)
+## Lite3 vendoring
 
-Plasmite pins Lite3 to an exact upstream commit in
-`vendor/lite3.lock.json`. An integrity manifest at `vendor/lite3.sha256`
-covers the curated files compiled into Plasmite and the local reader patch.
-Normal builds and integrity checks never access the network.
+Plasmite pins Lite3 to an exact upstream commit in `vendor/lite3.lock.json`. `vendor/lite3.sha256` holds checksums for the vendored files and the local read-safety patch. Builds and integrity checks use the local Lite3 snapshot. Cargo and Rustup can still need network access to fetch uncached crates and toolchains.
 
-`build.rs` performs these steps:
+`build.rs` tracks the vendored files and local C helpers, then uses the `cc` crate to compile them into one static archive. On macOS it also compiles `c/notify_shim.c` into `libplasmite_notify.a`. A missing source file stops compilation. An empty or incomplete file can leave unresolved `lite3_*` symbols at link time.
 
-1. Declares `cargo:rerun-if-changed` for shim and vendored Lite3 files.
-2. Compiles vendored Lite3 C units plus `c/lite3_shim.c` into one static archive (`liblite3.a`) via `cc`.
-3. On Darwin, compiles `c/notify_shim.c` into `libplasmite_notify.a`; other targets retain their notification backend.
-4. Leaves native-link metadata to Cargo/rustc default integration from `cc`.
+The macOS bridge weak-links the shared-address wait calls and uses them only on macOS 14.4 or later; an SDK without the header compiles a stub. Its deployment target follows `MACOSX_DEPLOYMENT_TARGET`, defaulting to macOS 10.12 on Intel and 11.0 on Apple Silicon, so the availability checks hold even when the SDK targets a newer OS. Older systems fall back to semaphores and polling with the same file format.
 
-The Darwin bridge weak-links the shared-address APIs and calls them only on
-macOS 14.4 or later. SDKs that lack the header compile an unavailable stub.
-Its C deployment target follows `MACOSX_DEPLOYMENT_TARGET`, or defaults to
-macOS 10.12 on Intel and 11.0 on Apple Silicon. This keeps availability guards
-intact even when the installed SDK defaults to a newer operating system.
-Older hosts keep the semaphore/polling fallback. The file format stays the same:
-the writer publishes its existing newest-sequence word with an atomic store.
-
-Key inputs:
-
-- `vendor/lite3/src/lite3.c`
-- `vendor/lite3/src/json_dec.c`
-- `vendor/lite3/src/json_enc.c`
-- `vendor/lite3/src/ctx_api.c`
-- `vendor/lite3/src/debug.c`
-- `vendor/lite3/lib/yyjson/yyjson.c`
-- `vendor/lite3/lib/nibble_base64/base64.c`
-- `c/lite3_shim.c`
-
-If these vendored files are missing or empty, link failures will surface as unresolved `lite3_*` symbols.
-
-Verify the snapshot metadata, complete file set, and checksums:
+Check the snapshot's metadata, file set and checksums:
 
 ```bash
 just verify-lite3
 ```
 
-To review and adopt a new upstream revision, select a full commit SHA and run:
+To adopt a new upstream revision, pick a full commit SHA and run:
 
 ```bash
 just update-lite3 <40-character-commit>
 ```
 
-The update command reconstructs `vendor/lite3/` from a fixed allowlist, applies
-`vendor/lite3-read-safety.patch`, and updates provenance and integrity metadata.
-The patch checks node bounds and alignment before compiler alignment assumptions
-and keeps iterator prefetch indexes inside the seven-slot array. The lock records
-the upstream revision and patch path. If the patch cannot apply, the updater
-stops before replacing the installed snapshot. Review upstream changes and retire
-the patch when upstream supplies an equivalent fix. The updater accesses the
-network; normal builds and `just check` do not.
+The updater rebuilds `vendor/lite3/` from a fixed allowlist, applies `vendor/lite3-read-safety.patch` and updates the provenance and checksums. The patch checks node bounds and alignment before the compiler assumes alignment, and keeps iterator prefetch indexes inside their seven-slot array. If the patch no longer applies, the updater stops before replacing the snapshot. Retire the patch when upstream ships an equivalent fix. The updater fetches the selected commit from upstream.
 
-Scheduled CI detects new commits on Lite3's `main` branch. Run the same
-networked check on demand with:
+Scheduled CI reports new commits on Lite3's `main` branch. Run the same check on demand with `just check-lite3-upstream`. On Linux with Clang, `just test-lite3-sanitizers` builds the C sources with AddressSanitizer and UndefinedBehaviorSanitizer and runs the Lite3 tests and C append checks at `-O0` and `-O2`, as CI does.
 
-```bash
-just check-lite3-upstream
-```
+## Build profiles and disk use
 
-Linux CI also compiles the vendored C sources with AddressSanitizer and
-UndefinedBehaviorSanitizer, links their runtimes into the Rust test binary, and
-runs the focused Lite3 suite and public C append regression with C optimization
-levels `-O0` and `-O2`. Reproduce that environment on a Linux host with
-Clang by running:
+Development and test builds keep line-table debug information for Plasmite and drop it for dependencies, which preserves useful backtraces without paying to build and link dependency debug data. For full variable inspection, set `CARGO_PROFILE_DEV_DEBUG=2` or `CARGO_PROFILE_TEST_DEBUG=2` for that session.
 
-```bash
-just test-lite3-sanitizers
-```
+Cargo never deletes builds it replaces, so `target/` grows with each change to dependencies, flags or toolchain. A clean build of everything `just check` needs is about 1 GB, so `just check` runs `cargo clean` first when `target/` passes 2 GB.
 
-## Local validation gates
-
-Use Cargo's fastest applicable command while developing. Start with a type and
-borrow check, then run the smallest test target that covers the changed
-behavior:
-
-```bash
-cargo check
-cargo test --lib <module-or-test-name>
-cargo test --test <integration-test-name> <test-name>
-```
-
-Development and test profiles emit line-table debug information for Plasmite
-and omit debug information from dependencies. This preserves source locations
-and useful backtraces in Plasmite without paying to generate or link dependency
-debug metadata. A debugging session that needs full variable inspection can
-override the profile temporarily with `CARGO_PROFILE_DEV_DEBUG=2` or
-`CARGO_PROFILE_TEST_DEBUG=2`.
-
-Cargo keeps every build it replaces, so `target/` grows with each change to
-dependencies, flags, or the toolchain. A clean build of everything `just check`
-needs is about 1 GB, so `just check` runs `cargo clean` first whenever
-`target/` is over 2 GB.
-
-Run the complete local gate when work is ready for handoff or push:
-
-```bash
-just check          # formatting, linting, Rust tests, version checks, Lite3 integrity
-just integration    # bindings, ABI, cookbook, and cross-artifact checks
-just release-gate   # check + integration + Python wheel smoke
-```
-
-Packaging smoke (npm pack + wheel install) is covered in CI pull requests by
-the `dist-smoke` job in `.github/workflows/ci.yml`.
+[Testing](record/testing.md) says which checks to run before you push, merge and release.
 
 ## Local developer server
 
-`just serve-dev` builds the CLI, seeds a demo pool under `/tmp/plasmite-dev/pools`,
-and starts the local browser interface at `http://127.0.0.1:9009/ui`. Its HTTPS
-listener uses an ephemeral loopback port to avoid collisions with other servers.
-Use `just serve-status` and `just serve-log` to inspect it, and `just serve-stop`
-to stop it. These recipes stop only their tracked dev process after verifying
-its executable, pool directory, and listener arguments; they leave unrelated
-listeners alone. A stale PID that identifies another process causes a refusal.
+`just serve-dev` builds the CLI, seeds a demo pool under `/tmp/plasmite-dev/pools` and starts the browser interface at `http://127.0.0.1:9009/ui`. Its HTTPS listener takes an ephemeral loopback port so it never collides with another server. Use `just serve-status` and `just serve-log` to inspect it and `just serve-stop` to stop it. These recipes stop only the process they started, after checking its executable, pool directory and listener arguments; a stale PID that now names another process causes a refusal.
 
-Secure sharing is part of the normal server. For a local development client that exercises HTTPS
-access, find this dev server's HTTPS address with
-`./target/debug/plasmite serve status`, then
-create a key explicitly:
+To exercise HTTPS access, find the dev server's HTTPS address with `./target/debug/plasmite serve status`, then create a key. Replace `HTTPS_PORT` with the port from the status output.
 
 ```bash
-./target/debug/plasmite --dir /tmp/plasmite-dev/pools access invite --name laptop
+./target/debug/plasmite --dir /tmp/plasmite-dev/pools access invite laptop
 # On the client, paste the key at the hidden prompt:
-plasmite access connect https://127.0.0.1:<HTTPS-port>
+./target/debug/plasmite access connect https://127.0.0.1:HTTPS_PORT
 ```
 
-`access invite` prints the new key; keep it private. The server helpers print
-only status, addresses, and log paths. The old `serve-dev-auth` bearer-token
-recipe has been removed.
+`access invite` prints the key; keep it private.
 
-For a server that lasts only as long as a command, use
-`just serve-with '<command>'`; it stops its own server when the command ends.
-Both developer recipes use the fixed local port `9009` and report a startup
-failure if another process already owns it. They wait up to ten seconds for the
-server's atomic ready file, which it writes after binding its listeners. The
-command starts only after readiness. Early exit or timeout reports the server
-log and cleans up the owned process and readiness scratch directory.
+For a server that lasts only as long as one command, use `just serve-with '<command>'`. Both recipes use the fixed port 9009, report a startup failure if another process holds it, and wait up to ten seconds for the server's ready file before running anything. An early exit or timeout prints the server log and cleans up.
 
-For a repeatable review of command help, human output, explicit JSON, finite
-history, and recovery errors, run:
+To review command help, human output, JSON output, finite history and recovery errors in one pass, run:
 
 ```bash
 cargo build --bin plasmite
 bash scripts/cli_ux_tour.sh
 ```
 
-The tour logs output to `tmp/cli-ux-tour.log`, uses temporary pool and saved-access
-directories, and removes them when it finishes. `serve status` reads the current
-user's registry so the tour can show the installed discovery workflow.
+The tour logs to `tmp/cli-ux-tour.log` and removes its temporary pool and access directories when it finishes. Its `serve status` step reads the current user's server registry.
 
-## Python tooling policy
+## Python tooling
 
-Use `uv` for Python environment and package operations in this project.
+Use `uv` for every Python environment and package operation (`uv venv`, `uv pip`, `uv tool`, `uv run`). Do not add `pip` commands to docs or runbooks.
 
-- Use `uv venv`, `uv pip`, and `uv tool` for local and CI automation.
-- Do not add direct `pip`-based commands to docs or release runbooks.
+## SDK archives
 
-## Release artifact matrix
-
-`.github/workflows/release.yml` (build stage) builds and packages binaries for:
-
-- `x86_64-unknown-linux-gnu` (`linux_amd64`)
-- `x86_64-apple-darwin` (`darwin_amd64`)
-- `aarch64-apple-darwin` (`darwin_arm64`)
-- `aarch64-unknown-linux-gnu` (`linux_arm64`)
-- `armv7-unknown-linux-gnueabihf` (`linux_armv7`)
-- `x86_64-pc-windows-msvc` (`windows_amd64` for Python and `win32-x64` for Node)
-
-Each release tarball now follows the SDK layout contract:
-
-```text
-bin/plasmite
-bin/pls
-include/plasmite.h
-lib/libplasmite.so.2          # Linux
-lib/libplasmite.2.dylib       # macOS
-lib/libplasmite.a               # optional
-lib/pkgconfig/plasmite.pc
-```
-
-## Source SDK build (C `libplasmite` consumers)
-
-If you want to link a C program against `include/plasmite.h` and `libplasmite`,
-build a local SDK tarball from source in release-style layout:
+To link a C program against `include/plasmite.h`, build a release-style SDK archive from source:
 
 ```bash
-just sdk-from-source
+just sdk-from-source                       # on Linux x86_64
+just sdk-from-source aarch64-apple-darwin  # on Apple Silicon
 ```
 
-Default output:
-
-```text
-dist/plasmite_<version>_linux_amd64.tar.gz
-```
-
-This command builds `plasmite` + `pls`, builds shared/static `libplasmite`,
-packages `bin/`, `include/`, `lib/`, `lib/pkgconfig/plasmite.pc`, and runs
-artifact smoke checks.
-
-`scripts/build_release_artifacts.sh <target-triple> [--static]` is the shared
-release build entrypoint. The release workflow invokes it once per platform,
-then reuses those artifacts for the SDK, Python wheel, and Node package instead
-of maintaining separate Cargo command blocks for each distribution channel.
-
-Use the SDK from your C build via `pkg-config`:
+This builds `plasmite`, `pls` and the shared and static libraries, creates `dist/plasmite_<version>_<platform>.tar.gz` in the [SDK layout](record/distribution.md#sdk-layout), and checks the extracted archive. The smoke check runs the target binaries, so use a host that can run them. To use the shared library through pkg-config, replace `VERSION` with the package version and use the archive suffix for your target.
 
 ```bash
-tar -xzf dist/plasmite_<version>_linux_amd64.tar.gz -C /path/to/sdk
+mkdir -p /path/to/sdk
+tar -xzf dist/plasmite_VERSION_linux_amd64.tar.gz -C /path/to/sdk
 export PKG_CONFIG_PATH=/path/to/sdk/lib/pkgconfig
 pkg-config --cflags --libs plasmite
 ```
 
-### Linux x86_64 packages
+`scripts/build_release_artifacts.sh <target-triple> [--static]` builds the native artifacts once per target. The release workflow packages the SDK, Python wheels and Node native assets from that output for the channels each target supports. [Releasing](record/releasing.md) and the [release runbook](../skills/plasmite-release-manager/SKILL.md) cover publication. [Distribution](record/distribution.md) lists the targets, platform baselines and the Linux ARM preview.
 
-Release SDKs, npm native assets and Python wheels build on Ubuntu 22.04, pinning
-an explicit glibc 2.35 baseline. Python packaging uses `auditwheel` to check both
-bundled native programs before tagging the wheel `manylinux_2_35_x86_64`.
-These packages start with Plasmite 1.3.0. See the
-[distribution guide](record/distribution.md) for the requirements of older releases.
-
-To run the release wheel check against an SDK built on that baseline:
+To check a Linux x86_64 wheel against the glibc 2.35 baseline, build the SDK on that baseline and run:
 
 ```bash
 PLASMITE_SDK_DIR=/path/to/sdk \
@@ -262,148 +112,20 @@ PLASMITE_MANYLINUX_PLATFORM=manylinux_2_35_x86_64 \
   bash scripts/python_wheel_smoke.sh
 ```
 
-The check rejects a newer glibc dependency instead of merely renaming the wheel.
-Source builds on other hosts can still run the ordinary local wheel smoke.
+The check uses `auditwheel` and rejects a newer glibc dependency instead of only renaming the wheel. Without these variables the script runs the ordinary local wheel smoke.
 
-### Install a Linux ARM preview
+## Windows builds
 
-The published [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)
-includes ARM64 and ARMv7 SDK archives with `plasmite`, `pls`, libraries, and
-headers. You can run the CLI and server without installing Rust or a desktop.
-Use the [ARM installation guide](record/distribution.md#linux-arm-sdk-preview-install)
-for public downloads, checksum verification, extraction, `PATH`, and pkg-config
-setup. It selects the archive by Linux userland width, not kernel architecture;
-both targets require glibc 2.35 or newer.
+Build in an x64 Visual Studio developer terminal with `clang-cl` on `PATH`, the Visual Studio C++ linker and the Windows SDK. Use the x64 Rust and LLVM toolchains, including on ARM64 Windows, where the build runs under emulation. `cl.exe` cannot build the vendored C code, which uses compiler extensions it lacks.
 
-The earlier [hosted CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
-is historical validation evidence. Use the published 1.0.0 assets for current
-installation. Physical Pi installation and OS-service reboot checks remain
-pending, so both targets retain the preview tier. ARMv6 is unsupported.
+Keep server state and saved connections on a filesystem that enforces Windows access control lists, such as NTFS. [Testing](record/testing.md#windows) lists the Windows-only test commands.
 
-On ARMv7, a pool file can be at most 2,147,483,647 bytes (2 GiB minus one
-byte). Plasmite rejects creation of a larger pool or mapping of a larger
-existing pool. A smaller pool can still fail to map if the operating system
-lacks memory.
+Troubleshooting:
 
-The ARM64 build uses Ubuntu 22.04 on ARM64, with glibc 2.35 as its
-runtime baseline. The ARMv7 build uses GCC's `arm-linux-gnueabihf` cross
-compiler with an Ubuntu 22.04 glibc 2.35 sysroot. Its compiler flags pin
-`-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard`; the Rust target also uses
-Thumb-2; dependencies can select optional NEON routines at runtime. The CI
-smoke checks extract both archives, compile and link a C SDK consumer, exercise
-the CLI and HTTPS restart path, and run six integration suites per target.
-ARMv7 runs through QEMU and also checks pool handoffs in both directions
-between 64-bit and 32-bit CLIs. These checks do not replace testing on physical
-Raspberry Pi hardware.
-
-For static linking on Linux:
-
-```bash
-pkg-config --cflags --static --libs plasmite
-```
-
-You can override target/platform tags:
-
-```bash
-just sdk-from-source aarch64-apple-darwin
-```
-
-`release.yml` uploads build artifacts only (SDK tarballs, Python dist artifacts, npm tarball, and release metadata).
-
-`.github/workflows/release-publish.yml` consumes verified build artifacts, checks an offline Homebrew candidate, publishes crates/npm/PyPI and GitHub SDK assets, then verifies public downloads against the build's checksums. Existing releases are verified without overwriting notes or assets.
-
-After successful publication, run `scripts/update_homebrew_formula.sh <tag> ../homebrew-tap --build-run-id <id>`, review the diff, and push the formula. The helper refuses to update until anonymous public downloads match the selected build. `--prepare-only` renders temporary rehearsal candidates without a public download check; never push those candidates. CI never mutates tap history.
-
-After publishing, dispatch `post-release-smoke.yml`. It checks npm and crates.io on Linux (also PyPI when the release declares Linux wheels), a published PyPI wheel on macOS, and the macOS Homebrew installation.
-
-For low-risk workflow validation after release workflow changes, run a no-publish rehearsal:
-
-```bash
-gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=true
-```
-
-If publish fails due to registry credentials, rerun only publish without rebuilding matrix artifacts:
-
-```bash
-gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false
-```
-
-If you need to force a specific build run (for example, during incident recovery), you can still pass `build_run_id` instead of `release_tag`.
-
-The publish workflow calls `scripts/resolve_release_build.sh REPOSITORY RUN_ID TAG REHEARSAL`.
-Pass an empty string for either `RUN_ID` or `TAG`; supply exactly one. The script
-searches at most forty recent runs for a tag, then validates the selected build's
-metadata against the tag's current remote commit. It emits `build_run_id`, `tag`,
-`version`, `source_sha`, and `rehearsal` as `key=value` lines only after all checks
-pass. It never publishes. Run `python3 scripts/test_release_build.py` for offline
-selection and provenance fixtures.
-
-## Performance monitoring policy
-
-- For hot-path or storage changes, release-blocking performance checks run locally on the maintainer host with the same power/runtime conditions for baseline and candidate.
-- Use:
-  - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <vX.Y.Z> --runs 3`
-- Multi-platform performance sweeps are optional and should be run when platform-sensitive code changes (I/O, mmap, locking, FFI/bindings), not required for every patch release.
-
-## Linux ARM archive preview
-
-- `aarch64-unknown-linux-gnu` (`linux_arm64`) and
-  `armv7-unknown-linux-gnueabihf` (`linux_armv7`) are GitHub SDK preview
-  targets for Raspberry Pi CLI/server use.
-- The archives contain the CLI and SDK layout. Users can install and run them
-  without Rust.
-- The [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)
-  publishes both archives and `sha256sums.txt`. The earlier
-  [ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
-  remains historical validation evidence. Physical Raspberry Pi installation
-  and reboot checks remain pending; publication does not promote the preview
-  tier.
-- ARMv6 is outside this preview. npm, PyPI, and Homebrew remain unchanged.
-
-## Windows support policy
-
-- Windows (`x86_64-pc-windows-msvc`) is now an official release channel for:
-  - Python wheel delivery (`windows_amd64`)
-  - Node native delivery (`win32-x64`)
-- These channels are built and smoke-tested in `release.yml` and published through `release-publish.yml`.
-- Windows rollback-only fallback workflows have been removed; official Windows delivery is via Python/Node release channels.
-
-Windows CI also runs secure-sharing tests against the release CLI: private
-state permissions, native connections, browser sessions, direct MCP
-authorization, restart, and revocation. To run that check from PowerShell:
-
-```powershell
-cargo test --release --lib windows_private::tests -- --test-threads=1
-cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access -- --test-threads=1
-```
-
-Use a filesystem that enforces Windows access control lists, such as NTFS, for
-server state and saved connections. The official artifact targets Windows
-x86_64; an ARM64 Windows VM can run it through Windows' x64 emulation.
-
-Source builds require `clang-cl`, the Visual Studio C++ linker, and the Windows
-SDK. The x86_64 Rust and LLVM toolchains also build the supported target inside
-an ARM64 Windows VM. The vendored C code uses extensions that `cl.exe` does not
-support.
-
-## Windows troubleshooting
-
-- **Source build fails with `cl.exe` errors (`__builtin_expect`, `__attribute__`, parsing errors in `lite3.h`)**
-  - Prefer official install channels (`uv tool install plasmite`, `npm i -g plasmite`) over local source builds.
-- **Source build fails with Lite3 parse errors near `case` labels**
-  - Verify the vendored snapshot with `just verify-lite3`.
-  - Plasmite pins a C11-compatible Lite3 revision; unexpected parse errors can indicate a modified or incomplete snapshot.
-- **`feed` fails with `failed to encode json as lite3`**
-  - After `access connect`, use an HTTPS pool URL so the remote server encodes the message. See [secure sharing](record/serving.md#share-your-first-pool).
-- **Emergency fallback artifact integrity**
-  - PowerShell: `Get-FileHash .\\plasmite_<version>_windows_amd64_preview.zip -Algorithm SHA256`
-  - Compare with the accompanying `.sha256` file.
+- **`cl.exe` errors such as `__builtin_expect`, `__attribute__` or parse errors in `lite3.h`.** The build is using `cl.exe`; put `clang-cl` on `PATH`, or install through `uv tool install plasmite` or `npm i -g plasmite` instead.
+- **Lite3 parse errors near `case` labels.** Run `just verify-lite3`; Plasmite pins a C11-compatible revision, so these errors point to a modified or incomplete snapshot.
+- **`feed` fails with `failed to encode json as lite3`.** After `access connect`, feed through the HTTPS pool URL so the server encodes the message. See [secure sharing](record/serving.md#share-your-first-pool).
 
 ## Portable Node view backend
 
-The remote-only Node package includes a checked WebAssembly (Wasm) artifact built
-from the shared Rust/C reader and input builder. Consumers need no native addon
-or compiler. Maintainers use the pinned Rust toolchain and WASI SDK 34; see the
-[portable core build instructions](../bindings/node/portable-core/README.md).
-`npm run check:portable` verifies the artifact, its import-free interface and the
-shared-source manifest without building native code.
+The Node package's HTTP client includes a checked WebAssembly (Wasm) core built from the shared Rust and C reader and input builder, so remote-only users need no native add-on or compiler. Maintainers build it with the pinned Rust toolchain and WASI SDK 34; see the [portable core build instructions](../bindings/node/portable-core/README.md). `npm run check:portable` verifies the artifact, its import-free interface and the shared-source manifest without building native code.

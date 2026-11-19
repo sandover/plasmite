@@ -1,6 +1,6 @@
-# Plasmite CLI Spec (1.2 and later)
+# Plasmite CLI Spec (1.2–1.3)
 
-This document defines the normative CLI compatibility contract starting with Plasmite 1.2.
+This document preserves the CLI contract from Plasmite 1.3.0. See the [2.0 contract](../v2/SPEC.md) for current behavior.
 The historical `spec/v0/` path is retained for existing documentation links;
 it does not preserve the superseded pre-1.0 CLI behavior.
 It keeps only script-level guarantees; signatures, walkthroughs, and examples live in code docs and `docs/cookbook.md`.
@@ -16,7 +16,7 @@ The 1.2.0 breaking cutover removes superseded format and input switches and
 changes feed's default message interpretation. Later releases follow the
 package major-version compatibility policy.
 No compatibility mode accepts the earlier behavior. The historical document
-path stays available. See [upgrading to 1.2.0](../../docs/record/upgrading-1.2.md).
+path stays available. See [upgrading to 1.2.0](https://github.com/sandover/plasmite/blob/v1.2.0/docs/record/upgrading-1.2.md).
 Language APIs, HTTP, MCP, and pool files keep their separately versioned contracts.
 
 ## Stable Surface
@@ -37,10 +37,6 @@ Language APIs, HTTP, MCP, and pool files keep their separately versioned contrac
 `duplex`, `tap`, `doctor`, `serve`, `access`, `mcp`, and `completion` also
 form the current command inventory. The separately versioned MCP contract
 owns its protocol guarantees.
-
-The source checkout includes next-major duplex changes described in the
-[upgrade guide](../../docs/record/upgrading-2.0.md); do not ship them
-under the current 1.x package version.
 
 ### Messages, input, and output
 
@@ -87,11 +83,6 @@ under the current 1.x package version.
   Live follow reports loss on stderr and continues. access status prints its
   report and returns nonzero when reachability or acceptance fails.
 - --data, --json, --yaml, --jsonl, --in, --data-only and --errors are removed.
-- Duplex accepts the same input formats on terminals and pipes. It gives no
-  meaning to application fields and delivers its own appends. --me and
-  --echo-self are removed. Successful input EOF closes sending; reception
-  continues until cancellation, output failure, or the idle-output timeout.
-  The receiver chooses its starting position before the first send.
 - Binary output requires a message command. Reports retain their JSON/YAML
   fields. Help/completion remain text, tap preserves child output, MCP keeps
   JSON-RPC. Product version output uses the shared development/release identity.
@@ -364,19 +355,11 @@ Current remote shorthand constraints (documented, non-frozen):
 `feed`, `follow`, and `duplex` also accept explicit `udp://HOST:PORT/POOL` targets.
 `serve --udp-follow` enables UDP reads and implies the default/configured UDP input
 address. Existing `--udp` remains append-only. Installed removal/preservation
-rules follow the [UDP v1 contract](../udp/v1/SPEC.md).
+rules follow the [1.3.0 UDP transport contract](https://github.com/sandover/plasmite/blob/v1.3.0/spec/udp/v1/SPEC.md).
 
 UDP feed never emits a stored-message receipt. Exit 0 means local socket
 submission, not storage. UDP follow/history use the normal filters and formats
-with best-effort delivery. The
-[arrival-order policy](../udp/v1/SPEC.md#receive-ordering-and-notices) describes
-unreleased source behavior; see that specification's source status. Deliver
-matching DATA
-in arrival order, including late messages and duplicates. Sequence/progress
-jumps never create inferred gaps or suppress DATA. Explicit oversized/pressure
-skips produce notices and finite exit 1; confirmed server retention gaps exit 9.
-A finite follow ends on terminal progress and drains accepted events. Exit 0
-requires no observed server skip/error; it gives no assurance of complete
-delivery. No-matching-output timeout exits 124.
+with best-effort delivery. Delivery gaps produce notices and finite exit 1;
+confirmed retained-history gaps exit 9; no-matching-output timeout exits 124.
 No automatic write retry, HTTP fallback, or gap repair. Unsupported commands or
 options reject a UDP target before work, with Usage.

@@ -1,7 +1,7 @@
 //! Purpose: Define stable error kinds and rich errors shared across core + CLI.
 //! Exports: `ErrorKind`, `Error`, `to_exit_code`.
 //! Role: Central error vocabulary for JSON stderr surfaces and exit code mapping.
-//! Invariants: `ErrorKind` names are part of the v0.0.1 contract; change with care.
+//! Invariants: `ErrorKind` names are part of the 2.0 contract; change with care.
 //! Invariants: `Error` may carry optional context (path/seq/offset) + a source error.
 use std::error::Error as StdError;
 use std::fmt;

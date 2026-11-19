@@ -16,10 +16,12 @@ tests with one expected skip. Native and fallback view tests both pass.
 
 [Raw measurements](raw.json) alternate the old and corrected append-view
 ordering seven times with literal builtins, where no callback can close a
-handle. Median small-send time changes from 5.026 to5.102 microseconds; wide
-changes from 19.805 to20.398, and 64 KiB string changes from 14.569 to14.208.
+handle. Median send times in microseconds were 5.026 to 5.102 for the small
+fixture, 19.805 to 20.398 for the wide fixture, and 14.569 to 14.208 for the
+64 KiB string.
 These short samples establish the scale of overhead, not a performance win.
 The raw file records interpreter and library hashes. The
 [exact measured runner](measured-runner.py) predates formatting of the maintained
-benchmark. The existing producer source archive supplies the old facade;
-the corrected facade lives in this commit. No runtime C library changed.
+benchmark. The producer source archive supplies the old facade. Commit
+`646b9b4` contains the corrected facade, and the comparison uses the same C
+library on both sides.

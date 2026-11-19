@@ -13,11 +13,11 @@ one object per Rust target:
 - `sdk_platform` is the stable suffix used by Python artifacts and, when
   `build_sdk` is true, SDK archives.
 - `node_platform` is the directory and artifact suffix used by npm.
-- `build_sdk`, `upload_sdist`, and `upload_wheel` control existing release
-  workflow behavior.
+- `build_sdk`, `upload_sdist`, and `upload_wheel` select the targets that upload
+  SDK archives, Python source distributions and Python wheels, respectively.
 - `channels` records whether the target is `official`, `preview`, or absent
   (`null`) for each target-dependent delivery channel.
 
-Keep this file small. It describes target identity and channel capability; it
-does not encode release sequencing, credentials, or policy prose. Run
-`scripts/validate_release_targets.sh` after changing it.
+Run `just check-release-targets` after changing the manifest. That recipe checks the
+schema, the distribution guide and the workflow scripts that use the manifest.
+For release sequencing and credentials, see the [release runbook](../skills/plasmite-release-manager/SKILL.md).

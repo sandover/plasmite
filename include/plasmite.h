@@ -1,49 +1,116 @@
 /*
-Purpose: C ABI for Plasmite bindings using libplasmite.
-Key Exports: Client/Pool/Stream handles, JSON + Lite3 append/get/tail functions, buffers, errors.
-Role: Stable boundary for official bindings (Go/Python/Node).
+Plasmite C ABI, major version 2.
 
-ABI stability:
-  - Within a major version, this header is additive-only: no field removals,
-    no reordering of struct members, no changes to enum discriminant values.
-  - New functions and struct fields are appended at the end.
-  - Breaking changes require a new major version. Each major has its own shared library name.
+Plasmite stores JSON messages in pools: bounded ring buffers on disk that many
+processes can write and read at once. Feed writes a message, follow waits for
+new ones, and fetch reads what the pool holds and stops. A pool reference is a
+name in the client's directory, a file path, or an https:// URL on a server
+saved with `plasmite access connect`. The Go, Python and Node bindings wrap
+this library; spec/v2/SPEC.md in the Plasmite repository holds the contract.
 
-Ownership rules:
-  - Handles (plsm_client_t*, plsm_pool_t*, plsm_stream_t*) are opaque.
-    The caller receives ownership from *_new / *_open / *_create and must
-    pass the handle to the matching *_free when done.
-  - Buffers (plsm_buf_t) returned via out-parameters are caller-owned.
-    Free with plsm_buf_free.  Do not mix with malloc/free.
-  - Errors (plsm_error_t*) returned via out_err are caller-owned.
-    Free with plsm_error_free.  NULL means no error.
-  - String fields inside plsm_error_t are owned by the error struct;
-    they become invalid after plsm_error_free.
-  - Every *_free function accepts NULL. plsm_buf_free and
-    plsm_lite3_frame_free reset caller-owned output structs, so freeing the
-    same output struct again is a no-op.
+Return values:
+  - Functions that return int return 0 on success and -1 on failure. On
+    failure they store a new plsm_error_t in *out_err. Pass NULL for out_err
+    to get the -1 without details.
+  - Next calls (plsm_stream_next_wait, plsm_lite3_stream_next_wait,
+    plsm_view_stream_next, plsm_udp_follow_next, plsm_udp_follow_next_view)
+    return 1 for an item, 0 when timeout_ms passes, 2 when a finite read ends,
+    3 after a cancel, and -1 on error. A timeout leaves the reader open.
+    timeout_ms 0 polls once; UINT64_MAX waits without a limit.
+  - A PLSM_ERROR_RETENTION_GAP error means the pool overwrote messages before
+    the reader reached them. `missing` holds the first missed sequence and
+    `next_seq` the oldest sequence still retained. Reopen at next_seq to
+    accept the loss.
 
-Caller obligations:
-  - Serialize all calls on each opaque client, pool, or stream handle,
-    including reads and free. Local stream cancel may overlap a read; wait for
-    the read before freeing. UDP pool send/follow calls may overlap while the
-    handle stays alive; wait for all calls before freeing it. UDP follow cancel
-    may run during next; cancel and wait for active calls before close.
-    Distinct handles may run concurrently. Do not use a freed handle.
-  - Every non-NULL pointer and pointer/length pair must refer to valid,
-    suitably aligned storage for the complete call. Handles and error pointers
-    must come from this library and be passed to their matching free exactly
-    once. Using a handle after free, freeing a handle/error twice, passing an
-    arbitrary non-NULL address, or overstating a buffer/tag length is undefined
-    behavior in the caller and is not converted into a Plasmite error.
+Handles and their release calls. Every release call accepts NULL; never use a
+handle after releasing it.
+  plsm_client_t        plsm_client_new                   plsm_client_free
+  plsm_pool_t          plsm_pool_open, plsm_pool_create  plsm_pool_free
+  plsm_stream_t        plsm_pool_follow, plsm_pool_fetch plsm_stream_free
+  plsm_lite3_stream_t  plsm_pool_follow_lite3,
+                       plsm_pool_fetch_lite3             plsm_lite3_stream_free
+  plsm_udp_client_t    plsm_udp_client_new               plsm_udp_client_free
+  plsm_udp_pool_t      plsm_udp_client_open_pool         plsm_udp_pool_free
+  plsm_udp_follow_t    plsm_udp_pool_read                plsm_udp_follow_close
+  plsm_message_view_t  view reads, view feeds,
+                       plsm_view_from_lite3              plsm_view_release
+  plsm_view_cursor_t   plsm_value_iter                   plsm_cursor_free
+  plsm_selector_t      plsm_selector_new                 plsm_selector_free
+  plsm_builder_t       plsm_builder_new                  plsm_builder_free
+  plsm_error_t         any failing call                  plsm_error_free
+
+Buffers and outputs:
+  - Initialize output structs to zero. Free a successful plsm_buf_t with
+    plsm_buf_free, a frame with plsm_lite3_frame_free and a UDP event with
+    plsm_udp_event_free. Each call clears the struct for reuse.
+  - plsm_pool_feed_json, plsm_pool_feed_lite3, plsm_stream_next_wait and
+    plsm_udp_event_message fill their buffer with one message as a JSON
+    envelope: {"seq":N,"time":"RFC 3339","meta":{"tags":[...]},"data":{...}}.
+    plsm_pool_info and plsm_pool_list return JSON describing pools.
+  - Strings inside plsm_error_t belong to the error and go away with
+    plsm_error_free. Free any previous error before reusing its output slot.
+
+Example: print every retained message from a saved sequence onward.
+
+    plsm_client_t *client = NULL;
+    plsm_pool_t *pool = NULL;
+    plsm_stream_t *stream = NULL;
+    plsm_error_t *err = NULL;
+    plsm_read_options_t from = { sizeof from, PLSM_READ_SEQUENCE, checkpoint, NULL, 0 };
+
+    if (plsm_client_new("./data", &client, &err) == 0 &&
+        plsm_pool_open(client, "sensors", 1, &pool, &err) == 0 &&
+        plsm_pool_fetch(pool, &from, &stream, &err) == 0) {
+        for (;;) {
+            plsm_buf_t message = {0};
+            int status = plsm_stream_next_wait(stream, 1000, &message, &err);
+            if (status == 1) {
+                printf("%.*s\n", (int)message.len, (const char *)message.data);
+                plsm_buf_free(&message);
+            } else if (status != 0) {
+                break;  // 2 finished, 3 cancelled, -1 failed with err set
+            }
+        }
+    }
+    if (err && err->kind == PLSM_ERROR_RETENTION_GAP)
+        fprintf(stderr, "lost from %llu; reopen at %llu\n",
+                (unsigned long long)err->missing, (unsigned long long)err->next_seq);
+    else if (err)
+        fprintf(stderr, "plasmite: %s\n", err->message);
+    plsm_error_free(err);
+    plsm_stream_free(stream);
+    plsm_pool_free(pool);
+    plsm_client_free(client);
+
+Use plsm_pool_follow instead of plsm_pool_fetch to keep waiting for new
+messages.
+
+Threads:
+  - Serialize all calls on each client, pool or stream handle, including
+    reads and free. Separate handles may run concurrently.
+  - A local stream cancel may overlap a read; wait for the read to return
+    before freeing the stream.
+  - UDP pool send and read calls may overlap while the handle stays alive;
+    wait for all of them before freeing it. A UDP follow cancel may run during
+    next; cancel and wait for active calls before close.
+
+Caller obligations: every non-NULL pointer and pointer/length pair must refer
+to valid, suitably aligned storage for the whole call. Handles and errors must
+come from this library and go to their release call exactly once. Using a
+handle after release, releasing it twice, passing an arbitrary non-NULL
+address or overstating a buffer or tag length is undefined behavior; Plasmite
+cannot turn it into an error.
+
+ABI stability: within a major version this header only grows. Struct members
+keep their order, enum values keep their numbers, and new functions and
+fields go at the end. A breaking change takes a new major version, and each
+major version has its own library file name.
 
 Linking:
-  - Dynamic: use libplasmite.2.dylib, libplasmite.so.2, or plasmite2.dll.
-  - Static: link against libplasmite.a (include system libs: -lpthread -ldl -lm).
-  - pkg-config: `pkg-config --cflags --libs plasmite` (available when installed
-    via Homebrew tap or release SDK tarball).
-
-Notes: All allocations returned must be freed by the caller via provided free functions.
+  - Dynamic: libplasmite.2.dylib, libplasmite.so.2 or plasmite2.dll.
+  - Static: libplasmite.a, plus the system libraries -lpthread -ldl -lm.
+  - pkg-config: `pkg-config --cflags --libs plasmite` works after a Homebrew
+    or release SDK install.
 */
 
 #ifndef PLASMITE_H
@@ -144,9 +211,12 @@ typedef struct plsm_error {
 
 typedef struct { const uint8_t *data; size_t len; } plsm_text_t;
 
-/* A null options pointer selects defaults. Otherwise initialize struct_size
- * to sizeof the struct. The caller retains the array and strings through
- * the call. The stream retains its own copy. */
+/* Read and feed options (plsm_read_options_t, plsm_feed_options_t): pass NULL
+ * for defaults, or set struct_size to sizeof the struct. Tag arrays and their
+ * strings must stay valid for the call; a stream keeps its own copy.
+ * start_value means: SEQUENCE, the first sequence to read; TIME, Unix
+ * nanoseconds; AGO, nanoseconds before now; LAST, a message count. DEFAULT
+ * starts a follow at the next new message and a fetch at the oldest. */
 typedef enum plsm_read_start_kind {
     PLSM_READ_DEFAULT = 0,
     PLSM_READ_OLDEST = 1,
@@ -188,14 +258,12 @@ int plsm_pool_feed_lite3_receipt(plsm_pool_t *, const uint8_t *, size_t,
     const plsm_feed_options_t *, plsm_feed_receipt_t *, plsm_error_t **);
 int plsm_pool_fetch(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
 int plsm_pool_fetch_lite3(plsm_pool_t *, const plsm_read_options_t *, plsm_lite3_stream_t **, plsm_error_t **);
+/* Pass create=1 to make a 1 MiB pool if it does not exist, or 0 to open only. */
 int plsm_pool_open(plsm_client_t *, const char *, uint32_t create, plsm_pool_t **, plsm_error_t **);
 int plsm_pool_follow(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
 int plsm_pool_follow_lite3(plsm_pool_t *, const plsm_read_options_t *, plsm_lite3_stream_t **, plsm_error_t **);
 
-/* View readers return immutable message snapshots through plsm_view_stream_next.
- * Each caller owns the returned views. Cancel and free the reader with
- * plsm_stream_cancel and plsm_stream_free. */
-
+/* A NULL pool_dir uses the default directory, ~/.plasmite/pools. */
 int plsm_client_new(const char *pool_dir, plsm_client_t **out_client, plsm_error_t **out_err);
 void plsm_client_free(plsm_client_t *client);
 
@@ -204,8 +272,6 @@ void plsm_client_free(plsm_client_t *client);
  * for an explicit bare file. Windows drive-relative forms are unsupported. */
 int plsm_pool_create(plsm_client_t *client, const char *pool_ref, uint64_t size_bytes, plsm_pool_t **out_pool, plsm_error_t **out_err);
 void plsm_pool_free(plsm_pool_t *pool);
-
-
 
 void plsm_stream_free(plsm_stream_t *stream);
 void plsm_lite3_stream_free(plsm_lite3_stream_t *stream);
@@ -363,8 +429,9 @@ int plsm_value_get(plsm_value_ref_t value, const uint8_t *key, size_t len,
 int plsm_value_index(plsm_value_ref_t value, uint32_t index,
     plsm_value_ref_t *out, plsm_error_t **err);
 int plsm_value_read(plsm_value_ref_t value, plsm_view_value_t *out, plsm_error_t **err);
-/* out_count always receives required capacity; insufficient capacity returns
- * Usage without filling slots. Keys use unique canonical last-entry values. */
+/* For a valid container, out_count receives the required capacity. A smaller
+ * buffer returns Usage without filling slots. Keys use unique canonical
+ * last-entry values. */
 int plsm_value_entries(plsm_value_ref_t value, plsm_view_entry_t *slots,
     size_t capacity, size_t *out_count, plsm_error_t **err);
 /* Sequential cursor retains one owner and bounded state. Serialize calls on
@@ -397,13 +464,15 @@ int plsm_view_to_json(const plsm_message_view_t *view, plsm_buf_t *out, plsm_err
  * non-NULL empty span names the empty object key. Kinds match plsm_view_value_t.
  * Nodes are opaque handles, not byte offsets; pass them back unchanged and
  * use only nodes returned by this builder. Container puts return a child node.
- * append_builder consumes the contents on both success and failure after input
- * guards; free the handle once afterward. No publication occurs on build errors.
+ * plsm_pool_feed_builder_view consumes the contents after validating the
+ * arguments. Free the handle once afterward. A build error stops publication.
  * A flush error can follow publication, as for other appends. */
 typedef struct plsm_builder plsm_builder_t;
-/* Independent immutable owners from the same reader as JSON. Pass tags as
- * UTF-8 spans when opening. Use plsm_stream_cancel and plsm_stream_free.
- * Serialize reads. Cancel may run concurrently.
+/* View reads: plsm_view_stream_next reads immutable message views from a
+ * plsm_stream_t opened by plsm_pool_follow or plsm_pool_fetch, as an
+ * alternative to plsm_stream_next_wait. The caller owns each returned view.
+ * Use plsm_stream_cancel and plsm_stream_free. Serialize reads. Cancel may run
+ * concurrently.
  * next waits for the first matching item. Local reads then acquire available
  * companions without waiting. Each HTTPS call returns at most one item.
  * max_count/max_bytes must be positive; bytes bound encoded payload snapshots.

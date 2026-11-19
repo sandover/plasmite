@@ -1,18 +1,24 @@
 ---
 name: "plasmite-release-manager"
-description: "Carefully run Plasmite releases end-to-end with fail-closed pre-release QA, split build/publish workflow mechanics, provenance validation, and post-release delivery verification across crates.io, npm, PyPI, Homebrew, and release artifacts. Use when asked to prepare, dry-run, execute, audit, or recover a release (including publish-only reruns after credential fixes)."
+description: "Carefully run Plasmite releases end-to-end with fail-closed pre-release QA, split build/publish workflow mechanics, provenance validation, and delivery checks for crates.io, npm, PyPI, Homebrew, the Go module and the SDK archives. Use when asked to prepare, dry-run, execute, audit, or recover a release (including publish-only reruns after credential fixes)."
 ---
 
 # Plasmite Release Manager
 
 Use this runbook for preparation, rehearsal, publication and recovery. Record the
 release target (`vX.Y.Z`), mode (`dry-run` or `live`), agent and previous release tag.
-Honor any requested review or publication hold before remote mutations.
+Honor any requested review or publication hold. A hosted rehearsal needs an
+existing remote release tag and a successful build for it. If the candidate has
+no tag and the dry run must leave remote refs unchanged, stop after local checks.
 
 ## Prepare the exact candidate
 
-1. Check `gh auth status` and access to GitHub Actions artifacts and registries.
-   Keep a clean maintainer checkout of `../homebrew-tap` available.
+1. Check `gh auth status` and access to GitHub Actions artifacts. Keep a clean
+   maintainer checkout of `../homebrew-tap` available. The publish workflow uses
+   the `CARGO_REGISTRY_TOKEN` and `PYPI_API_TOKEN` repository secrets and npm
+   trusted publishing. Rehearsal checks candidate artifacts, the temporary tap
+   formula and registry preflight. The live publish steps exercise registry
+   publishing permissions.
 2. Inspect the complete diff from the previous release. Finalize the versioned
    changelog with the actual release date and a fresh empty `[Unreleased]` heading.
    Review the complete release body: the publish workflow appends install guidance.
@@ -25,7 +31,8 @@ Honor any requested review or publication hold before remote mutations.
    `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`.
    Failed required checks block progression. Do not duplicate the canonical gate's
    individual test commands or benchmark unchanged code.
-6. Commit and push the reviewed candidate, including versions and changelog.
+6. For a local-only dry run, record the results and stop here. Otherwise, commit
+   and push the reviewed candidate, including versions and changelog.
    Require a clean working tree and confirm the intended remote ref names this SHA.
    Set `release_sha="$(git rev-parse HEAD)"`, then run:
    `gh run list --workflow ci.yml --commit "$release_sha" --limit 5 --json headSha,status,conclusion,url`.
@@ -34,10 +41,11 @@ Honor any requested review or publication hold before remote mutations.
 
 ## Build, rehearse and publish
 
-1. Tag the green candidate: `git tag <release_target> "$release_sha"`, then
+1. When authorized to push a new tag, tag the green candidate with
+   `git tag <release_target> "$release_sha"` and push it with
    `git push origin <release_target>`. Never move an existing release tag.
    The tag starts `release.yml`; all matrix jobs must pass. Record its run ID/URL.
-   Release builds use Rust 1.99.1 and the targets in `release/targets.json`.
+   The workflow pins Rust and uses the target manifest from the tagged source.
 2. Verify provenance before using artifacts:
    `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`.
    Require the metadata's source SHA to equal the reviewed candidate. If downloads
@@ -62,6 +70,12 @@ Honor any requested review or publication hold before remote mutations.
    `Formula/plasmite.rb` as `plasmite: update to <version>` and push; if already
    aligned, no commit is needed. `--prepare-only` is for temporary rehearsal
    candidates, never a live tap promotion.
+6. Once the matching SDK archives pass public download verification, publish the
+   Go module for a 2.x release. Set `release_target` to the product tag and
+   `release_sha` to its verified source commit, then run
+   `git tag "bindings/go/$release_target" "$release_sha"` and
+   `git push origin "refs/tags/bindings/go/$release_target"`. On a retry, verify
+   that the existing Go tag points to the same commit and leave it in place.
 
 ## Recover without guessing
 
@@ -100,7 +114,6 @@ run IDs**, not the newest workflow run. Recheck the remote tag and exact-SHA CI.
 3. Dispatch `gh workflow run post-release-smoke.yml -f release_version=<version>`.
    Require Linux npm/crates (also PyPI when the release declares Linux wheels),
    macOS PyPI, and macOS Homebrew jobs to pass.
-   This checks published installs, not just build artifacts.
 4. For local verification, the script accepts only `npm,pypi,crates`:
    `bash scripts/post_release_delivery_smoke.sh --version <version> --channels npm,pypi,crates`.
    Select a host/interpreter supported by that release's published wheel tags and
@@ -109,6 +122,10 @@ run IDs**, not the newest workflow run. Recheck the remote tag and exact-SHA CI.
    wheels; it does not define Python support. Check the released manifest before
    selecting Linux PyPI; without supported wheels or an SDK, use `npm,crates`.
    Homebrew is separate: install the formula on macOS and require the exact version.
-5. Archive results and exact-SHA CI evidence. A missing or failed required channel
+5. For the 2.x Go module, extract the verified SDK for your host and run
+   `bash scripts/go_module_smoke.sh <release_target> /path/to/sdk`. The script
+   downloads that exact module version into a fresh project and runs a round trip
+   with the installed SDK. Record the Go tag, its source SHA and the smoke result.
+6. Archive results and exact-SHA CI evidence. A missing or failed required channel
    blocks completion. Clean generated builds/successful-test scratch with
    `cargo clean`, preserving source, release evidence and active Ergo state.

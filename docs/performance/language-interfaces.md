@@ -87,8 +87,7 @@ copy; Python compatibility buffers also require extra encoded copies. Larger
 batches retain more messages at once. Lite3 can occupy more bytes than compact
 JSON, so fewer conversions do not guarantee less wire traffic or CPU. HTTP JSON and binary readers both report terminal errors. UDP views deliver
 messages in arrival order, including duplicates and late packets.
-See the [migration guide](../record/upgrading-2.0.md#keep-encoded-data-with-owned-views)
-for exact-number rules, copy boundaries, cleanup and transport support.
+Each library guide's Advanced section covers exact-number rules, copy boundaries, cleanup and transport support: [Rust](../../README-crate.md), [Python](../../bindings/python/README.md#advanced), [JavaScript](../../bindings/node/README.md#advanced) and [Go](../../bindings/go/README.md#advanced).
 
 ## Plasmite 2.0 read and write check
 

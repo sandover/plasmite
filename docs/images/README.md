@@ -1,9 +1,7 @@
 # README visuals
 
-The README uses three visuals: the local pool model, a terminal example, and
-the live browser map. Each has a different job. The diagram shows who shares
-the file; the terminal shows a reader arriving after a writer exits; the map
-shows how to inspect retained messages and live traffic.
+This directory holds a diagram of the local pool model, a recording of a reader
+arriving after its writer exits, and a recording of the browser map.
 
 ## Local IPC recording
 
@@ -23,7 +21,8 @@ After the 2.0 release, install Plasmite 2.0.0 on macOS and run from the repo roo
 uv run scripts/record_readme_demo.py --font /System/Library/Fonts/Menlo.ttc
 ```
 
-The script requires a monospace TTF/TTC font; pass another font path on Linux.
+The script looks for `pls` on `PATH` and requires a monospace TTF/TTC font.
+On Linux, pass the path to a font installed there.
 It creates its own temporary pool directory and removes it when finished.
 It checks the installed version and reads the retained message back before
 writing the assets. For a 2.0 candidate, add `--candidate` and put that build on `PATH`.

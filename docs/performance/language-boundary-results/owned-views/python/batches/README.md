@@ -5,17 +5,20 @@ iteration remains one record at a time; the caller chooses count and byte bounds
 
 ## Public behavior
 
-`pool.tail_views(...)` returns an iterator and context manager. `next(stream)`
+`pool.follow_view(...)` and `pool.fetch_view(...)` return iterators that also
+work as context managers. `next(stream)`
 acquires one independent immutable snapshot. `stream.next_batch(count, bytes)`
 waits for the first accepted record, then takes available companions without
 waiting to fill. Both bounds must be positive; the byte bound counts encoded
 payload lengths. An oversized first requested record raises without consuming
-it. Records before `since_seq` undergo frame-header checks and skip the copy.
+it. When the reader skips records to reach the requested `since` position, it
+checks their frame headers without copying their payloads.
 
 A finite per-call timeout returns `[]` when its wait expires; zero polls.
-Finish and cancellation raise `StopIteration`. Existing tail state owns
-sequence/gap handling, accepted-message limits, cancellation and the stream-wide
-deadline. A batch commits checkpoints one record at a time. If a later record
+When the reader reaches the end or observes cancellation with no records
+ready to return, it raises `StopIteration`. If a batch has already acquired
+records when cancellation arrives, it returns them before stopping.
+A batch advances its checkpoint one record at a time. If a later record
 fails, it returns the valid prefix and leaves the failing record for the next
 call. Formatting and validation run after releasing the shared pool lock.
 
