@@ -183,11 +183,12 @@ existing notification path reduced median latency 84.5% and the 95th percentile
 87.1%. The [paced runs](pipe-comparison-results/followup-paced.raw.json)
 preserve every latency sample. They do not establish a hard deadline.
 
-The Unix notification backend emulates a timed semaphore wait with 5 ms checks.
+The Unix notification backend in these runs emulated a timed semaphore wait
+with 5 ms checks.
 An experiment reduced that interval to 1 ms: three repeats measured 0.999 ms
 median latency and 1.441 ms at the 95th percentile, versus 4.147/6.369 ms with
 5 ms checks in the same session. The change increased idle polling substantially,
-so the implementation retains 5 ms checks.
+so those builds retained 5 ms checks.
 
 Three separate idle trials per variant waited for two seconds without a writer.
 All variants used the updated Python wrapper. Median CPU consumption was

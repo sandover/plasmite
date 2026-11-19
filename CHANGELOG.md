@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 - Use `PLS2` for framed Lite3 files. Existing pool files keep their format.
 - UDP follows deliver late and duplicate datagrams in arrival order. A server-confirmed retention gap names the first missing and first retained sequences. Positional UDP fetch only returns the requested sequence.
 
+### Faster Linux followers
+
+- Wake every waiting local follower on a write. Writers skip the wake-up call
+  when nobody has registered a wait. Readers check for committed messages
+  about once a second if a writer exits before waking them.
+
 ### Immutable views and direct native input
 
 - Add owned Lite3 message views across Rust, C, Python, JavaScript and Go.

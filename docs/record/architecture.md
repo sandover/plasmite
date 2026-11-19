@@ -210,11 +210,18 @@ word. Readers retain a header-only mapping and compare the generation from
 their empty-cursor check before sleeping. The kernel compares again when it
 registers the wait, so an intervening append cannot hide behind a new wait.
 
-Other Unix hosts retain named semaphore hints with 5 ms polling inside waits.
-Each pool derives its canonical semaphore name once and lazily retains its
-writer handle until the pool closes. Unsupported hosts use bounded polling.
-Old and new libraries share the same file format; when their notification
-mechanisms differ, readers discover commits through the bounded fallback.
+On Linux, a reader that reaches the end of the pool arms a wake-up bit in
+the mapped header. The writer publishes the next generation and clears the
+bit under the writer lock. After unlocking, it wakes all waiting readers if
+the bit was set. The notification word uses reserved header space, and the
+pool format and full message sequence remain compatible with older builds.
+
+Linux readers use a one-second recheck to pick up messages when a writer exits
+before signalling or uses an older backend. The C reader cancellation call can
+wake a blocked reader on kernels with `futex_waitv`. Callers that supply a plain
+cancellation flag, and kernels without that call, retain 50 ms cancellation checks.
+Caller-supplied durations can shorten any wait. Platforms without a
+shared-address backend keep their existing semaphore or polling fallback.
 
 Invariants:
 

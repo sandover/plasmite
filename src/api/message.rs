@@ -434,6 +434,8 @@ impl Pool {
             cursor,
             tags: read.tags,
             cancel: read.cancel,
+            #[cfg(target_os = "linux")]
+            cancel_signal: None,
             notify: live.then(|| open_for_pool(self)).flatten(),
             expected_seq: first,
             terminated: first.is_none()
@@ -456,6 +458,8 @@ pub(crate) struct TailState {
     cursor: Cursor,
     tags: Vec<String>,
     cancel: Option<Arc<AtomicBool>>,
+    #[cfg(target_os = "linux")]
+    cancel_signal: Option<Arc<crate::core::notify::CancelSignal>>,
     notify: Option<NotifyHandle>,
     expected_seq: Option<u64>,
     terminated: bool,
@@ -480,6 +484,16 @@ impl<'a> TailReader<'a> {
 }
 
 impl TailState {
+    #[cfg(target_os = "linux")]
+    pub(crate) fn with_cancel_signal(
+        mut self,
+        signal: Arc<crate::core::notify::CancelSignal>,
+    ) -> Self {
+        self.cancel = Some(signal.flag());
+        self.cancel_signal = Some(signal);
+        self
+    }
+
     pub(crate) fn next<T>(
         &mut self,
         pool: &Pool,
@@ -584,24 +598,31 @@ impl TailState {
                     if wait_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         return Ok(TailOutcome::WaitExpired);
                     }
-                    let wait_for = wait_interval(wait_deadline, Duration::from_millis(50));
+                    let poll_interval = Duration::from_millis(50);
                     if let Some(notify) = &mut self.notify {
-                        match notify
-                            .wait_for_generation(self.cursor.observed_generation(), wait_for)
-                        {
-                            Ok(WaitOutcome::Signaled) | Ok(WaitOutcome::TimedOut) => {}
-                            Err(NotifyError::Unavailable) => {
-                                self.notify = None;
-                                std::thread::sleep(wait_for);
-                            }
+                        #[cfg(target_os = "linux")]
+                        let interval = if self.cancel.is_none() || self.cancel_signal.is_some() {
+                            crate::core::notify::linux::RECOVERY_CHECK
+                        } else {
+                            poll_interval
+                        };
+                        #[cfg(not(target_os = "linux"))]
+                        let interval = poll_interval;
+                        let wait_for = wait_interval(wait_deadline, interval);
+                        match notify.wait_for_generation(
+                            self.cursor.observed_generation(),
+                            wait_for,
+                            #[cfg(target_os = "linux")]
+                            self.cancel_signal.as_deref(),
+                        ) {
+                            Ok(WaitOutcome::Signaled) | Ok(WaitOutcome::TimedOut) => continue,
+                            Err(NotifyError::Unavailable) => self.notify = None,
                             Err(NotifyError::Io(err)) => {
                                 let _ = err.kind();
-                                std::thread::sleep(wait_for);
                             }
                         }
-                    } else {
-                        std::thread::sleep(wait_for);
                     }
+                    std::thread::sleep(wait_interval(wait_deadline, poll_interval));
                 }
                 CursorResult::FellBehind => {
                     continue;

@@ -1,11 +1,46 @@
-# Shared-address wake-ups on macOS
+# Local follower wake-ups
 
 Shared-address waits cut paced delivery latency and idle CPU on macOS 14.4
 and later. The writer wakes every independent reader after publishing a new
 sequence. This replaces 5 ms semaphore polling and adds a kernel wake per append;
-binary bulk throughput falls 8.1% in the matched run below. Other operating
-systems retain their existing backends. The installed SDK declares the public
-APIs in `usr/include/os/os_sync_wait_on_address.h`.
+binary bulk throughput falls 8.1% in the matched run below. The installed SDK
+declares the public APIs in `usr/include/os/os_sync_wait_on_address.h`.
+
+## Wake-all on Linux
+
+An idle reader arms a shared bit. The next writer clears the bit when it
+publishes the new sequence and wakes every waiting reader when the bit was
+set. Writers skip the wake call when the bit is clear. Readers still check
+the pool after one second so a writer that exits after committing cannot
+leave a reader asleep indefinitely. The C reader can wake immediately on
+cancellation on kernels with `futex_waitv`.
+
+## Earlier blocking semaphore experiment on Linux
+
+The first Linux experiment put idle followers to sleep in the kernel. Each
+append could wake one waiting follower. Followers checked every 50 ms for
+cancellation or a message whose wake-up another follower consumed.
+
+The matched run used a Debian 13 ARM64 VM. Both release builds used the
+same 2.0 source based on `e358359`. Only the semaphore wait differed.
+Each of three paired runs per reader count measured two idle seconds and
+then sent eight events about a second apart. Each follower opened its own
+pool handle and verified every message. Idle counts come from voluntary
+thread sleeps recorded by Linux. The VM measured CPU time and delivery
+latency.
+
+| Followers | Idle sleeps/s per follower | Idle CPU per follower | Delivery p50 | Delivery p95 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 185.5 → 19.5 | 0.343% → 0.139% | 2.74 → 0.17 ms | 5.31 → 0.26 ms |
+| 4 | 186.5 → 20.0 | 0.273% → 0.101% | 16.30 → 23.75 ms | 51.15 → 47.75 ms |
+
+The table compares 5 ms polling with the blocking wait. Idle figures are
+medians across followers and runs. CPU is a share of one guest CPU. Delivery
+percentiles combine samples for each follower count and build. Every follower
+received every event and stopped within 50 ms of cancellation in these runs.
+The four-follower median ran slower in this repeat. Which follower receives
+the wake-up still depends on scheduling. These measurements cover VM behavior
+and give no estimate of power draw on a physical device.
 
 ## Adopted macOS path
 
@@ -21,16 +56,16 @@ Each notification owns a 4 KiB header mapping, which can outlive its originating
 Pool without retaining another descriptor. The writer uses its existing mapping.
 The change adds no thread, shared waiter count, coordination file, or format
 version. Waits retain their existing deadlines and at most 50 ms cancellation
-slices. Unavailable or failed hints retain bounded polling. Other Unix hosts
-keep the 5 ms semaphore backend; Windows keeps its polling backend.
+slices. Unavailable or failed hints retain bounded polling. Other Unix hosts without shared-address waits use 5 ms semaphore polling.
+Windows checks for changes on a timer.
 
 The bridge compiles against the supported minimum macOS version, rather than
 the installed SDK's default. An initial development build inherited the SDK's
 27.2 minimum for this C object, which removed its runtime guards despite Rust's
 11.0 minimum. The final build explicitly sets the bridge's deployment target.
 [compatibility.raw.json](compatibility.raw.json) verifies both weak imports,
-the availability check and the final library's 11.0 minimum. No older macOS,
-Linux, or Windows host ran these performance experiments. Weak imports and
+the availability check and the final library's 11.0 minimum. The macOS
+measurements below only cover the tested host. Weak imports and
 guarded calls establish the build mechanism, not an older-host execution result.
 
 ## Matched latency and idle CPU

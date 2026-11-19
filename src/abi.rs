@@ -13,6 +13,7 @@
 use crate::abi_remote::{PoolHandle, RemoteFrames};
 use crate::api::{Feed, LocalClient, PoolOptions, PoolRef, Read, Since, TailOutcome, TailState};
 use crate::core::error::{Error, ErrorKind};
+use crate::core::notify::CancelSignal;
 use crate::core::pool::{Durability, Pool};
 #[cfg(test)]
 use serde_json::Value;
@@ -42,13 +43,13 @@ pub struct plsm_pool {
 #[repr(C)]
 pub struct plsm_stream {
     state: Mutex<StreamState>,
-    cancel: Arc<AtomicBool>,
+    cancel: Arc<CancelSignal>,
 }
 
 #[repr(C)]
 pub struct plsm_lite3_stream {
     state: Mutex<StreamState>,
-    cancel: Arc<AtomicBool>,
+    cancel: Arc<CancelSignal>,
 }
 
 enum StreamState {
@@ -374,14 +375,14 @@ pub extern "C" fn plsm_lite3_stream_next_wait(
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_stream_cancel(stream: *mut plsm_stream) {
     if let Some(stream) = unsafe { stream.as_ref() } {
-        stream.cancel.store(true, Ordering::Release);
+        stream.cancel.cancel();
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream) {
     if let Some(stream) = unsafe { stream.as_ref() } {
-        stream.cancel.store(true, Ordering::Release);
+        stream.cancel.cancel();
     }
 }
 
@@ -1391,25 +1392,28 @@ fn read_state(
     options: *const plsm_read_options,
     live: bool,
     error: *mut *mut plsm_error,
-) -> Result<(StreamState, Arc<AtomicBool>), i32> {
+) -> Result<(StreamState, Arc<CancelSignal>), i32> {
     let handle = borrow_pool(handle, error)?;
-    let cancel = Arc::new(AtomicBool::new(false));
-    let options = parse_read(options)
-        .map_err(|err| fail(error, err))?
-        .cancel(cancel.clone());
+    let cancel = Arc::new(CancelSignal::default());
+    let options = parse_read(options).map_err(|err| fail(error, err))?;
     let state = (|| match &handle.pool {
         PoolHandle::Local(source) => {
             let pool = Box::new(source.reopen()?);
+            #[cfg(not(target_os = "linux"))]
+            let options = options.cancel(cancel.flag());
             let state = pool.read_state(options, live)?;
+            #[cfg(target_os = "linux")]
+            let state = state.with_cancel_signal(cancel.clone());
             Ok(StreamState::Local { pool, state })
         }
         PoolHandle::Remote(pool) => {
+            let options = options.cancel(cancel.flag());
             let reader = if live {
                 pool.follow_lite3(options)?
             } else {
                 pool.fetch_lite3(options)?
             };
-            RemoteFrames::start(reader, cancel.clone()).map(StreamState::Remote)
+            RemoteFrames::start(reader, cancel.flag()).map(StreamState::Remote)
         }
     })()
     .map_err(|err| fail(error, err))?;

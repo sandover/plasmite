@@ -28,6 +28,9 @@ const MAGIC: [u8; 4] = *b"PLSM";
 const ENDIANNESS_LE: u8 = 1;
 const HEADER_SIZE: usize = 4096;
 const NEWEST_SEQ_OFFSET: usize = 96;
+// Linux uses one previously reserved word as a disposable wake-up hint.
+#[cfg(target_os = "linux")]
+const NOTIFY_OFFSET: usize = 104;
 const INDEX_SLOT_BYTES: u64 = 16;
 const MAX_AUTO_INDEX_CAPACITY: u64 = 65_536;
 const MIN_RING_SIZE_FOR_INDEX: u64 = 1024;
@@ -433,7 +436,9 @@ pub struct PoolAgeMetrics {
 pub struct Pool {
     path: PathBuf,
     // Derive the canonical wake-up name once, outside the append path.
+    #[cfg(not(target_os = "linux"))]
     notify_name: String,
+    #[cfg(not(target_os = "linux"))]
     notify_writer: Option<notify::PoolSemaphore>,
     file: File,
     #[cfg(unix)]
@@ -530,7 +535,9 @@ impl Pool {
         let mut pool = Self {
             #[cfg(unix)]
             file_identity: unix_file_identity(&file, &path)?,
+            #[cfg(not(target_os = "linux"))]
             notify_name: notify::pool_semaphore_name(&path),
+            #[cfg(not(target_os = "linux"))]
             notify_writer: None,
             path,
             file,
@@ -608,7 +615,9 @@ impl Pool {
                 use std::os::unix::fs::MetadataExt;
                 (metadata.dev(), metadata.ino())
             },
+            #[cfg(not(target_os = "linux"))]
             notify_name: notify::pool_semaphore_name(&path),
+            #[cfg(not(target_os = "linux"))]
             notify_writer: None,
             path,
             file,
@@ -633,6 +642,7 @@ impl Pool {
         Ok(header)
     }
 
+    #[cfg(not(target_os = "linux"))]
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
@@ -656,7 +666,7 @@ impl Pool {
     /// Own a header-only mapping so a notification handle can outlive this Pool.
     pub(crate) fn progress_watch(&self) -> Result<ProgressWatch, Error> {
         // SAFETY: Pool creation/open validates a full header in this held file.
-        // This read/write alias exposes only atomic accesses to the sequence word.
+        // The read/write alias exposes only atomic accesses to notification state.
         let mmap = unsafe {
             memmap2::MmapOptions::new()
                 .len(HEADER_SIZE)
@@ -982,13 +992,28 @@ impl Pool {
             options,
             flush_mmap_range,
         )?;
-        drop(lock);
-        // Notification is optional wake-up work after committed storage publication.
-        let _ = notify::post_for_pool(
-            progress_word(&self.mmap),
-            &self.notify_name,
-            &mut self.notify_writer,
-        );
+        #[cfg(target_os = "linux")]
+        {
+            let word = linux_wake_word(&self.mmap);
+            let armed = notify::linux::publish(word, seq);
+            drop(lock);
+            #[cfg(test)]
+            if std::env::var_os("PLASMITE_TEST_CRASH_BEFORE_WAKE").is_some() {
+                std::process::exit(91);
+            }
+            if armed {
+                notify::linux::wake(word);
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            drop(lock);
+            let _ = notify::post_for_pool(
+                progress_word(&self.mmap),
+                &self.notify_name,
+                &mut self.notify_writer,
+            );
+        }
         Ok(seq)
     }
 
@@ -1126,12 +1151,38 @@ impl ProgressWatch {
         u64::from_le(progress_word(&self.mmap).load(Ordering::Acquire))
     }
 
+    #[cfg(target_os = "linux")]
+    pub(crate) fn wait(
+        &self,
+        expected: u64,
+        timeout: std::time::Duration,
+        cancel: Option<&notify::CancelSignal>,
+    ) -> Result<notify::WaitOutcome, notify::NotifyError> {
+        notify::linux::wait(
+            linux_wake_word(&self.mmap),
+            progress_word(&self.mmap),
+            expected,
+            timeout,
+            cancel,
+        )
+    }
+
+    #[cfg(not(target_os = "linux"))]
     pub(crate) fn wait(
         &self,
         expected: u64,
         timeout: std::time::Duration,
     ) -> Result<notify::WaitOutcome, notify::NotifyError> {
         notify::wait_for_sequence(progress_word(&self.mmap), expected, timeout)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_wake_word(mmap: &MmapMut) -> &std::sync::atomic::AtomicU32 {
+    // SAFETY: A validated header starts at a page boundary. This aligned,
+    // reserved word has no other live accesses in this version.
+    unsafe {
+        std::sync::atomic::AtomicU32::from_ptr(mmap.as_ptr().add(NOTIFY_OFFSET).cast_mut().cast())
     }
 }
 
@@ -2432,22 +2483,69 @@ mod tests {
         let path = dir.path().join("progress.plasmite");
         let pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
         let watch = pool.progress_watch().unwrap();
-        let observed = watch.generation();
-        assert_eq!(observed, 0);
+        assert_eq!(watch.generation(), 0);
+        let mut notify = crate::api::notify::open_for_pool(&pool);
         drop(pool);
         let mut writer = Pool::open(&path).unwrap();
         writer.append(b"published before wait").unwrap();
         assert_eq!(watch.generation(), 1);
-        if crate::core::notify::shared_address_available() {
-            assert_eq!(
-                watch.wait(observed, Duration::from_secs(1)).unwrap(),
-                crate::core::notify::WaitOutcome::Signaled
-            );
-            assert_eq!(
-                watch.wait(1, Duration::from_millis(1)).unwrap(),
-                crate::core::notify::WaitOutcome::TimedOut
-            );
+        if crate::core::notify::shared_address_available()
+            && let Some(notify) = &mut notify
+        {
+            use crate::api::notify::NotifyWait;
+            assert_eq!(notify.wait(Duration::from_secs(1)), NotifyWait::Signaled);
+            assert_eq!(notify.wait(Duration::from_millis(1)), NotifyWait::TimedOut);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn commit_without_notification_is_recovered() {
+        use crate::api::{Read, ReadPoll};
+        use std::sync::atomic::Ordering;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("quiet-crash.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        let mut reader = pool.follow_lite3(Read::new()).unwrap();
+        thread::scope(|scope| {
+            let crash = scope.spawn(|| {
+                let word = super::linux_wake_word(&pool.mmap);
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while word.load(Ordering::Acquire) == 0 && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                assert_ne!(word.load(Ordering::Acquire), 0, "reader did not arm");
+                // Give the armed reader time to enter the wait before the child commits.
+                thread::sleep(Duration::from_millis(20));
+                Command::new(std::env::current_exe().unwrap())
+                    .args(["core::pool::tests::crash_before_wake_child", "--exact"])
+                    .env("PLASMITE_TEST_CRASH_BEFORE_WAKE", &path)
+                    .status()
+                    .unwrap()
+            });
+            match reader.poll(Duration::from_secs(3)).unwrap() {
+                ReadPoll::Message(frame) => assert_eq!(frame.seq, 1),
+                _ => panic!("reader failed to discover a committed message"),
+            }
+            assert_eq!(crash.join().unwrap().code(), Some(91));
+        });
+        assert!(matches!(
+            reader.poll(Duration::ZERO).unwrap(),
+            ReadPoll::Waiting
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn crash_before_wake_child() {
+        let Some(path) = std::env::var_os("PLASMITE_TEST_CRASH_BEFORE_WAKE") else {
+            return;
+        };
+        let mut pool = Pool::open(std::path::Path::new(&path)).unwrap();
+        pool.feed(&serde_json::json!({"n": 1}), crate::api::Feed::new())
+            .unwrap();
+        panic!("the writer must exit before signalling readers");
     }
 
     #[test]
