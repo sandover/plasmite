@@ -5,8 +5,10 @@ import threading
 import time
 import unittest
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import plasmite
+from plasmite import _views
 
 
 class ViewStreams(unittest.TestCase):
@@ -54,6 +56,39 @@ class ViewStreams(unittest.TestCase):
         with self.pool.fetch_view(since=wanted.seq) as stream:
             result = stream.next_batch(16, len(memoryview(wanted)), 0)
             self.assertEqual([message.seq for message in result], [wanted.seq])
+
+    def test_batch_budget_applies_after_filtering(self):
+        self.pool.feed_view({"padding": "x" * 65536}, ["skip"])
+        large = self.pool.feed_view({"padding": "x" * 65536}, ["keep"])
+        small = self.pool.feed_view({"index": 3}, ["small"])
+        for count in (1, 16):
+            with self.subTest(count=count):
+                with self.pool.fetch_view(tags=["small"]) as stream:
+                    batch = stream.next_batch(count, len(memoryview(small)), 0)
+                    self.assertEqual([item.seq for item in batch], [small.seq])
+                with self.pool.fetch_view(tags=["keep"]) as stream:
+                    with self.assertRaisesRegex(plasmite.PlasmiteError, "batch budget"):
+                        stream.next_batch(count, 4096, 0)
+                    batch = stream.next_batch(count, len(memoryview(large)), 0)
+                    self.assertEqual([item.seq for item in batch], [large.seq])
+
+    def test_cancel_after_native_pull_delivers_acquired_batch(self):
+        self.pool.feed_view({"index": 1})
+        self.pool.feed_view({"index": 2})
+        cancel = threading.Event()
+        next_batch = _views.backend.next_batch
+
+        def cancel_after_pull(*args):
+            result = next_batch(*args)
+            cancel.set()
+            return result
+
+        with self.pool.fetch_view(cancel=cancel) as stream:
+            with patch.object(_views.backend, "next_batch", side_effect=cancel_after_pull):
+                batch = stream.next_batch(2, 4096, 0)
+            self.assertEqual([item.seq for item in batch], [1, 2])
+            with self.assertRaises(StopIteration):
+                stream.next_batch(2, 4096, 0)
 
     def test_tags_count_accepted_records(self):
         for i in range(12):
@@ -192,22 +227,6 @@ class ViewStreams(unittest.TestCase):
                     next(stream)
         finally:
             small.close()
-
-    def test_event_cancellation_after_acquisition(self):
-        from unittest.mock import patch
-        from plasmite import _views
-
-        cancel = threading.Event()
-        message = self.pool.feed_view({"x": 1})
-        with self.pool.follow_view(since="oldest", cancel=cancel) as stream:
-
-            def acquire(*args):
-                cancel.set()
-                return 1, [message]
-
-            with patch.object(_views.backend, "next_batch", acquire):
-                with self.assertRaises(StopIteration):
-                    next(stream)
 
     def test_argument_close_before_handle_borrow(self):
         with self.pool.follow_view(since="oldest") as stream:

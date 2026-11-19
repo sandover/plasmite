@@ -56,6 +56,30 @@ class HandleCallbacks(unittest.TestCase):
         self.pool = self.client.open_pool("callbacks")
         return self.pool
 
+    def test_client_and_udp_arguments_finish_before_handle_check(self):
+        with plasmite.Client(self.directory.name) as client:
+            self.assert_closed_before_native(
+                "plsm_pool_open",
+                lambda: client.open_pool("callbacks", create=closing_int(client.close)),
+            )
+
+        with plasmite.Client(self.directory.name) as client:
+            class PoolName(str):
+                def encode(self, *args, **kwargs):
+                    client.close()
+                    return super().encode(*args, **kwargs)
+
+            self.assert_closed_before_native(
+                "plsm_pool_delete", lambda: client.delete_pool(PoolName("callbacks"))
+            )
+
+        with plasmite.UdpClient("udp://127.0.0.1:9701") as client:
+            with client.open_pool("callbacks") as pool:
+                self.assert_closed_before_native(
+                    "plsm_udp_pool_feed_lite3",
+                    lambda: pool.feed_lite3(b"unused", closing_int(pool.close)),
+                )
+
     def test_append_durability(self):
         for method, symbol, payload in [
             ("feed_json", "plsm_pool_feed_json", b"{}"),

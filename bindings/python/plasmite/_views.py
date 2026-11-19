@@ -189,9 +189,6 @@ class ViewStream:
                     address, max_count, max_bytes, _wait_ms(deadline, self._cancel)
                 )
             if status == 1:
-                if self._cancel is not None and self._cancel.is_set():
-                    stream.cancel()
-                    raise StopIteration
                 return items
             if status in (2, 3):
                 raise StopIteration

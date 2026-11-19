@@ -188,8 +188,10 @@ with pool.follow_view(tags=["sensor"], since=1) as stream:
 `next_batch` waits for the first accepted message, then takes available records
 without waiting to fill the batch. `wait=0` polls and returns `[]` when no
 record is ready. A finite timeout also returns `[]` when its wait expires;
-completion or cancellation raises `StopIteration`. A retention gap raises
-`RetentionGapError` with the missing and first retained sequences.
+completion or cancellation raises `StopIteration`. If cancellation arrives
+during a successful pull, the pull returns the acquired batch and the next call
+stops. A retention gap raises `RetentionGapError` with the missing and first
+retained sequences.
 A first record larger than the byte bound raises an error without consuming it;
 retry with a larger bound. Returned children keep their individual owners alive
 when the stream, pool, batch list or other messages go away.

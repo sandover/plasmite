@@ -87,6 +87,25 @@ class BindingTests(unittest.TestCase):
             pool.close()
             client.close()
 
+    def test_embedded_nul_in_pool_identifiers_is_rejected(self) -> None:
+        with self._new_client() as client:
+            client.create_pool("events").close()
+            invalid = "events\0other"
+            for operation in (client.create_pool, client.open_pool, client.delete_pool):
+                with self.subTest(operation=operation.__name__):
+                    with self.assertRaisesRegex(ValueError, "NUL"):
+                        operation(invalid)
+            with client.open_pool("events") as pool:
+                self.assertIsNotNone(pool.info())
+
+        with self.assertRaisesRegex(ValueError, "NUL"):
+            Client(str(self.pool_dir) + "\0other")
+        with self.assertRaisesRegex(ValueError, "NUL"):
+            UdpClient("udp://127.0.0.1:9701\0other")
+        with UdpClient("udp://127.0.0.1:9701") as client:
+            with self.assertRaisesRegex(ValueError, "NUL"):
+                client.open_pool(invalid)
+
     def test_numeric_append_receipts_match_stored_frames(self) -> None:
         with self._client_pool("identities") as (_, pool):
             value = {"nested": [1, {"text": "hello"}]}

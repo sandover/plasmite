@@ -582,6 +582,13 @@ def _ensure_bytes(payload: bytes | bytearray | memoryview, name: str) -> bytes:
     raise TypeError(f"{name} must be bytes-like")
 
 
+def _encode_c_string(value: str, name: str) -> bytes:
+    encoded = _ensure_bytes(value.encode("utf-8"), name)
+    if b"\0" in encoded:
+        raise ValueError(f"{name} must not contain NUL")
+    return encoded
+
+
 def _ensure_non_negative_int(value: int, name: str) -> int:
     if not isinstance(value, int):
         raise TypeError(f"{name} must be an int")
@@ -689,7 +696,7 @@ class Client:
             raise ValueError("pool_dir is required")
         out_client = POINTER(plsm_client_t)()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_client_new(pool_dir.encode("utf-8"), byref(out_client), byref(out_err))
+        rc = _LIB.plsm_client_new(_encode_c_string(pool_dir, "pool_dir"), byref(out_client), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         self._ptr = out_client
@@ -706,7 +713,7 @@ class Client:
         size_bytes = _ensure_non_negative_int(size_bytes, "size_bytes")
         out_pool = POINTER(plsm_pool_t)()
         out_err = POINTER(plsm_error_t)()
-        encoded_ref = _ensure_bytes(pool_ref.encode("utf-8"), "pool_ref")
+        encoded_ref = _encode_c_string(pool_ref, "pool_ref")
         native_size = c_uint64(size_bytes)
         _require_open(self._ptr, "client")
         rc = _LIB.plsm_pool_create(
@@ -727,12 +734,13 @@ class Client:
             raise ValueError("pool_ref is required")
         out_pool = POINTER(plsm_pool_t)()
         out_err = POINTER(plsm_error_t)()
-        encoded_ref = _ensure_bytes(pool_ref.encode("utf-8"), "pool_ref")
+        encoded_ref = _encode_c_string(pool_ref, "pool_ref")
+        create_flag = int(create)
         _require_open(self._ptr, "client")
         rc = _LIB.plsm_pool_open(
             self._ptr,
             encoded_ref,
-            int(create),
+            create_flag,
             byref(out_pool),
             byref(out_err),
         )
@@ -749,7 +757,8 @@ class Client:
     def delete_pool(self, pool_ref: str) -> None:
         _require_open(self._ptr, "client")
         error = POINTER(plsm_error_t)()
-        encoded = _ensure_bytes(pool_ref.encode("utf-8"), "pool_ref")
+        encoded = _encode_c_string(pool_ref, "pool_ref")
+        _require_open(self._ptr, "client")
         if _LIB.plsm_pool_delete(self._ptr, encoded, byref(error)) != 0:
             raise _take_error(error)
 
@@ -1185,7 +1194,7 @@ class UdpClient:
             raise ValueError("endpoint is required")
         out_client = POINTER(plsm_udp_client_t)()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_udp_client_new(endpoint.encode("utf-8"), byref(out_client), byref(out_err))
+        rc = _LIB.plsm_udp_client_new(_encode_c_string(endpoint, "endpoint"), byref(out_client), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         self._ptr = out_client
@@ -1197,7 +1206,7 @@ class UdpClient:
             raise ValueError("pool_name is required")
         out_pool = POINTER(plsm_udp_pool_t)()
         out_err = POINTER(plsm_error_t)()
-        encoded_name = _ensure_bytes(pool_name.encode("utf-8"), "pool_name")
+        encoded_name = _encode_c_string(pool_name, "pool_name")
         _require_open(self._ptr, "UDP client")
         rc = _LIB.plsm_udp_client_open_pool(
             self._ptr,
@@ -1241,8 +1250,8 @@ class UdpPool:
         if not payload:
             raise ValueError("payload is required")
         out_err = POINTER(plsm_error_t)()
-        _require_open(self._ptr, "UDP pool")
         options = plsm_feed_options_t(sizeof(plsm_feed_options_t), int(durability))
+        _require_open(self._ptr, "UDP pool")
         rc = _LIB.plsm_udp_pool_feed_lite3(
             self._ptr,
             payload,
