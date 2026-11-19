@@ -1,14 +1,14 @@
 # Vision
 
-Plasmite is the simplest reliable way to coordinate processes with structured messages, without external infrastructure.
+Plasmite is the simplest reliable way for programs and AI agents to coordinate with structured messages, without external infrastructure.
 
 ## North star
 
-A developer can create, inspect, stream and automate message workflows in minutes, using plain files, JSON and the tools they already know. One small model serves them whether they arrive through the shell or a library, and it stays the same as their work grows.
+A developer or an AI agent can create, inspect, stream and automate message workflows in minutes, using plain files, JSON and the tools they already know. One small model serves them whether they arrive through the shell, a library or a Model Context Protocol (MCP) client, and it stays the same as their work grows.
 
 ## The model
 
-A pool is a named pipe that remembers. It's a ring buffer on disk that keeps the most recent messages, up to a fixed size, and drops the oldest when it fills. Writers and readers come and go independently.
+A pool is a message channel that outlasts the programs and agents using it. It's a ring buffer on disk that keeps the most recent messages, up to a fixed size, and drops the oldest when it fills. Writers and readers come and go independently.
 
 Three verbs cover the work: **feed** puts a message into a pool, **follow** waits for new messages, and **fetch** reads messages the pool already holds. Every read starts at a position and moves forward.
 
@@ -17,6 +17,7 @@ Every message has the same four fields: `seq`, `time`, `meta` and `data`. The po
 ## Target use cases
 
 - Coordinating processes on one host or across nearby hosts.
+- Coordinating AI agents and the people supervising them: handoffs, progress and shared history that survive restarts and context resets, across harnesses and machines. An agent can join through MCP with nothing installed.
 - Logging events from scripts and re-reading the history later.
 - Capturing any command's output with a pipe into `feed`, then reading it back with `follow` and `fetch`.
 - Lightweight messaging between services in small deployments.

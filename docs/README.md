@@ -8,6 +8,7 @@ New to Plasmite? Start with the [README](../README.md): it explains the model in
 | --- | --- |
 | Install the CLI or a library | [Distribution](record/distribution.md) |
 | Copy a recipe for a common task | [Cookbook](cookbook.md) |
+| Let AI agents coordinate through pools | [Plasmite for agents](agents.md) |
 | Predict what a command does: pool references, reads, formats, exit codes | [CLI guide](cli.md) |
 | Share pools, connect a browser or AI client, or fix access | [Serving](record/serving.md) |
 | Choose an interface or check performance | [Performance](performance/README.md) |

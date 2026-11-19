@@ -189,7 +189,7 @@ Add Plasmite to the agent's Model Context Protocol (MCP) configuration:
 {"mcpServers": {"plasmite": {"command": "plasmite", "args": ["mcp"]}}}
 ```
 
-The agent can list pools and call `plasmite_feed`, `plasmite_fetch` and `plasmite_follow`. MCP filters by tags only. For a shared server, connect the agent to `https://pools.example.net:9743/mcp`; see [Connect an AI client](record/serving.md#connect-an-ai-client).
+The agent can list pools and call `plasmite_feed`, `plasmite_fetch` and `plasmite_follow`. [Plasmite for agents](agents.md) shows handoffs, catching up after a restart, and instructions to paste into `AGENTS.md`. For a shared server, connect the agent to `https://pools.example.net:9743/mcp`; see [Connect an AI client](record/serving.md#connect-an-ai-client).
 
 ## Use Plasmite from Python, JavaScript and Go
 

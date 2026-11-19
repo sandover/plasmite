@@ -10,6 +10,7 @@ docs/
 ├── building.md                                — Build system + vendoring; read when touching build/release tooling
 ├── cli.md                                     — CLI guide; read when predicting how reads start, gaps, input/output formats, or exit codes
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
+├── agents.md                                  — Read when connecting AI agents through MCP or designing agent handoffs
 ├── performance/README.md                      — Read when choosing a performance report or measuring a change
 ├── performance/udp-transport.md               — Read when assessing UDP versus HTTP delivery, measured latency, or maximum datagram support
 ├── performance/udp-transport-bench.rs          — Read with the UDP transport report for the historical benchmark and its matching checkout
