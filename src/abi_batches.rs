@@ -43,14 +43,14 @@ pub extern "C" fn plsm_view_stream_next(
     count: *mut usize,
     error: *mut *mut plsm_error,
 ) -> i32 {
+    if !count.is_null() {
+        unsafe { *count = 0 };
+    }
     if out.is_null() || count.is_null() {
         return fail(
             error,
             Error::new(ErrorKind::Usage).with_message("output is null"),
         );
-    }
-    unsafe {
-        *count = 0;
     }
     let stream = match borrow_stream(stream, error) {
         Ok(stream) => stream,

@@ -358,6 +358,10 @@ impl<F> FollowReader<F> {
     }
 
     fn open(&mut self) -> Result<(), Error> {
+        if self.cancelled() {
+            self.socket = None;
+            return Ok(());
+        }
         let deadline = Instant::now() + Duration::from_millis(wire::STARTUP_MS);
         let mut answered_challenge = false;
         let mut request = self.subscribe_packet(None, Some(self.selection.clone()))?;
@@ -366,6 +370,10 @@ impl<F> FollowReader<F> {
         let mut buffer = [0u8; 65_536];
 
         loop {
+            if self.cancelled() {
+                self.close();
+                return Ok(());
+            }
             let now = Instant::now();
             if now >= deadline {
                 return Err(startup_timeout());
@@ -377,6 +385,11 @@ impl<F> FollowReader<F> {
             let wait = retry_at
                 .min(deadline)
                 .saturating_duration_since(Instant::now());
+            let wait = if self.cancel.is_some() {
+                wait.min(Duration::from_millis(50))
+            } else {
+                wait
+            };
             self.set_read_timeout(wait)?;
             let length = match self.socket_ref()?.recv(&mut buffer) {
                 Ok(length) => length,

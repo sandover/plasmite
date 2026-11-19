@@ -192,9 +192,9 @@ int plsm_pool_open(plsm_client_t *, const char *, uint32_t create, plsm_pool_t *
 int plsm_pool_follow(plsm_pool_t *, const plsm_read_options_t *, plsm_stream_t **, plsm_error_t **);
 int plsm_pool_follow_lite3(plsm_pool_t *, const plsm_read_options_t *, plsm_lite3_stream_t **, plsm_error_t **);
 
-/* View readers return immutable message snapshots through plsm_view_stream_next
- * or plsm_view_stream_next_batch. Each caller owns the returned view. Cancel
- * and free the reader with plsm_stream_cancel and plsm_stream_free. */
+/* View readers return immutable message snapshots through plsm_view_stream_next.
+ * Each caller owns the returned views. Cancel and free the reader with
+ * plsm_stream_cancel and plsm_stream_free. */
 
 int plsm_client_new(const char *pool_dir, plsm_client_t **out_client, plsm_error_t **out_err);
 void plsm_client_free(plsm_client_t *client);
@@ -404,7 +404,8 @@ typedef struct plsm_builder plsm_builder_t;
 /* Independent immutable owners from the same reader as JSON. Pass tags as
  * UTF-8 spans when opening. Use plsm_stream_cancel and plsm_stream_free.
  * Serialize reads. Cancel may run concurrently.
- * next waits for the first item, then acquires available companions only.
+ * next waits for the first matching item. Local reads then acquire available
+ * companions without waiting. Each HTTPS call returns at most one item.
  * max_count/max_bytes must be positive; bytes bound encoded payload snapshots.
  * An oversized first record errors without consuming it. Each returned owner
  * requires plsm_view_release, including any prefix returned before an error.

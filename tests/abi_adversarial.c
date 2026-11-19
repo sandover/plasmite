@@ -236,6 +236,12 @@ int main(int argc, char **argv) {
               "feed until the first record is overwritten");
         plsm_buf_free(&message);
     }
+    size_t rejected_count = 99;
+    CHECK(plsm_view_stream_next(views, 0, 1, SIZE_MAX, NULL, &rejected_count, &err) == -1 &&
+          err && err->kind == PLSM_ERROR_USAGE && rejected_count == 0,
+          "invalid view output reports no initialized owners");
+    plsm_error_free(err);
+    err = NULL;
     for (int attempt = 0; attempt < 2; ++attempt) {
         const plsm_message_view_t *view = NULL;
         size_t count = 0;

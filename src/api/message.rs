@@ -513,6 +513,7 @@ impl TailState {
     ) -> Result<TailOutcome<T>, Error> {
         self.next_wait_using(
             wait,
+            None,
             |cursor, expected| cursor.next_checked(pool, expected),
             select,
         )
@@ -521,13 +522,14 @@ impl TailState {
     fn next_wait_using<T>(
         &mut self,
         wait: Option<Duration>,
+        max_bytes: Option<usize>,
         acquire: impl FnMut(&mut Cursor, Option<u64>) -> Result<CursorResult, Error>,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
     ) -> Result<TailOutcome<T>, Error> {
         if let Some(error) = &self.failure {
             return Err((**error).clone());
         }
-        let result = self.poll_cursor(wait, acquire, select);
+        let result = self.poll_cursor(wait, max_bytes, acquire, select);
         // A bad wait or too-small batch budget leaves the reader usable.
         if let Err(error) = &result
             && error.kind() != ErrorKind::Usage
@@ -540,6 +542,7 @@ impl TailState {
     fn poll_cursor<T>(
         &mut self,
         wait: Option<Duration>,
+        max_bytes: Option<usize>,
         mut acquire: impl FnMut(&mut Cursor, Option<u64>) -> Result<CursorResult, Error>,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
     ) -> Result<TailOutcome<T>, Error> {
@@ -569,6 +572,7 @@ impl TailState {
             }
             polled = true;
 
+            let checkpoint = max_bytes.map(|_| self.cursor.clone());
             match acquire(&mut self.cursor, self.expected_seq)? {
                 CursorResult::Message(frame) => {
                     if self.upper.is_some_and(|upper| frame.seq > upper) {
@@ -579,7 +583,17 @@ impl TailState {
                     if !check_sequence(self.expected_seq, seq)? {
                         continue;
                     }
+                    let bytes = frame.payload.len();
                     let item = select(frame, &self.tags)?;
+                    if let Some(limit) = max_bytes
+                        && bytes > limit
+                        && item.is_some()
+                    {
+                        self.cursor = checkpoint.expect("bounded reads save the cursor");
+                        return Err(Error::new(ErrorKind::Usage).with_message(format!(
+                            "next frame needs {bytes} encoded bytes, above batch budget {limit}"
+                        )));
+                    }
                     self.expected_seq = seq.checked_add(1);
                     // Sequence space cannot advance after the last u64 value.
                     self.terminated = seq == u64::MAX || self.upper == Some(seq);
@@ -646,11 +660,19 @@ impl TailState {
         if max_bytes == 0 {
             return Err(Error::new(ErrorKind::Usage).with_message("byte bound must be positive"));
         }
+        // A size check at the cursor would reject an oversized record before
+        // the selector could discard it. Keep the early check for unfiltered reads.
+        let filtered = !self.tags.is_empty();
         self.next_wait_using(
             wait,
+            filtered.then_some(max_bytes),
             |cursor, expected| {
                 let _lock = pool.read_lock()?;
-                cursor.next_locked_bounded(pool, max_bytes, expected)
+                if filtered {
+                    cursor.next_owned_locked(pool, expected)
+                } else {
+                    cursor.next_locked_bounded(pool, max_bytes, expected)
+                }
             },
             select,
         )
@@ -670,9 +692,11 @@ impl TailState {
         }
         let cancel = self.cancel.clone();
         let upper = self.upper;
+        let filtered = !self.tags.is_empty();
         let mut frames = std::collections::VecDeque::new();
         let first = self.next_wait_using(
             wait,
+            filtered.then_some(max_bytes),
             |cursor, expected| {
                 // Filtering may reject the first record. Reuse only companions
                 // acquired by this explicit call, committing one checkpoint at a time.
@@ -683,7 +707,11 @@ impl TailState {
                 // One lock covers the first snapshot and all available companions.
                 // Conversion never runs inside this lock.
                 let _lock = pool.read_lock()?;
-                let first = cursor.next_locked_bounded(pool, max_bytes, expected)?;
+                let first = if filtered {
+                    cursor.next_owned_locked(pool, expected)?
+                } else {
+                    cursor.next_locked_bounded(pool, max_bytes, expected)?
+                };
                 if let CursorResult::Message(frame) = &first {
                     if expected.is_some_and(|expected| frame.seq < expected) {
                         return Ok(first);
@@ -1103,21 +1131,28 @@ impl PoolApiExt for Pool {
         durability: Durability,
     ) -> Result<Message, Error> {
         let labels = tags.iter().map(String::as_str).collect::<Vec<_>>();
-        let FeedReceipt { seq, time } =
-            match crate::view::MessageView::encode_legacy_value(data, &labels) {
-                Ok(view) => self.append_prepared(view.bytes(), durability)?,
-                Err(_) => {
-                    let payload = crate::core::lite3::encode_message(tags, data)?;
-                    self.append_prepared(payload.as_slice(), durability)?
-                }
-            };
+        let (receipt, data) = match crate::view::MessageView::encode_legacy_value(data, &labels) {
+            Ok(view) => (
+                self.append_prepared(view.bytes(), durability)?,
+                data.clone(),
+            ),
+            Err(_) => {
+                let payload = crate::core::lite3::encode_message(tags, data)?;
+                let (_, stored_data) = decode_payload(payload.as_slice())?;
+                (
+                    self.append_prepared(payload.as_slice(), durability)?,
+                    stored_data,
+                )
+            }
+        };
+        let FeedReceipt { seq, time } = receipt;
         Ok(Message {
             seq,
             time,
             meta: Meta {
                 tags: tags.to_vec(),
             },
-            data: data.clone(),
+            data,
         })
     }
 
@@ -1871,7 +1906,13 @@ mod tests {
                     {
                         assert_eq!(view.bytes(), expected.as_slice(), "{data}");
                     }
-                    assert_eq!(receipt.data, data);
+                    let stored = pool
+                        .fetch(super::Read::since(super::Since::Seq(receipt.seq)))
+                        .unwrap()
+                        .next()
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(receipt, stored);
                     assert_eq!(pool.get(receipt.seq).unwrap().payload, expected.as_slice());
                 }
                 (Err(expected), Err(error)) => {

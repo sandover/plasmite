@@ -3,6 +3,11 @@ use plasmite::api::{
 };
 use serde_json::{Value, json};
 use std::net::UdpSocket;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -85,6 +90,34 @@ fn sends_complete_routed_lite3_datagrams_and_checks_both_sizes() {
         .open_pool(&PoolRef::uri(format!("udp://{endpoint}/sensors")))
         .expect("same endpoint URL");
     assert!(uri_pool.feed_lite3(&[0], Feed::new()).is_err());
+}
+
+#[test]
+fn cancellation_during_udp_handshake_finishes_without_peer_response() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let client = UdpClient::new(format!("udp://{}", peer.local_addr().unwrap())).unwrap();
+    let pool = client.open_pool(&PoolRef::name("sensors")).unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let read = Read::new().cancel(cancel.clone());
+    let (send, result) = mpsc::channel();
+    let opening = thread::spawn(move || {
+        let outcome = pool.follow(read).map(|follow| follow.is_finished());
+        send.send(outcome).unwrap();
+    });
+
+    let mut packet = [0; 1024];
+    let (size, _) = peer.recv_from(&mut packet).unwrap();
+    assert!(size >= HEADER);
+    assert_eq!(packet[6], SUBSCRIBE);
+    cancel.store(true, Ordering::Release);
+    assert!(
+        result
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap()
+    );
+    opening.join().unwrap();
 }
 
 #[test]

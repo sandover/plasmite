@@ -399,11 +399,6 @@ pub extern "C" fn plsm_pool_feed_json_view(
     finish(
         (|| {
             let (durability, tags) = crate::abi::feed_arguments(options)?;
-            let durability = match durability {
-                0 => crate::api::Durability::Fast,
-                1 => crate::api::Durability::Flush,
-                _ => return Err(usage()),
-            };
             let parsed = crate::core::lite3::ParsedJson::parse_view(unsafe {
                 std::slice::from_raw_parts(bytes, len)
             })?;

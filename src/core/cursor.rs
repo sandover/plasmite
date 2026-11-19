@@ -94,7 +94,7 @@ impl Cursor {
         self.next_owned_locked(pool, None)
     }
 
-    fn next_owned_locked(
+    pub(crate) fn next_owned_locked(
         &mut self,
         pool: &Pool,
         expected: Option<u64>,

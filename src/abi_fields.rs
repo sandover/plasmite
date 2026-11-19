@@ -100,25 +100,13 @@ fn lookup(doc: Lite3DocRef<'_>, root: usize, tokens: &[String]) -> Result<Option
 }
 
 fn project(payload: &[u8], paths: &[&str]) -> Result<(Vec<plsm_field_value>, Vec<u8>), Error> {
-    // Wire bytes may start at any address. Request four-byte alignment only for
-    // the fallback; ordinary owned frames already meet the native requirement.
-    let aligned;
-    let payload = if payload.as_ptr().align_offset(4) == 0 {
-        payload
-    } else {
-        aligned = {
-            let mut words = vec![0u32; payload.len().div_ceil(4)];
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    payload.as_ptr(),
-                    words.as_mut_ptr().cast(),
-                    payload.len(),
-                )
-            };
-            words
-        };
-        unsafe { std::slice::from_raw_parts(aligned.as_ptr().cast(), payload.len()) }
-    };
+    crate::abi::with_aligned_payload(payload, |payload| project_aligned(payload, paths))
+}
+
+fn project_aligned(
+    payload: &[u8],
+    paths: &[&str],
+) -> Result<(Vec<plsm_field_value>, Vec<u8>), Error> {
     let doc = Lite3DocRef::new(payload);
     doc.validate()?;
     let root = doc.key_offset("data")?;

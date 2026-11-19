@@ -897,20 +897,19 @@ unsafe fn feed_input_bytes<'a>(
     Ok(unsafe { std::slice::from_raw_parts(bytes, len) })
 }
 
-fn append_parsed(
-    pool: &mut PoolHandle,
-    parsed: &crate::core::lite3::ParsedJson,
-    tags: &[&str],
-    durability: u32,
-) -> Result<(u64, u64), Error> {
-    let durability = match durability {
-        0 => crate::api::Durability::Fast,
-        1 => crate::api::Durability::Flush,
-        _ => return Err(Error::new(ErrorKind::Usage).with_message("invalid durability")),
-    };
-    let payload = parsed.encode_message(tags)?;
-    let receipt = pool.append_prepared(payload.as_slice(), durability)?;
-    Ok((receipt.seq, receipt.time))
+// Lite3 validates aligned nodes. A public byte span may start at any address.
+pub(crate) fn with_aligned_payload<T>(payload: &[u8], use_payload: impl FnOnce(&[u8]) -> T) -> T {
+    if payload.as_ptr().align_offset(4) == 0 {
+        return use_payload(payload);
+    }
+    let mut words = vec![0u32; payload.len().div_ceil(4)];
+    unsafe {
+        std::ptr::copy_nonoverlapping(payload.as_ptr(), words.as_mut_ptr().cast(), payload.len());
+        use_payload(std::slice::from_raw_parts(
+            words.as_ptr().cast(),
+            payload.len(),
+        ))
+    }
 }
 
 fn parse_utf8_cstr(input: *const c_char, name: &str) -> Result<String, Error> {
@@ -1214,13 +1213,14 @@ pub extern "C" fn plsm_pool_feed_json(
         }?)?;
         let (durability, tags) = feed_arguments(options)?;
         let tags = tags.unwrap_or_default();
-        let (seq, time) = append_parsed(&mut pool.pool, &parsed, &tags, durability)?;
-        let wire = crate::interface_wire::MessageWire::new(
-            seq,
-            crate::api::format_ts(time)?,
-            &tags,
-            parsed.value(),
-        );
+        let payload = parsed.encode_message(&tags)?;
+        let doc = payload.as_doc();
+        let data =
+            crate::core::lite3::JsonValue::new(doc, doc.message_data_offset(ErrorKind::Corrupt)?)?;
+        let crate::api::FeedReceipt { seq, time } =
+            pool.pool.append_prepared(payload.as_slice(), durability)?;
+        let wire =
+            crate::interface_wire::MessageWire::new(seq, crate::api::format_ts(time)?, &tags, data);
         if len < 4096 {
             return write_wire(out, &wire);
         }
@@ -1256,9 +1256,9 @@ pub extern "C" fn plsm_pool_feed_lite3(
         Err(code) => return code,
     };
     let result = (|| {
-        let message = pool.pool.feed_lite3(
+        let message = with_aligned_payload(
             unsafe { feed_input_bytes(bytes, len, "lite3_bytes") }?,
-            parse_feed(options)?,
+            |payload| pool.pool.feed_lite3(payload, parse_feed(options)?),
         )?;
         write_message_buf(out, message)
     })();
@@ -1289,12 +1289,9 @@ pub extern "C" fn plsm_pool_feed_json_receipt(
             feed_input_bytes(bytes, len, "json_bytes")
         }?)?;
         let (durability, tags) = feed_arguments(options)?;
-        let (seq, time) = append_parsed(
-            &mut pool.pool,
-            &parsed,
-            &tags.unwrap_or_default(),
-            durability,
-        )?;
+        let payload = parsed.encode_message(&tags.unwrap_or_default())?;
+        let crate::api::FeedReceipt { seq, time } =
+            pool.pool.append_prepared(payload.as_slice(), durability)?;
         unsafe { out.write(plsm_feed_receipt { seq, time }) };
         Ok(())
     })();
@@ -1321,9 +1318,9 @@ pub extern "C" fn plsm_pool_feed_lite3_receipt(
         Err(code) => return code,
     };
     let result = (|| {
-        let receipt = pool.pool.feed_lite3_receipt(
+        let receipt = with_aligned_payload(
             unsafe { feed_input_bytes(bytes, len, "lite3_bytes") }?,
-            parse_feed(options)?,
+            |payload| pool.pool.feed_lite3_receipt(payload, parse_feed(options)?),
         )?;
         unsafe {
             out.write(plsm_feed_receipt {
@@ -1338,11 +1335,7 @@ pub extern "C" fn plsm_pool_feed_lite3_receipt(
 
 pub(crate) fn parse_feed(options: *const plsm_feed_options) -> Result<Feed, Error> {
     let (durability, tags) = feed_arguments(options)?;
-    let feed = Feed::new().durability(if durability == 0 {
-        Durability::Fast
-    } else {
-        Durability::Flush
-    });
+    let feed = Feed::new().durability(durability);
     Ok(match tags {
         Some(tags) => feed.tags(tags),
         None => feed,
@@ -1351,24 +1344,30 @@ pub(crate) fn parse_feed(options: *const plsm_feed_options) -> Result<Feed, Erro
 
 pub(crate) fn feed_arguments<'a>(
     options: *const plsm_feed_options,
-) -> Result<(u32, Option<Vec<&'a str>>), Error> {
+) -> Result<(Durability, Option<Vec<&'a str>>), Error> {
     if options.is_null() {
-        return Ok((0, None));
+        return Ok((Durability::Fast, None));
     }
     let size = unsafe { ptr::addr_of!((*options).struct_size).read() } as usize;
     if size < std::mem::size_of::<plsm_feed_options>() {
         return Err(Error::new(ErrorKind::Usage).with_message("feed options are too small"));
     }
     let options = unsafe { &*options };
-    if options.durability > 1 {
-        return Err(Error::new(ErrorKind::Usage).with_message("durability must be fast or flush"));
-    }
+    let durability = match options.durability {
+        0 => Durability::Fast,
+        1 => Durability::Flush,
+        _ => {
+            return Err(
+                Error::new(ErrorKind::Usage).with_message("durability must be fast or flush")
+            );
+        }
+    };
     let tags = if options.tags_len == 0 {
         None
     } else {
         Some(unsafe { batches::tag_spans(options.tags, options.tags_len) }?)
     };
-    Ok((options.durability, tags))
+    Ok((durability, tags))
 }
 
 fn parse_read(options: *const plsm_read_options) -> Result<Read, Error> {
@@ -1977,6 +1976,78 @@ mod tests {
             unreachable!()
         };
         assert_eq!(identity.time, storage.get(2).unwrap().time);
+    }
+
+    #[test]
+    fn abi_json_feed_returns_stored_value_and_accepts_unaligned_lite3() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = plsm_pool {
+            pool: Pool::create(dir.path().join("feed"), PoolOptions::new(65536))
+                .unwrap()
+                .into(),
+        };
+        let pool = &mut owner as *mut plsm_pool;
+        let mut error = ptr::null_mut();
+        let mut out = plsm_buf {
+            data: ptr::null_mut(),
+            len: 0,
+        };
+        let json = br#"{"n":18446744073709551615}"#;
+        assert_eq!(
+            plsm_pool_feed_json(
+                pool,
+                json.as_ptr(),
+                json.len(),
+                ptr::null(),
+                &mut out,
+                &mut error
+            ),
+            0
+        );
+        let receipt = parse_buf(&out);
+        plsm_buf_free(&mut out);
+
+        let PoolHandle::Local(storage) = &owner.pool else {
+            unreachable!()
+        };
+        let frame = storage.get(1).unwrap();
+        let stored: serde_json::Value =
+            serde_json::from_slice(&crate::api::message_json_from_frame(&frame).unwrap()).unwrap();
+        assert_eq!(receipt, stored);
+
+        let mut prefixed = vec![0u32; (frame.payload.len() + 1).div_ceil(4)];
+        let unaligned = unsafe { prefixed.as_mut_ptr().cast::<u8>().add(1) };
+        unsafe {
+            ptr::copy_nonoverlapping(frame.payload.as_ptr(), unaligned, frame.payload.len());
+        }
+        assert_eq!(
+            plsm_pool_feed_lite3(
+                pool,
+                unaligned,
+                frame.payload.len(),
+                ptr::null(),
+                &mut out,
+                &mut error
+            ),
+            0
+        );
+        assert_eq!(parse_buf(&out)["data"], stored["data"]);
+        plsm_buf_free(&mut out);
+
+        let mut identity = plsm_feed_receipt { seq: 0, time: 0 };
+        assert_eq!(
+            plsm_pool_feed_lite3_receipt(
+                pool,
+                unaligned,
+                frame.payload.len(),
+                ptr::null(),
+                &mut identity,
+                &mut error
+            ),
+            0
+        );
+        assert_eq!(identity.seq, 3);
+        assert!(error.is_null());
     }
 
     #[test]
