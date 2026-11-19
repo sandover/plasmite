@@ -4,7 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build artifacts for (format: vX.Y.Z)."
+        description: "Version to build for the rehearsal (format: vX.Y.Z)."
+        required: true
+        type: string
+
+      source_sha:
+        description: "Exact head commit of the CI review branch."
         required: true
         type: string
 
@@ -30,12 +35,16 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG_INPUT: ${{ inputs.tag }}
+          REHEARSAL_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
 
           tag="$RELEASE_TAG_INPUT"
           ./scripts/validate_release_tag.sh "$tag"
-          source_sha="6591eae6404cbadb8b858039fba9a7e3efad9f05"
+          [[ "$REHEARSAL_SHA" =~ ^[0-9a-f]{40}$ ]]
+          candidate="$(git ls-remote --exit-code origin refs/heads/codex/plasmite-2.0-cleanup-ci | cut -f1)"
+          test "$candidate" = "$REHEARSAL_SHA"
+          source_sha="$REHEARSAL_SHA"
 
           version="${tag#v}"
           {
