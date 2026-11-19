@@ -884,6 +884,38 @@ fn browser_read_uses_v2_and_receives_pool_incarnation() -> TestResult<()> {
 }
 
 #[test]
+fn continuation_checks_incarnation_before_replacement_bounds() -> TestResult<()> {
+    let dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(dir.path())?;
+    let client = server.client()?;
+    let reference = PoolRef::name("replaced");
+    let pool = client.create_pool(&reference, PoolOptions::new(65536))?;
+    for n in 1..=3 {
+        pool.feed(&json!({"n": n}), Feed::default())?;
+    }
+    let url = format!("{}/v2/pools/replaced/fetch", server.local_url);
+    let response = ureq::get(&url).call()?;
+    let original = response.header("plasmite-incarnation").unwrap().to_owned();
+    let _ = response.into_string()?;
+
+    drop(pool);
+    client.delete_pool(&reference)?;
+    client.create_pool(&reference, PoolOptions::new(65536))?;
+
+    let result = ureq::get(&url)
+        .query("since", "2")
+        .query("until", "3")
+        .query("incarnation", &original)
+        .call();
+    let Err(ureq::Error::Status(status, response)) = result else {
+        panic!("expected replacement to fail");
+    };
+    assert_eq!(status, 404);
+    assert_eq!(response.into_json::<Value>()?["error"]["kind"], "NotFound");
+    Ok(())
+}
+
+#[test]
 fn local_ui_tail_reads_reported_oldest_after_small_pool_wrap() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;

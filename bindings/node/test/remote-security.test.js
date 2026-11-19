@@ -143,6 +143,7 @@ test("2.0 fetch opens eagerly and keeps its bound through cutoff", async () => {
     assert.equal((await read.next()).done, true);
     assert.equal(calls[1].searchParams.get("since"), "2");
     assert.equal(calls[1].searchParams.get("until"), "3");
+    assert.equal(calls[1].searchParams.get("incarnation"), "original");
     assert.equal(calls[1].searchParams.get("tag"), "keep");
     assert.equal(calls[2].href, calls[1].href);
   } finally {
@@ -185,5 +186,22 @@ test("HTTP follow rejects cutoff without opening another request", async () => {
     const reader = await pool.follow();
     await assert.rejects(reader.next(), /invalid stream cutoff/);
     assert.equal(calls, 1);
+  });
+});
+
+test("transport failure before response produces a structured Io error", async () => {
+  const cause = new TypeError("fetch failed");
+  await withFetchStub(() => { throw cause; }, async () => {
+    const { RemotePool } = require("../remote");
+    const client = new RemoteClient("https://service.example");
+    const pool = new RemotePool(client, "events");
+    for (const operation of [() => client.listPools(), () => pool.fetch(), () => pool.feed({ x: 1 })]) {
+      await assert.rejects(operation(), error => {
+        assert.ok(error instanceof RemoteError);
+        assert.equal(error.kind, 8);
+        assert.equal(error.cause, cause);
+        return true;
+      });
+    }
   });
 });

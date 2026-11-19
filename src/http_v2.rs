@@ -94,6 +94,7 @@ struct ReadQuery {
     since: Option<String>,
     last: Option<u64>,
     until: Option<u64>,
+    incarnation: Option<String>,
 }
 
 async fn read<const LIVE: bool>(
@@ -126,6 +127,11 @@ async fn read<const LIVE: bool>(
             .with_message("until requires an explicit continuation sequence on fetch")
             .into());
     }
+    if query.incarnation.is_some() && query.until.is_none() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("incarnation requires a fetch continuation")
+            .into());
+    }
     let tags = url::form_urlencoded::parse(raw_query.as_deref().unwrap_or_default().as_bytes())
         .filter_map(|(key, value)| (key == "tag").then(|| value.into_owned()));
     options = options.tags(tags);
@@ -148,7 +154,14 @@ async fn read<const LIVE: bool>(
     };
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        worker.run::<LIVE>(client, pool_ref, options, query.until, opened);
+        worker.run::<LIVE>(
+            client,
+            pool_ref,
+            options,
+            query.until,
+            query.incarnation,
+            opened,
+        );
     });
     let incarnation = tokio::time::timeout(timeout, opening)
         .await
@@ -202,6 +215,7 @@ impl ReadWorker {
         pool_ref: PoolRef,
         options: Read,
         until: Option<u64>,
+        expected_incarnation: Option<String>,
         opened: tokio::sync::oneshot::Sender<Result<String, Error>>,
     ) {
         let pool = match client.open_pool(&pool_ref, false) {
@@ -218,6 +232,12 @@ impl ReadWorker {
                 return;
             }
         };
+        if expected_incarnation.is_some_and(|expected| expected != incarnation) {
+            let _ = opened
+                .send(Err(Error::new(ErrorKind::NotFound)
+                    .with_message("pool was replaced during the read")));
+            return;
+        }
         let stream = if LIVE {
             pool.follow_lite3(options)
         } else if let Some(until) = until {
@@ -401,7 +421,7 @@ mod tests {
                 revoked: None,
                 binary: false,
             }
-            .run::<true>(client, reference, Read::new(), None, opened);
+            .run::<true>(client, reference, Read::new(), None, None, opened);
         });
         opening.await.unwrap().unwrap();
         drop(receive);
@@ -431,7 +451,7 @@ mod tests {
             binary: false,
         };
         let done = tokio::task::spawn_blocking(move || {
-            worker.run::<true>(client, reference, Read::new(), None, opened);
+            worker.run::<true>(client, reference, Read::new(), None, None, opened);
         });
         opening.await.unwrap().unwrap();
         revoked.store(true, Ordering::Release);
@@ -464,7 +484,7 @@ mod tests {
                 revoked: None,
                 binary: false,
             }
-            .run::<true>(client, reference, Read::new(), None, opened);
+            .run::<true>(client, reference, Read::new(), None, None, opened);
         });
         opening.await.unwrap().unwrap();
         stop.send_replace(true);
@@ -502,7 +522,14 @@ mod tests {
                 revoked: None,
                 binary: false,
             }
-            .run::<true>(client, pool_ref, Read::since(Since::Oldest), None, opened);
+            .run::<true>(
+                client,
+                pool_ref,
+                Read::since(Since::Oldest),
+                None,
+                None,
+                opened,
+            );
         });
         opening.await.unwrap().unwrap();
         tokio::time::timeout(Duration::from_secs(2), done)
@@ -541,7 +568,7 @@ mod tests {
                 revoked: None,
                 binary: false,
             };
-            worker.run::<false>(client, pool_ref, Read::new(), None, opened);
+            worker.run::<false>(client, pool_ref, Read::new(), None, None, opened);
         });
         opening.await.unwrap().unwrap();
         done.await.unwrap();

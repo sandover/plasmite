@@ -67,6 +67,10 @@ test('HTTP views preserve exact values, forwarding, transport limits and retaine
   const observed = [];
   for await (const message of await pool.fetchView({ since: first.seq })) observed.push(message);
   assert.deepEqual(observed.map(value => value.seq), [first.seq, forwarded.seq, retagged.seq]);
+  const forwardedMessage = await pool.feed(first);
+  assert.deepEqual(forwardedMessage.tags, ['source', '\0']);
+  assert.ok(forwardedMessage.seq > retagged.seq);
+  await assert.rejects(pool.feed(first, { tags: [] }), err => err.kind === ErrorKind.Usage);
   const fetch = global.fetch;
   // A failed feed frees its unpublished encoding. Caller snapshots live on.
   const portable = require(path.join(root, 'portable'));

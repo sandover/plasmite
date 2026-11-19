@@ -177,6 +177,14 @@ impl Stream {
             if let Some((next, end)) = self.resumed {
                 pairs.append_pair("since", &next.to_string());
                 pairs.append_pair("until", &end.to_string());
+                let incarnation = self
+                    .incarnation
+                    .as_ref()
+                    .and_then(|value| value.to_str().ok())
+                    .ok_or_else(|| {
+                        protocol_error("missing pool identity on stream continuation")
+                    })?;
+                pairs.append_pair("incarnation", incarnation);
             } else {
                 match &self.selection.start {
                     ReadStart::Default => {}
@@ -462,12 +470,12 @@ mod tests {
                 "{\"type\":\"cutoff\",\"next_seq\":8,\"until\":10}\n",
             ),
             (
-                "/v2/pools/events/fetch?since=8&until=10&tag=keep",
+                "/v2/pools/events/fetch?since=8&until=10&incarnation=original&tag=keep",
                 "original",
                 "{\"type\":\"cutoff\",\"next_seq\":8,\"until\":10}\n",
             ),
             (
-                "/v2/pools/events/fetch?since=8&until=10&tag=keep",
+                "/v2/pools/events/fetch?since=8&until=10&incarnation=original&tag=keep",
                 "original",
                 concat!(
                     "{\"seq\":9,\"time\":\"2026-11-17T00:00:00.000000123Z\",\"data\":{},\"meta\":{\"tags\":[\"keep\"]}}\n",
@@ -499,7 +507,7 @@ mod tests {
                 "{\"type\":\"cutoff\",\"next_seq\":2,\"until\":3}\n",
             ),
             (
-                "/v2/pools/events/fetch?since=2&until=3",
+                "/v2/pools/events/fetch?since=2&until=3&incarnation=original",
                 "replacement",
                 "{\"seq\":2,\"time\":\"2026-11-17T00:00:00Z\",\"data\":{},\"meta\":{\"tags\":[]}}\n",
             ),
