@@ -1,0 +1,96 @@
+{
+  "revision": "234cc5b",
+  "platform": "Linux-6.12.115+deb13.1-arm64-aarch64-with-glibc2.41",
+  "machine": "aarch64",
+  "python": "3.13.5",
+  "listener": "local",
+  "workload": {
+    "payload_text_bytes": 1024,
+    "pool_capacity_mib": 32,
+    "target_duration_seconds": 5,
+    "idle_sample_seconds": 5,
+    "drain_seconds": 2,
+    "controls": 10,
+    "server_arguments": []
+  },
+  "trials": [
+    {
+      "target_writes_per_second": 20,
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1
+      },
+      "admitted_or_scheduled": {
+        "event": 1
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.01,
+        "threads": 6,
+        "rss_bytes": 10821632,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.01,
+        "threads": 6,
+        "rss_bytes": 10899456,
+        "descriptors_or_handles": 15,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "with_stalled_follower": null,
+      "extra_agent_call": "ok",
+      "after_load": {
+        "cpu_seconds": 0.06,
+        "threads": 7,
+        "rss_bytes": 11296768,
+        "descriptors_or_handles": 16
+      },
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 5.116,
+          "fetch": 4.363,
+          "mcp_info": 4.21
+        },
+        "successful": {
+          "feed": 10,
+          "fetch": 10,
+          "mcp_info": 10
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 3.304,
+          "fetch": 1.653,
+          "mcp_info": 2.742
+        },
+        "successful": {
+          "feed": 10,
+          "fetch": 10,
+          "mcp_info": 10
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 100,
+        "committed": 100,
+        "elapsed_seconds": 4.95237762099714,
+        "achieved_writes_per_second": 20.19232127534439,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 50,
+        "expected_deliveries": 50,
+        "received_deliveries": 50,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 3.151,
+        "errors": {}
+      }
+    }
+  ]
+}

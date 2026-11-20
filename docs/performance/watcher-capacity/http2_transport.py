@@ -192,8 +192,6 @@ class Http2Transport(httpx.AsyncBaseTransport):
             self.pump.cancel()
             await asyncio.gather(self.pump, return_exceptions=True)
         if self.writer:
-            self.writer.close()
-            try:
-                await self.writer.wait_closed()
-            except OSError:
-                pass
+            # All measured responses have ended. Close the socket even if the
+            # server still has buffered frames for a reader we just cancelled.
+            self.writer.transport.abort()

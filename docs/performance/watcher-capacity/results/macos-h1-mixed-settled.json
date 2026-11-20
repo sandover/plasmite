@@ -1,0 +1,205 @@
+{
+  "revision": "687025b",
+  "platform": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.14.10",
+  "listener": "https",
+  "workload": {
+    "payload_text_bytes": 1024,
+    "pool_capacity_mib": 32,
+    "target_duration_seconds": 10.0,
+    "idle_sample_seconds": 5.0,
+    "idle_settle_seconds": 12.0,
+    "drain_seconds": 2.0,
+    "controls": 40,
+    "server_arguments": []
+  },
+  "trials": [
+    {
+      "target_writes_per_second": 20,
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1016
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000,
+        "http": 16,
+        "mcp": 16
+      },
+      "admitted_or_scheduled": {
+        "event": 1000,
+        "http": 16,
+        "mcp": 16
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.065407542,
+        "threads": 17,
+        "rss_bytes": 10747904,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "admission": {
+        "cpu_seconds": 0.46842280000000003,
+        "threads": 57,
+        "rss_bytes": 58556416,
+        "descriptors_or_handles": 1055
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.49423207999999996,
+        "threads": 57,
+        "rss_bytes": 58621952,
+        "descriptors_or_handles": 1054,
+        "cpu_percent_of_one_core": 0.20171461082259412
+      },
+      "with_stalled_follower": {
+        "cpu_seconds": 0.56697688,
+        "threads": 58,
+        "rss_bytes": 71892992,
+        "descriptors_or_handles": 1057
+      },
+      "extra_agent_call": "ok",
+      "after_load": {
+        "cpu_seconds": 2.556204992,
+        "threads": 107,
+        "rss_bytes": 75431936,
+        "descriptors_or_handles": 1058
+      },
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 16.761,
+          "fetch": 14.713,
+          "mcp_info": 10.923
+        },
+        "successful": {
+          "feed": 40,
+          "fetch": 40,
+          "mcp_info": 40
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 3.467,
+          "fetch": 2.598,
+          "mcp_info": 3.3
+        },
+        "successful": {
+          "feed": 40,
+          "fetch": 40,
+          "mcp_info": 40
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 200,
+        "committed": 200,
+        "elapsed_seconds": 9.954697000001033,
+        "achieved_writes_per_second": 20.09101834038537,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 100,
+        "expected_deliveries": 10320,
+        "received_deliveries": 10320,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 15.521,
+        "errors": {}
+      }
+    },
+    {
+      "target_writes_per_second": 20,
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1016
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000,
+        "http": 16,
+        "mcp": 16
+      },
+      "admitted_or_scheduled": {
+        "event": 1000,
+        "http": 16,
+        "mcp": 16
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.08128316799999999,
+        "threads": 17,
+        "rss_bytes": 10682368,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "admission": {
+        "cpu_seconds": 0.471563536,
+        "threads": 49,
+        "rss_bytes": 58015744,
+        "descriptors_or_handles": 1055
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.494912448,
+        "threads": 49,
+        "rss_bytes": 58195968,
+        "descriptors_or_handles": 1054,
+        "cpu_percent_of_one_core": 0.15732249218074837
+      },
+      "with_stalled_follower": {
+        "cpu_seconds": 0.560855136,
+        "threads": 50,
+        "rss_bytes": 70565888,
+        "descriptors_or_handles": 1057
+      },
+      "extra_agent_call": "ok",
+      "after_load": {
+        "cpu_seconds": 2.886314752,
+        "threads": 85,
+        "rss_bytes": 73547776,
+        "descriptors_or_handles": 1058
+      },
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 3.568,
+          "fetch": 3.492,
+          "mcp_info": 2.671
+        },
+        "successful": {
+          "feed": 40,
+          "fetch": 40,
+          "mcp_info": 40
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.404,
+          "fetch": 2.119,
+          "mcp_info": 2.025
+        },
+        "successful": {
+          "feed": 40,
+          "fetch": 40,
+          "mcp_info": 40
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 200,
+        "committed": 200,
+        "elapsed_seconds": 9.952941499999724,
+        "achieved_writes_per_second": 20.094561994562667,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 100,
+        "expected_deliveries": 10320,
+        "received_deliveries": 10320,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 13.456,
+        "errors": {}
+      }
+    }
+  ]
+}

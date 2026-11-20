@@ -1,8 +1,47 @@
 # Live watcher capacity
 
-On one Apple silicon Mac, the 2.0 baseline added a waiting thread for each Model
-Context Protocol (MCP) Events stream. At 64 streams, it delivered every matching
-notification, but finite HTTP fetches returned HTTP 423 until a stream closed.
+The shared-wait implementation served 1,000 Model Context Protocol (MCP) Events
+streams, 16 HTTP followers and 16 MCP follow calls across ten pools. The release
+build delivered every tagged message to every matching reader in the mixed
+trials below. The short-request checks passed on both connection shapes in
+the macOS repeats and the Debian ARM64 runs.
+
+## HTTPS mixed load
+
+Each row uses 20 writes per second, 1 KiB of text per message, and one HTTP
+follower that stopped reading while the other readers received their messages.
+Idle memory and thread samples come from before the extra follower stalls.
+The macOS runs used release build `687025b`. The Debian 13 ARM64 virtual machine
+had four virtual CPUs and ran release build `1ed2128`, which includes the
+non-Apple build fix. Both ran on the Apple M5 Pro.
+
+| Host and connection shape | Server idle threads | Idle CPU | Idle resident memory | p95 to last receipt |
+| --- | ---: | ---: | ---: | ---: |
+| [macOS, shared HTTP/2](results/macos-h2-mixed.json) | 29 | 0.09% | 19.67 MiB | 12.73 ms |
+| [macOS, separate HTTP/1.1, two repeats](results/macos-h1-mixed-settled.json) | 49–57 | 0.16–0.20% | 55.50–55.91 MiB | 13.46–15.52 ms |
+| [Debian ARM64 VM, shared HTTP/2](results/debian-arm64-h2-mixed.json) | 29 | 0.20% | 19.75 MiB | 47.35 ms |
+| [Debian ARM64 VM, separate HTTP/1.1](results/debian-arm64-h1-mixed.json) | 35 | 0.20% | 43.12 MiB | 16.60 ms |
+
+The five-second trials delivered 5,160 tagged notifications or messages each.
+The macOS HTTP/1.1 repeats lasted ten seconds and delivered 10,320 each.
+All ordinary calls succeeded with the streams open. With the stalled reader,
+feed, finite fetch, and MCP info p95 stayed below twice their idle times in
+the table. In [the first short macOS HTTP/1.1 trial](results/macos-h1-mixed-quick.json),
+MCP info p95 rose from 8.29 to 31.37 ms. The two repeats used 40 samples per
+request instead of 12 and waited 12 seconds after opening the readers.
+The server still had 49–57 threads after the wait, with ten pool waiters
+and MCP follow calls that renewed every five seconds.
+
+On macOS, the separate-connection trial used 1,054 server descriptors with
+the readers idle, compared with 43 for shared HTTP/2. The first stalled
+follower raised resident memory to 68.38 MiB on HTTP/1.1 and 28.59 MiB on
+HTTP/2. These samples include the pool pages the benchmark touched.
+
+The [Debian baseline](results/baseline-debian-arm64-event-64.json) admitted 64
+quiet local streams and grew from six to 69 idle threads. It used 1.00% of one
+core and returned HTTP 423 for every finite fetch attempted while the streams
+were open. Its [single-stream baseline](results/baseline-debian-arm64-event-1.json)
+is available for comparison.
 
 ## Release baseline on macOS
 
