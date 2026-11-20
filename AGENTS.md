@@ -12,6 +12,7 @@ docs/
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
 ├── agents.md                                  — Read when connecting AI agents through MCP or designing agent handoffs
 ├── performance/README.md                      — Read when choosing a performance report or measuring a change
+├── performance/watcher-capacity/              — Read when measuring idle watchers, delivery or competing short requests
 ├── performance/udp-transport.md               — Read when assessing UDP versus HTTP delivery, measured latency, or maximum datagram support
 ├── performance/udp-transport-bench.rs          — Read with the UDP transport report for the historical benchmark and its matching checkout
 ├── performance/udp-transport-results/          — Read when checking the raw runs and host setup behind the UDP measurements

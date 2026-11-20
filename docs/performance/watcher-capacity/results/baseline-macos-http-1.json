@@ -1,0 +1,95 @@
+{
+  "revision": "234cc5b",
+  "platform": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.14.10",
+  "listener": "local",
+  "workload": {
+    "payload_text_bytes": 1024,
+    "pool_capacity_mib": 32,
+    "target_duration_seconds": 5,
+    "idle_sample_seconds": 5,
+    "drain_seconds": 2,
+    "controls": 10
+  },
+  "trials": [
+    {
+      "target_writes_per_second": 20,
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1
+      },
+      "pools": 1,
+      "requested_readers": {
+        "http": 1
+      },
+      "admitted_or_scheduled": {
+        "http": 1
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.019359625,
+        "threads": 17,
+        "rss_bytes": 8536064,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.021680082,
+        "threads": 17,
+        "rss_bytes": 8617984,
+        "descriptors_or_handles": 15,
+        "cpu_percent_of_one_core": 0.0398207970793103
+      },
+      "with_stalled_follower": null,
+      "extra_agent_call": "ok",
+      "after_load": {
+        "cpu_seconds": 0.076550584,
+        "threads": 19,
+        "rss_bytes": 9076736,
+        "descriptors_or_handles": 16
+      },
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.377,
+          "fetch": 2.115,
+          "mcp_info": 2.508
+        },
+        "successful": {
+          "feed": 10,
+          "fetch": 10,
+          "mcp_info": 10
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 6.405,
+          "fetch": 8.697,
+          "mcp_info": 7.115
+        },
+        "successful": {
+          "feed": 10,
+          "fetch": 10,
+          "mcp_info": 10
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 100,
+        "committed": 100,
+        "elapsed_seconds": 4.952247875000467,
+        "achieved_writes_per_second": 20.19285030234691,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 50,
+        "expected_deliveries": 50,
+        "received_deliveries": 50,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 9.684,
+        "errors": {}
+      }
+    }
+  ]
+}
