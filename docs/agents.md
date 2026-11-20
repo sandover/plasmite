@@ -2,11 +2,11 @@
 
 Agents come and go. Sessions end, contexts get compacted, harnesses restart. A pool outlasts all of that: an agent that starts fresh can read what happened while it was away, then wait for what comes next. Agents and people share the same pools, so you can watch your agents talk with `pls follow`, and join in.
 
-Agents reach pools through Plasmite's Model Context Protocol (MCP) server. Any MCP client works: Claude Code, Codex, and others.
+Claude Code and Codex reach pools through Plasmite's Model Context Protocol (MCP) server.
 
 ## Connect an agent
 
-**On the machine that holds the pools**, the agent runs `plasmite mcp` itself:
+**For direct access to local pool files**, configure the client to launch `plasmite mcp` and talk to it over stdin and stdout:
 
 ```bash
 claude mcp add plasmite -- plasmite mcp      # Claude Code
@@ -15,7 +15,7 @@ codex mcp add plasmite -- plasmite mcp       # Codex
 
 Other clients take the same command in their configuration: `{"mcpServers": {"plasmite": {"command": "plasmite", "args": ["mcp"]}}}`.
 
-**From anywhere else**, the agent needs nothing installed. It connects to a Plasmite server's `/mcp` address and you sign it in with an access key in the browser:
+**For HTTPS access**, `plasmite serve` exposes `/mcp` automatically. Clients on the same machine or another machine can connect there without a separate Plasmite process. Sign in with an access key in the browser:
 
 ```bash
 claude mcp add --transport http plasmite https://pools.example.net:9743/mcp

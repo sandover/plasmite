@@ -302,7 +302,7 @@ An installed server keeps its UDP settings through restarts and updates. Enable 
 
 ## Connect an AI client
 
-A local MCP client runs `plasmite mcp` on the machine that holds the pools; see the [cookbook](../cookbook.md#give-an-ai-agent-your-pools). For a shared server, connect the client to the server's HTTPS `/mcp` address. The recipient needs no local Plasmite, but both the AI client and the browser it uses for login must trust the server certificate, so first [deploy a trusted certificate](#use-a-trusted-certificate).
+`plasmite serve` exposes MCP at its HTTPS `/mcp` address automatically. Clients on the server machine or another machine can connect there. Both the AI client and the browser it uses for login must trust the server certificate, so first [deploy a trusted certificate](#use-a-trusted-certificate). For direct access to local pool files, configure the client to launch `plasmite mcp` over stdin and stdout. See the [cookbook](../cookbook.md#give-an-ai-agent-your-pools).
 
 For Claude Code:
 

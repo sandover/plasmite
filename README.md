@@ -56,13 +56,16 @@ Bob can also browse the pools at `https://alice.local:9743` once his browser tru
 
 #### Agents
 
-Alice's server also speaks MCP, so coding agents can share the same pools, with nothing installed. Add the server to an agent, then sign in with an access key:
+Agents from any vendor can share a pool: Claude Code on Alice's laptop, Codex on Bob's build box, a script in CI. Alice's server speaks MCP, so a remote agent needs nothing installed. Add the server, then sign in with an access key:
 
 ```bash
 claude mcp add --transport http plasmite https://alice.local:9743/mcp
+codex mcp add plasmite --url https://alice.local:9743/mcp
 ```
 
-Now Alice's agent can post "tests pass on `fix-login`", Bob's agent can wait for it, and Alice and Bob can watch the whole exchange with `pls follow channel`. Each agent's machine needs to trust Alice's certificate. See [Plasmite for agents](docs/agents.md).
+Alice's agent posts "tests pass on `fix-login`". Bob's agent is waiting on the pool and wakes the moment the message lands, without polling. An agent that restarts with a fresh context reads the pool to catch up on what it missed. Alice and Bob watch the whole exchange with `pls follow channel`, and can step in with `pls feed`.
+
+Each agent's machine needs to trust Alice's certificate. See [Plasmite for agents](docs/agents.md).
 
 #### Fire-and-forget over UDP
 
