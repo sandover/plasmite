@@ -80,7 +80,8 @@ def temporary_server(binary, https, extra_args):
         token = secrets.token_hex(32)
         # Store the fixture grant in the throwaway directory. The running
         # server still validates the key and token on its production routes.
-        descriptor = os.open(state / "oauth.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        grants_path = state / "oauth.json"
+        descriptor = os.open(grants_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as output:
             json.dump({
                 "codes": [],
@@ -93,5 +94,26 @@ def temporary_server(binary, https, extra_args):
                     "grant_id": "watcher-benchmark", "expires_at": int(time.time()) + 1800,
                 }],
             }, output)
+        if os.name == "nt":
+            # Windows ignores POSIX mode bits. Match the protected ACL the
+            # server applies when it creates its own credential files.
+            subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", """
+$ErrorActionPreference = 'Stop'
+$path = $env:PLASMITE_BENCH_GRANTS_PATH
+$acl = Get-Acl -LiteralPath $path
+$owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl.SetOwner($owner)
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($sid in $owner.Value, 'S-1-5-18', 'S-1-5-32-544') {
+    $identity = [Security.Principal.SecurityIdentifier]::new($sid)
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'Allow')
+    $acl.SetAccessRule($rule)
+}
+Set-Acl -LiteralPath $path -AclObject $acl
+"""],
+                env={**os.environ, "PLASMITE_BENCH_GRANTS_PATH": str(grants_path)},
+                check=True,
+            )
         with running(binary, pools, ready, access, origin, port, extra_args) as (pid, _, _, _):
             yield origin, pid, certificate, key, token
