@@ -1201,3 +1201,14 @@
 {"version":1,"task_id":"S6SY42","kind":"done","at":"2026-11-20T21:21:40.461219Z","text":"Verified native automation with a scripted model, plus authenticated HTTP streams, retained replay, and retention gaps."}
 {"version":1,"task_id":"ULIAYQ","kind":"result","at":"2026-11-20T21:21:40.500153Z","text":"Codex CLI 0.171.0-alpha.13 rejects custom MCP event streams. OpenCode 2.3.2 passed its native automation check.","file":{"path":"docs/validation/mcp-wake-up.md","sha256":"571da5be4779b0a0c9d26976db48a7207cd69272f15e6fd901a2655304b3426f","mtime":"2026-11-20T21:20:46.976652078Z","git_commit":"037dac3e090a78cff57bf4bf8f15c59b84972d7c"}}
 {"version":1,"task_id":"ULIAYQ","kind":"result","at":"2026-11-20T22:28:42.970786Z","text":"Claude Code 2.1.329 fetched over modern MCP with defaults. No Events requests appeared in the HTTP trace.","file":{"path":"docs/validation/mcp-wake-up.md","sha256":"d1c01d796f6c224a51b6b2947f779877bc2eda25b2e2bf3a35ac509fac1eed22","mtime":"2026-11-20T22:28:42.910292436Z","git_commit":"037dac3e090a78cff57bf4bf8f15c59b84972d7c"}}
+{"version":1,"task_id":"MZEOO7","kind":"created","at":"2026-11-20T22:52:08.821084Z"}
+{"version":1,"task_id":"YBWWNO","kind":"created","at":"2026-11-20T22:52:08.8211Z"}
+{"version":1,"task_id":"KH2B6R","kind":"created","at":"2026-11-20T22:52:08.821102Z"}
+{"version":1,"task_id":"XJUNGH","kind":"created","at":"2026-11-20T22:52:08.821105Z"}
+{"version":1,"task_id":"YOOHZK","kind":"created","at":"2026-11-20T22:52:08.821106Z"}
+{"version":1,"task_id":"V62ZWS","kind":"created","at":"2026-11-20T22:52:08.821109Z"}
+{"version":1,"task_id":"KH2B6R","kind":"open","at":"2026-11-20T22:52:18.356088Z"}
+{"version":1,"task_id":"XJUNGH","kind":"open","at":"2026-11-20T22:52:18.405601Z"}
+{"version":1,"task_id":"YOOHZK","kind":"open","at":"2026-11-20T22:52:18.446467Z"}
+{"version":1,"task_id":"V62ZWS","kind":"open","at":"2026-11-20T22:52:18.4861Z"}
+{"version":1,"task_id":"YBWWNO","kind":"open","at":"2026-11-20T22:52:18.526375Z"}
