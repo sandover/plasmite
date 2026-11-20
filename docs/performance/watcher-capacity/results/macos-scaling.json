@@ -1,0 +1,2021 @@
+{
+  "machine": "Apple M5 Pro",
+  "listener": "https",
+  "fixture": "A fresh local HTTPS server and synthetic grant per trial; alternate baseline and candidate",
+  "trials": [
+    {
+      "revision": "234cc5b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1
+      },
+      "admitted_or_scheduled": {
+        "event": 1
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.013908583,
+        "threads": 17,
+        "rss_bytes": 10698752,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.015133998999999999,
+        "threads": 17,
+        "rss_bytes": 10797056,
+        "descriptors_or_handles": 16,
+        "cpu_percent_of_one_core": 0.029391167092740842
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.206,
+          "fetch": 2.386,
+          "mcp_info": 1.996
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 3.799,
+          "fetch": 2.384,
+          "mcp_info": 2.199
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9541050420011743,
+        "achieved_writes_per_second": 20.469728668749816,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 20,
+        "received_deliveries": 20,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 3.202,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1
+      },
+      "admitted_or_scheduled": {
+        "event": 1
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.017789541,
+        "threads": 17,
+        "rss_bytes": 10747904,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.019256375,
+        "threads": 18,
+        "rss_bytes": 10977280,
+        "descriptors_or_handles": 16,
+        "cpu_percent_of_one_core": 0.009026684481789444
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 3.188,
+          "fetch": 2.298,
+          "mcp_info": 2.319
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.169,
+          "fetch": 2.509,
+          "mcp_info": 2.883
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9524333750014193,
+        "achieved_writes_per_second": 20.487254782750743,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 20,
+        "received_deliveries": 20,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 4.096,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.011682791,
+        "threads": 17,
+        "rss_bytes": 10665984,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.047621209,
+        "threads": 80,
+        "rss_bytes": 18497536,
+        "descriptors_or_handles": 142,
+        "cpu_percent_of_one_core": 1.3079111138194566
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.153,
+          "fetch": 1.31,
+          "mcp_info": 0.982
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 2.556,
+          "mcp_info": 1.053
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9532204589995672,
+        "achieved_writes_per_second": 20.478999088760244,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 5.167,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.012752832,
+        "threads": 17,
+        "rss_bytes": 10731520,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.040835124,
+        "threads": 30,
+        "rss_bytes": 14729216,
+        "descriptors_or_handles": 79,
+        "cpu_percent_of_one_core": 0.0024244366215371163
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 1.752,
+          "fetch": 1.224,
+          "mcp_info": 1.085
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 5.659,
+          "fetch": 6.017,
+          "mcp_info": 9.073
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9533169159985846,
+        "achieved_writes_per_second": 20.47798781261821,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 11.753,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 192
+      },
+      "before_readers": {
+        "cpu_seconds": 0.017145291,
+        "threads": 17,
+        "rss_bytes": 10731520,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.09098712,
+        "threads": 80,
+        "rss_bytes": 21200896,
+        "descriptors_or_handles": 142,
+        "cpu_percent_of_one_core": 1.1038258220742594
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.131,
+          "fetch": 3.156,
+          "mcp_info": 2.282
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 9.156,
+          "mcp_info": 2.257
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9519553339996492,
+        "achieved_writes_per_second": 20.492272186391734,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 11.273,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 256
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 256
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.016569249,
+        "threads": 17,
+        "rss_bytes": 10698752,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.11282266799999999,
+        "threads": 35,
+        "rss_bytes": 24002560,
+        "descriptors_or_handles": 271,
+        "cpu_percent_of_one_core": 0.0054593084639544395
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.254,
+          "fetch": 2.905,
+          "mcp_info": 2.613
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 8.408,
+          "fetch": 16.674,
+          "mcp_info": 20.066
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.954851750000671,
+        "achieved_writes_per_second": 20.461909707468237,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 5120,
+        "received_deliveries": 5120,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 24.372,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 936
+      },
+      "before_readers": {
+        "cpu_seconds": 0.016349082,
+        "threads": 17,
+        "rss_bytes": 10698752,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.21879975200000001,
+        "threads": 80,
+        "rss_bytes": 21250048,
+        "descriptors_or_handles": 142,
+        "cpu_percent_of_one_core": 1.0574576206642539
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 3.168,
+          "fetch": 2.72,
+          "mcp_info": 2.425
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 5.914,
+          "mcp_info": 2.412
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9555607910006074,
+        "achieved_writes_per_second": 20.454490693451206,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 10.975,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1000
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 1000
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.016725666,
+        "threads": 17,
+        "rss_bytes": 10715136,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.386851616,
+        "threads": 33,
+        "rss_bytes": 56393728,
+        "descriptors_or_handles": 1015,
+        "cpu_percent_of_one_core": 0.0060215232420606545
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.586,
+          "fetch": 2.889,
+          "mcp_info": 2.387
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 10.022,
+          "fetch": 32.971,
+          "mcp_info": 1.266
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.95261075000235,
+        "achieved_writes_per_second": 20.485393722200833,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 20000,
+        "received_deliveries": 20000,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 47.387,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.020738749,
+        "threads": 17,
+        "rss_bytes": 10715136,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.056297122000000005,
+        "threads": 80,
+        "rss_bytes": 18677760,
+        "descriptors_or_handles": 142,
+        "cpu_percent_of_one_core": 0.9577949618987518
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.128,
+          "fetch": 2.803,
+          "mcp_info": 2.361
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.013,
+          "mcp_info": 2.762
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.953144582999812,
+        "achieved_writes_per_second": 20.479794659422737,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 4.57,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.021768458,
+        "threads": 17,
+        "rss_bytes": 10747904,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.052023832,
+        "threads": 44,
+        "rss_bytes": 16023552,
+        "descriptors_or_handles": 88,
+        "cpu_percent_of_one_core": 0.04612952119689454
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 10.429,
+          "fetch": 2.8,
+          "mcp_info": 2.533
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.069,
+          "fetch": 1.963,
+          "mcp_info": 1.897
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.953030624998064,
+        "achieved_writes_per_second": 20.480989641439777,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 4.456,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 192
+      },
+      "before_readers": {
+        "cpu_seconds": 0.021487333,
+        "threads": 17,
+        "rss_bytes": 10698752,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.091537292,
+        "threads": 80,
+        "rss_bytes": 20938752,
+        "descriptors_or_handles": 142,
+        "cpu_percent_of_one_core": 0.9620560965071508
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.624,
+          "fetch": 2.969,
+          "mcp_info": 3.275
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 3.435,
+          "mcp_info": 2.227
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9535507920008968,
+        "achieved_writes_per_second": 20.4755362203972,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 4.652,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 256
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 256
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.021521415999999998,
+        "threads": 17,
+        "rss_bytes": 10600448,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.124233748,
+        "threads": 43,
+        "rss_bytes": 24428544,
+        "descriptors_or_handles": 280,
+        "cpu_percent_of_one_core": 0.04482668104127119
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 3.838,
+          "fetch": 2.47,
+          "mcp_info": 2.68
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.0,
+          "fetch": 3.482,
+          "mcp_info": 2.623
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9528065000013157,
+        "achieved_writes_per_second": 20.48334025924896,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 512,
+        "received_deliveries": 512,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 6.771,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 936
+      },
+      "before_readers": {
+        "cpu_seconds": 0.018979666,
+        "threads": 17,
+        "rss_bytes": 10715136,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.210846296,
+        "threads": 80,
+        "rss_bytes": 21168128,
+        "descriptors_or_handles": 142,
+        "cpu_percent_of_one_core": 0.997070878179646
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.681,
+          "fetch": 2.473,
+          "mcp_info": 2.394
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 3.997,
+          "mcp_info": 2.822
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.955078874998435,
+        "achieved_writes_per_second": 20.459532610944926,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 4.108,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1000
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 1000
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.022669874,
+        "threads": 17,
+        "rss_bytes": 10665984,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.377962992,
+        "threads": 51,
+        "rss_bytes": 57196544,
+        "descriptors_or_handles": 1024,
+        "cpu_percent_of_one_core": 0.03377985299302943
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.072,
+          "fetch": 4.053,
+          "mcp_info": 3.019
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 9.544,
+          "fetch": 8.332,
+          "mcp_info": 2.12
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.953875582999899,
+        "achieved_writes_per_second": 20.47213259023672,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 2000,
+        "received_deliveries": 2000,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 14.107,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 1
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1
+      },
+      "admitted_or_scheduled": {
+        "event": 1
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.020351958,
+        "threads": 17,
+        "rss_bytes": 11010048,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.021102416,
+        "threads": 17,
+        "rss_bytes": 11075584,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.015499309868873924
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.225,
+          "fetch": 1.652,
+          "mcp_info": 1.777
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 1.804,
+          "fetch": 2.366,
+          "mcp_info": 3.231
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9522677079985442,
+        "achieved_writes_per_second": 20.48899330564035,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 20,
+        "received_deliveries": 20,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 2.12,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 1
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1
+      },
+      "admitted_or_scheduled": {
+        "event": 1
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.016106956999999998,
+        "threads": 17,
+        "rss_bytes": 10977280,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.016544416,
+        "threads": 18,
+        "rss_bytes": 11157504,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.001924591586267642
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 1.825,
+          "fetch": 1.351,
+          "mcp_info": 3.407
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 11.537,
+          "fetch": 5.019,
+          "mcp_info": 8.141
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9523034169978928,
+        "achieved_writes_per_second": 20.488618547576497,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 20,
+        "received_deliveries": 20,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 2.888,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.014411206999999999,
+        "threads": 17,
+        "rss_bytes": 10846208,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.03129129,
+        "threads": 80,
+        "rss_bytes": 15613952,
+        "descriptors_or_handles": 78,
+        "cpu_percent_of_one_core": 0.8152121897377655
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 12.268,
+          "fetch": 5.865,
+          "mcp_info": 3.062
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 1.213,
+          "mcp_info": 1.739
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9525444169994444,
+        "achieved_writes_per_second": 20.486089664208333,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 4.205,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.015938791,
+        "threads": 17,
+        "rss_bytes": 10895360,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.037878624,
+        "threads": 19,
+        "rss_bytes": 11616256,
+        "descriptors_or_handles": 15,
+        "cpu_percent_of_one_core": 0.005422417461298913
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 3.139,
+          "fetch": 2.105,
+          "mcp_info": 1.958
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 3.491,
+          "fetch": 5.452,
+          "mcp_info": 6.087
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9540749169973424,
+        "achieved_writes_per_second": 20.47004424040432,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 8.299,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 192
+      },
+      "before_readers": {
+        "cpu_seconds": 0.014872166000000001,
+        "threads": 17,
+        "rss_bytes": 10862592,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.06225196,
+        "threads": 80,
+        "rss_bytes": 16367616,
+        "descriptors_or_handles": 82,
+        "cpu_percent_of_one_core": 0.6982622910621541
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 17.206,
+          "fetch": 10.16,
+          "mcp_info": 16.753
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 5.993,
+          "mcp_info": 11.024
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9530049580025661,
+        "achieved_writes_per_second": 20.481258808943302,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 3.801,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 256
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 256
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.01544075,
+        "threads": 17,
+        "rss_bytes": 10928128,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.066416458,
+        "threads": 20,
+        "rss_bytes": 13582336,
+        "descriptors_or_handles": 19,
+        "cpu_percent_of_one_core": 0.002892384212822569
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 1.851,
+          "fetch": 1.136,
+          "mcp_info": 1.327
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 1.541,
+          "fetch": 1.177,
+          "mcp_info": 1.547
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9523668750007346,
+        "achieved_writes_per_second": 20.487952603674938,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 5120,
+        "received_deliveries": 5120,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 7.501,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 936
+      },
+      "before_readers": {
+        "cpu_seconds": 0.014560916,
+        "threads": 17,
+        "rss_bytes": 11059200,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.081135584,
+        "threads": 80,
+        "rss_bytes": 16793600,
+        "descriptors_or_handles": 97,
+        "cpu_percent_of_one_core": 0.9049653879373811
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.524,
+          "fetch": 2.303,
+          "mcp_info": 1.631
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.587,
+          "mcp_info": 3.475
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.953096707999066,
+        "achieved_writes_per_second": 20.48029666742909,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 1280,
+        "received_deliveries": 1280,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 6.819,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 1000
+      },
+      "pools": 1,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 1000
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.016609208,
+        "threads": 17,
+        "rss_bytes": 11026432,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.225614704,
+        "threads": 20,
+        "rss_bytes": 19611648,
+        "descriptors_or_handles": 34,
+        "cpu_percent_of_one_core": 0.006513218880256306
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.649,
+          "fetch": 2.052,
+          "mcp_info": 1.95
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 2.262,
+          "fetch": 1.946,
+          "mcp_info": 6.597
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9520977499996661,
+        "achieved_writes_per_second": 20.490777165235112,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 20000,
+        "received_deliveries": 20000,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 29.583,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.018085708,
+        "threads": 17,
+        "rss_bytes": 10977280,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.039604748,
+        "threads": 80,
+        "rss_bytes": 15941632,
+        "descriptors_or_handles": 78,
+        "cpu_percent_of_one_core": 0.6683320368160889
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 1.48,
+          "fetch": 1.21,
+          "mcp_info": 1.031
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.429,
+          "mcp_info": 3.58
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.952869583001302,
+        "achieved_writes_per_second": 20.48267859163708,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 4.629,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 64
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.02692704,
+        "threads": 17,
+        "rss_bytes": 10944512,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.038990707,
+        "threads": 29,
+        "rss_bytes": 12288000,
+        "descriptors_or_handles": 24,
+        "cpu_percent_of_one_core": 0.020734785881974707
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 1.626,
+          "fetch": 1.116,
+          "mcp_info": 0.988
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.475,
+          "fetch": 1.384,
+          "mcp_info": 3.545
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.952477374998125,
+        "achieved_writes_per_second": 20.486793092820555,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 3.234,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 192
+      },
+      "before_readers": {
+        "cpu_seconds": 0.021320249,
+        "threads": 17,
+        "rss_bytes": 10960896,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.0580635,
+        "threads": 80,
+        "rss_bytes": 15908864,
+        "descriptors_or_handles": 83,
+        "cpu_percent_of_one_core": 0.9285057238247534
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.568,
+          "fetch": 2.326,
+          "mcp_info": 2.347
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 2.396,
+          "mcp_info": 2.159
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9535444590001134,
+        "achieved_writes_per_second": 20.475602597994254,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 3.545,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 256
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 256
+      },
+      "admitted_or_scheduled": {
+        "event": 256
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.019015416,
+        "threads": 17,
+        "rss_bytes": 10944512,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.07885404,
+        "threads": 30,
+        "rss_bytes": 14073856,
+        "descriptors_or_handles": 29,
+        "cpu_percent_of_one_core": 0.024567634882284615
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 1.675,
+          "fetch": 1.541,
+          "mcp_info": 1.301
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 2.888,
+          "fetch": 1.595,
+          "mcp_info": 1.555
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.952680041998974,
+        "achieved_writes_per_second": 20.484666785989006,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 512,
+        "received_deliveries": 512,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 3.46,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "234cc5b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 64
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 64
+      },
+      "rejected": {
+        "event: {'code': -32025, 'data': {'limit': 'streams'}, 'message': 'Too many live reads'}": 936
+      },
+      "before_readers": {
+        "cpu_seconds": 0.019492916,
+        "threads": 17,
+        "rss_bytes": 10977280,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.08416496000000001,
+        "threads": 80,
+        "rss_bytes": 16695296,
+        "descriptors_or_handles": 97,
+        "cpu_percent_of_one_core": 0.7844374334220711
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 6.496,
+          "fetch": 1.959,
+          "mcp_info": 2.201
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 2.678,
+          "mcp_info": 1.911
+        },
+        "successful": {
+          "feed": 6,
+          "mcp_info": 6
+        },
+        "errors": {
+          "fetch: HTTP 423": 6
+        }
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9532118329989316,
+        "achieved_writes_per_second": 20.479089530491226,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 128,
+        "received_deliveries": 128,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 3.049,
+        "errors": {}
+      }
+    },
+    {
+      "revision": "687025b",
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 1000
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 1000
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.018027291,
+        "threads": 17,
+        "rss_bytes": 10895360,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.161756712,
+        "threads": 29,
+        "rss_bytes": 20054016,
+        "descriptors_or_handles": 43,
+        "cpu_percent_of_one_core": 0.022934952738762098
+      },
+      "extra_agent_call": "ok",
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 2.34,
+          "fetch": 1.911,
+          "mcp_info": 1.824
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 4.883,
+          "fetch": 5.026,
+          "mcp_info": 1.832
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.9532266669993987,
+        "achieved_writes_per_second": 20.478933999733435,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 2000,
+        "received_deliveries": 2000,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 10.308,
+        "errors": {}
+      }
+    }
+  ],
+  "platform": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.10",
+  "workload": {
+    "payload_text_bytes": 1024,
+    "pool_capacity_mib": 32,
+    "target_duration_seconds": 2.0,
+    "idle_sample_seconds": 1.0,
+    "drain_seconds": 0.5,
+    "controls": 6
+  }
+}

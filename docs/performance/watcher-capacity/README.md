@@ -52,6 +52,21 @@ core and returned HTTP 423 for every finite fetch attempted while the streams
 were open. Its [single-stream baseline](results/baseline-debian-arm64-event-1.json)
 is available for comparison.
 
+## Additional event streams on macOS
+
+The [28-trial count comparison](results/macos-scaling.json) opened 1, 64,
+256 and 1,000 Events streams with both HTTPS connection shapes. It repeated
+every multi-stream count across one and ten pools and alternated the two
+release builds. Each trial sent 40 writes at 20 per second and sampled idle
+CPU for one second.
+
+The baseline admitted at most 64 streams and held 80 threads at that
+count. The candidate admitted every requested stream. With 1,000 streams
+watching one pool, it held 20 threads on shared HTTP/2 and 33 threads on
+separate HTTP/1.1. With the streams spread across ten pools, those counts
+were 29 and 51. Every admitted reader received each matching message.
+The candidate also accepted an ordinary request with the streams open.
+
 ## Raise the write rate
 
 Each step ran for eight seconds with 1,032 readers and one stalled follower.
@@ -81,7 +96,8 @@ At 50 writes per second for five seconds, [the control build](results/debian-arm
 and [the modified build](results/debian-arm64-delay-nodelay.json) each delivered
 13,416 matching receipts. The modified build enabled `TCP_NODELAY` on accepted
 sockets before the TLS handshake. The p95 to the last receipt fell from
-50.90 ms to 9.20 ms. The short fetch p95 under load was 2.57 ms in the control
+50.90 ms to 9.20 ms. Plasmite now enables the option on HTTPS sockets.
+The short fetch p95 under load was 2.57 ms in the control
 and 3.62 ms with the option. This pair leaves the cause of the intermittent
 short-request delays open.
 
