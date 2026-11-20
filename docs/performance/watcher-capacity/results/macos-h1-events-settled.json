@@ -1,0 +1,103 @@
+{
+  "revision": "687025b",
+  "platform": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.14.10",
+  "listener": "https",
+  "workload": {
+    "payload_text_bytes": 1024,
+    "pool_capacity_mib": 32,
+    "target_duration_seconds": 2.0,
+    "idle_sample_seconds": 5.0,
+    "idle_settle_seconds": 15.0,
+    "drain_seconds": 1.0,
+    "controls": 6,
+    "server_arguments": []
+  },
+  "trials": [
+    {
+      "target_writes_per_second": 20,
+      "connections": "separate-h1",
+      "stream_versions": {
+        "HTTP/1.1": 1000
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000
+      },
+      "admitted_or_scheduled": {
+        "event": 1000
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.019627375,
+        "threads": 17,
+        "rss_bytes": 10747904,
+        "descriptors_or_handles": 14,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "admission": {
+        "cpu_seconds": 0.38460129600000004,
+        "threads": 55,
+        "rss_bytes": 57327616,
+        "descriptors_or_handles": 1024
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.393642672,
+        "threads": 26,
+        "rss_bytes": 56426496,
+        "descriptors_or_handles": 1022,
+        "cpu_percent_of_one_core": 0.033324967686812666
+      },
+      "with_stalled_follower": null,
+      "extra_agent_call": "ok",
+      "after_load": {
+        "cpu_seconds": 0.68299824,
+        "threads": 93,
+        "rss_bytes": 58605568,
+        "descriptors_or_handles": 1024
+      },
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 4.133,
+          "fetch": 3.123,
+          "mcp_info": 2.618
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 9.874,
+          "fetch": 8.749,
+          "mcp_info": 2.098
+        },
+        "successful": {
+          "feed": 6,
+          "fetch": 6,
+          "mcp_info": 6
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 40,
+        "committed": 40,
+        "elapsed_seconds": 1.953535708002164,
+        "achieved_writes_per_second": 20.4756943198684,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 20,
+        "expected_deliveries": 2000,
+        "received_deliveries": 2000,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 15.27,
+        "errors": {}
+      }
+    }
+  ]
+}

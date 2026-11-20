@@ -67,6 +67,12 @@ separate HTTP/1.1. With the streams spread across ten pools, those counts
 were 29 and 51. Every admitted reader received each matching message.
 The candidate also accepted an ordinary request with the streams open.
 
+A [settled HTTP/1.1 trial](results/macos-h1-events-settled.json) with 1,000
+Events streams across ten pools had 17 threads before readers, 55 at
+admission and 26 after a 15-second wait and a five-second idle sample.
+The server used 0.033% of one core during the sample and delivered all
+2,000 matching notifications.
+
 ## Raise the write rate
 
 Each step ran for eight seconds with 1,032 readers and one stalled follower.
@@ -120,6 +126,12 @@ went from 3.12 to 3.42 ms, and HTTP follow p95 went from 2.96 to 3.64 ms.
 The single-reader latency target remains open. The candidate schedules a
 short read after the common waiter signals. In the baseline, the same
 blocking thread waits and reads.
+
+[A separate local socket test](results/macos-local-nodelay.json) set
+`TCP_NODELAY` on the loopback listener. Events p95 went from 3.74 to
+3.76 ms, and HTTP follow p95 went from 3.54 to 3.49 ms. The setting
+did not recover the single-reader latency. The production option applies
+to HTTPS sockets.
 
 ## Release baseline on macOS
 
