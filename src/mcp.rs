@@ -22,6 +22,11 @@ use crate::{api::Durability, since::parse_rfc3339_ns};
 
 const JSON_RPC_VERSION: &str = "2.0";
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+pub const MODERN_MCP_PROTOCOL_VERSION: &str = "2026-07-28";
+const SUPPORTED_PROTOCOL_VERSIONS: [&str; 2] = [MODERN_MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION];
+const VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
+const CLIENT_CAPABILITIES_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
+const SERVER_INFO_KEY: &str = "io.modelcontextprotocol/serverInfo";
 const PARSE_ERROR_CODE: i32 = -32700;
 const INVALID_REQUEST_CODE: i32 = -32600;
 const METHOD_NOT_FOUND_CODE: i32 = -32601;
@@ -50,7 +55,7 @@ const MCP_INSTRUCTIONS: &str = concat!(
     "application-level stable identifier."
 );
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum JsonRpcId {
     String(String),
@@ -134,6 +139,34 @@ impl JsonRpcError {
     pub fn internal_error(message: impl Into<String>) -> Self {
         Self::new(INTERNAL_ERROR_CODE, message)
     }
+
+    pub fn unsupported_version(version: &str) -> Self {
+        Self {
+            code: -32022,
+            message: "Unsupported protocol version".to_string(),
+            data: Some(json!({"requested": version, "supported": SUPPORTED_PROTOCOL_VERSIONS})),
+        }
+    }
+}
+
+pub fn request_protocol_version(payload: &Value) -> Option<&str> {
+    payload
+        .get("params")?
+        .get("_meta")?
+        .get(VERSION_KEY)?
+        .as_str()
+}
+
+pub fn uses_modern_mcp(method: &str, params: Option<&Value>) -> bool {
+    method == "server/discover"
+        || params
+            .and_then(|p| p.get("_meta"))
+            .and_then(Value::as_object)
+            .is_some_and(|meta| {
+                meta.contains_key(VERSION_KEY)
+                    || meta.contains_key(CLIENT_CAPABILITIES_KEY)
+                    || meta.contains_key("io.modelcontextprotocol/clientInfo")
+            })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -527,24 +560,131 @@ impl<H: McpHandler> McpDispatcher<H> {
     }
 
     pub fn dispatch_value(&mut self, value: Value) -> DispatchOutcome {
+        self.dispatch_value_with_mode(value, false)
+    }
+
+    pub fn dispatch_value_with_mode(
+        &mut self,
+        value: Value,
+        require_modern: bool,
+    ) -> DispatchOutcome {
         match parse_jsonrpc_request(value) {
-            Ok(request) => self.dispatch_request(request),
+            Ok(request) => self.dispatch_request_with_mode(request, require_modern),
             Err(response) => DispatchOutcome::Response(*response),
         }
     }
 
     pub fn dispatch_request(&mut self, request: JsonRpcRequest) -> DispatchOutcome {
-        let id = request.id.clone();
-        let route_result = self.route_method(request);
-        match id {
-            Some(response_id) => match route_result {
-                Ok(result) => {
-                    DispatchOutcome::Response(JsonRpcResponse::success(response_id, result))
-                }
-                Err(error) => DispatchOutcome::Response(JsonRpcResponse::error(response_id, error)),
-            },
-            None => DispatchOutcome::NoResponse,
+        self.dispatch_request_with_mode(request, false)
+    }
+
+    fn dispatch_request_with_mode(
+        &mut self,
+        request: JsonRpcRequest,
+        require_modern: bool,
+    ) -> DispatchOutcome {
+        let Some(id) = request.id.clone() else {
+            // Notifications never invoke request methods (which may write a pool).
+            return DispatchOutcome::NoResponse;
+        };
+        let modern = require_modern || uses_modern_mcp(&request.method, request.params.as_ref());
+        let result = if modern {
+            self.route_modern(request)
+        } else {
+            self.route_method(request)
+        };
+        DispatchOutcome::Response(match result {
+            Ok(result) => JsonRpcResponse::success(id, result),
+            Err(error) => JsonRpcResponse::error(id, error),
+        })
+    }
+
+    fn route_modern(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
+        if request.id == Some(JsonRpcId::Null) {
+            return Err(JsonRpcError::invalid_request(
+                "MCP requests need a non-null id",
+            ));
         }
+        let params = request
+            .params
+            .as_ref()
+            .and_then(Value::as_object)
+            .ok_or_else(|| JsonRpcError::invalid_params("request requires object params"))?;
+        let meta = params
+            .get("_meta")
+            .and_then(Value::as_object)
+            .ok_or_else(|| JsonRpcError::invalid_params("request requires object params._meta"))?;
+        let version = meta
+            .get(VERSION_KEY)
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                JsonRpcError::invalid_params("missing or invalid protocol version in params._meta")
+            })?;
+        if version != MODERN_MCP_PROTOCOL_VERSION {
+            return Err(JsonRpcError::unsupported_version(version));
+        }
+        if !meta
+            .get(CLIENT_CAPABILITIES_KEY)
+            .is_some_and(Value::is_object)
+        {
+            return Err(JsonRpcError::invalid_params(
+                "missing or invalid clientCapabilities in params._meta",
+            ));
+        }
+        if let Some(info) = meta.get("io.modelcontextprotocol/clientInfo")
+            && (info.get("name").and_then(Value::as_str).is_none()
+                || info.get("version").and_then(Value::as_str).is_none())
+        {
+            return Err(JsonRpcError::invalid_params(
+                "clientInfo needs string name and version",
+            ));
+        }
+        let cacheable = matches!(
+            request.method.as_str(),
+            "server/discover"
+                | "tools/list"
+                | "resources/list"
+                | "resources/read"
+                | "resources/templates/list"
+        );
+        let mut result = match request.method.as_str() {
+            "server/discover" => json!({
+                "supportedVersions": SUPPORTED_PROTOCOL_VERSIONS,
+                "capabilities": {"tools": {}, "resources": {}},
+                "instructions": MCP_INSTRUCTIONS,
+            }),
+            "resources/templates/list" => json!({"resourceTemplates": []}),
+            "initialize" | "notifications/initialized" => {
+                return Err(JsonRpcError::method_not_found(
+                    "use server/discover for modern MCP",
+                ));
+            }
+            _ => self.route_method(request).map_err(|mut error| {
+                if error.code == -32002
+                    || (error.code == -32000
+                        && error
+                            .data
+                            .as_ref()
+                            .and_then(|data| data.get("error_kind"))
+                            .and_then(Value::as_str)
+                            == Some("NotFound"))
+                {
+                    error.code = INVALID_PARAMS_CODE;
+                }
+                error
+            })?,
+        };
+        result["resultType"] = json!("complete");
+        if cacheable {
+            // Pool contents and permissions can change between requests.
+            result["ttlMs"] = json!(0);
+            result["cacheScope"] = json!("private");
+        }
+        result["_meta"][SERVER_INFO_KEY] = json!({
+            "name": self.metadata.name,
+            "version": self.metadata.version,
+        });
+        Ok(result)
     }
 
     fn route_method(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {

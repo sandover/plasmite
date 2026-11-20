@@ -233,6 +233,7 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
             .send_string(&exchange),
         Err(ureq::Error::Status(400, _))
     ));
+    check_modern_mcp(&agent, &resource, access_token)?;
     mcp_initialize_http(&agent, &resource, access_token)?;
     let accepted = mcp_list(&agent, &resource, access_token, 2)?;
     assert_eq!(accepted.status(), 200);
@@ -671,6 +672,103 @@ fn approve_code(
         .ok_or("missing code")?
         .1
         .into_owned())
+}
+
+fn check_modern_mcp(
+    agent: &ureq::Agent,
+    resource: &str,
+    token: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let post = |method, header_name: Option<&str>, payload: &Value, auth: bool| {
+        let mut request = agent
+            .post(resource)
+            .set("Accept", "application/json, text/event-stream")
+            .set("MCP-Protocol-Version", "2026-07-28")
+            .set("Mcp-Method", method);
+        if auth {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        if let Some(name) = header_name {
+            request = request.set("Mcp-Name", name);
+        }
+        request.send_json(payload).map_err(Box::new)
+    };
+    let rpc = |id, method, mut params: Value| {
+        params["_meta"] = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {}
+        });
+        json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})
+    };
+    let discovery = rpc(101, "server/discover", json!({}));
+    assert!(matches!(
+        post("server/discover", None, &discovery, false),
+        Err(error) if matches!(*error, ureq::Error::Status(401, _))
+    ));
+    let result: Value = post("server/discover", None, &discovery, true)?.into_json()?;
+    assert_eq!(
+        result["result"]["supportedVersions"],
+        json!(["2026-07-28", "2025-11-25"])
+    );
+    let tools: Value =
+        post("tools/list", None, &rpc(102, "tools/list", json!({})), true)?.into_json()?;
+    assert_eq!(tools["result"]["resultType"], "complete");
+
+    let feed = rpc(
+        103,
+        "tools/call",
+        json!({"name":"plasmite_feed","arguments":{"pool":"modern-mcp","create":true,"data":{"proof":true}}}),
+    );
+    let rejected = post("tools/call", Some("plasmite_fetch"), &feed, true);
+    let body: Value = match rejected {
+        Err(error) => match *error {
+            ureq::Error::Status(400, response) => response.into_json()?,
+            _ => return Err(error.into()),
+        },
+        Ok(_) => return Err("expected mismatched Mcp-Name rejection".into()),
+    };
+    assert_eq!(body["error"]["code"], -32020);
+    let result: Value = post("tools/call", Some("plasmite_feed"), &feed, true)?.into_json()?;
+    assert_eq!(result["result"]["structuredContent"]["message"]["seq"], 1);
+
+    let fetch = rpc(
+        104,
+        "tools/call",
+        json!({"name":"plasmite_fetch","arguments":{"pool":"modern-mcp","since":"oldest"}}),
+    );
+    let result: Value = post("tools/call", Some("plasmite_fetch"), &fetch, true)?.into_json()?;
+    assert_eq!(
+        result["result"]["structuredContent"]["messages"][0]["data"]["proof"],
+        true
+    );
+
+    let uri = "plasmite:///pools/modern-mcp";
+    let encoded = format!("=?base64?{}?=", STANDARD.encode(uri));
+    let result: Value = post(
+        "resources/read",
+        Some(&encoded),
+        &rpc(105, "resources/read", json!({"uri":uri})),
+        true,
+    )?
+    .into_json()?;
+    assert_eq!(result["result"]["contents"][0]["uri"], uri);
+
+    let unknown = post(
+        "missing/action",
+        None,
+        &rpc(106, "missing/action", json!({})),
+        true,
+    );
+    let body: Value = match unknown {
+        Err(error) => match *error {
+            ureq::Error::Status(404, response) => response.into_json()?,
+            _ => return Err(error.into()),
+        },
+        Ok(_) => return Err("expected unknown method rejection".into()),
+    };
+    assert_eq!(body["error"]["code"], -32601);
+    Ok(())
 }
 
 fn mcp_initialize_http(

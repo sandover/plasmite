@@ -6,6 +6,7 @@
 //! Notes: Streaming uses JSONL or framed Lite3; follow and fetch streams resume after a cutoff.
 
 use axum::body::Body;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{
     ConnectInfo, DefaultBodyLimit, FromRequestParts, MatchedPath, Path as AxumPath, Query,
     RawQuery, State,
@@ -16,6 +17,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytes::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
@@ -65,9 +67,10 @@ use plasmite::api::{
     Durability, Error, ErrorKind, Feed, LocalClient, Pool, PoolInfo, PoolOptions, PoolRef,
 };
 use plasmite::mcp::{
-    DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION, McpDispatcher,
-    McpHandler, McpResource, McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest,
-    ResourceReadResult, ToolCallRequest, ToolCallResult,
+    DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION,
+    MODERN_MCP_PROTOCOL_VERSION, McpDispatcher, McpHandler, McpResource, McpTool, McpToolAccess,
+    PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest, ToolCallResult,
+    request_protocol_version, uses_modern_mcp,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -1268,7 +1271,7 @@ async fn mcp_post(
     uri: Uri,
     headers: HeaderMap,
     activity: Option<Extension<RequestActivity>>,
-    Json(payload): Json<Value>,
+    payload: Result<Json<Value>, JsonRejection>,
 ) -> Response {
     let grant = if state.local_admin {
         None
@@ -1288,9 +1291,6 @@ async fn mcp_post(
             StatusCode::SERVICE_UNAVAILABLE,
         );
     };
-    if let Err(response) = validate_mcp_protocol_version(&headers, &payload) {
-        return response;
-    }
     if let Err(err) = validate_mcp_origin_header(&headers) {
         return error_response_with_status(err, StatusCode::FORBIDDEN);
     }
@@ -1307,12 +1307,36 @@ async fn mcp_post(
             StatusCode::FORBIDDEN,
         );
     }
+    let payload = match payload {
+        Ok(Json(payload)) => payload,
+        Err(JsonRejection::JsonSyntaxError(_)) => {
+            return mcp_request_error(
+                &Value::Null,
+                StatusCode::BAD_REQUEST,
+                -32700,
+                "invalid JSON",
+            );
+        }
+        Err(rejection) => return rejection.into_response(),
+    };
     if is_jsonrpc_response_payload(&payload) {
         return mcp_request_error(
             &payload,
             StatusCode::BAD_REQUEST,
             -32600,
             "JSON-RPC responses are not accepted",
+        );
+    }
+    let modern = match validate_mcp_request_headers(&headers, &payload) {
+        Ok(modern) => modern,
+        Err(response) => return response,
+    };
+    if modern && payload.get("id").is_none() {
+        return mcp_request_error(
+            &payload,
+            StatusCode::BAD_REQUEST,
+            -32600,
+            "modern HTTP MCP only accepts requests",
         );
     }
 
@@ -1361,6 +1385,7 @@ async fn mcp_post(
             let status = match response.error.as_ref().map(|error| error.code) {
                 Some(-32601) => StatusCode::NOT_FOUND,
                 Some(-32022..=-32020) => StatusCode::BAD_REQUEST,
+                Some(-32602 | -32600) if modern => StatusCode::BAD_REQUEST,
                 _ => StatusCode::OK,
             };
             let payload = match serde_json::to_value(response) {
@@ -1508,15 +1533,77 @@ fn mcp_wait_busy_tool_result() -> ToolCallResult {
     )
 }
 
-fn validate_mcp_protocol_version(headers: &HeaderMap, payload: &Value) -> Result<(), Response> {
+fn validate_mcp_request_headers(headers: &HeaderMap, payload: &Value) -> Result<bool, Response> {
     let method = payload.get("method").and_then(Value::as_str);
     let header_version = single_mcp_header(headers, "MCP-Protocol-Version")
         .map_err(|_| mcp_header_mismatch(payload, "invalid MCP-Protocol-Version header"))?;
+    let modern = header_version == Some(MODERN_MCP_PROTOCOL_VERSION)
+        || method.is_some_and(|method| uses_modern_mcp(method, payload.get("params")));
+    if modern {
+        let Some(body_version) = request_protocol_version(payload) else {
+            return Err(mcp_request_error(
+                payload,
+                StatusCode::BAD_REQUEST,
+                -32602,
+                "missing or invalid protocol version in params._meta",
+            ));
+        };
+        if header_version != Some(body_version) {
+            return Err(mcp_header_mismatch(
+                payload,
+                "MCP-Protocol-Version header must match params._meta",
+            ));
+        }
+        if body_version != MODERN_MCP_PROTOCOL_VERSION {
+            return Err(mcp_protocol_error(
+                payload,
+                StatusCode::BAD_REQUEST,
+                McpJsonRpcError::unsupported_version(body_version),
+            ));
+        }
+        let header_method = single_mcp_header(headers, "Mcp-Method")
+            .map_err(|_| mcp_header_mismatch(payload, "invalid Mcp-Method header"))?;
+        if header_method.is_none() || header_method != method {
+            return Err(mcp_header_mismatch(
+                payload,
+                "Mcp-Method header must match method",
+            ));
+        }
+        let name_field = match method {
+            Some("tools/call" | "prompts/get") => Some("name"),
+            Some("resources/read") => Some("uri"),
+            _ => None,
+        };
+        if let Some(field) = name_field {
+            let name = payload
+                .get("params")
+                .and_then(|params| params.get(field))
+                .and_then(Value::as_str);
+            let header_name = single_mcp_header(headers, "Mcp-Name")
+                .and_then(|value| value.ok_or(()))
+                .and_then(decode_mcp_header)
+                .map_err(|_| mcp_header_mismatch(payload, "missing or invalid Mcp-Name header"))?;
+            if name != Some(header_name.as_ref()) {
+                return Err(mcp_header_mismatch(
+                    payload,
+                    "Mcp-Name header must match request name or URI",
+                ));
+            }
+        }
+        return Ok(true);
+    }
     if header_version == Some(MCP_PROTOCOL_VERSION)
         || (header_version.is_none()
             && matches!(method, Some("initialize" | "notifications/initialized")))
     {
-        return Ok(());
+        return Ok(false);
+    }
+    if let Some(version) = header_version {
+        return Err(mcp_protocol_error(
+            payload,
+            StatusCode::BAD_REQUEST,
+            McpJsonRpcError::unsupported_version(version),
+        ));
     }
     Err(mcp_request_error(
         payload,
@@ -1524,6 +1611,22 @@ fn validate_mcp_protocol_version(headers: &HeaderMap, payload: &Value) -> Result
         -32600,
         "unsupported or missing MCP-Protocol-Version",
     ))
+}
+
+fn decode_mcp_header(value: &str) -> Result<std::borrow::Cow<'_, str>, ()> {
+    if let Some(encoded) = value
+        .strip_prefix("=?base64?")
+        .and_then(|text| text.strip_suffix("?="))
+    {
+        let decoded = STANDARD.decode(encoded).map_err(|_| ())?;
+        return String::from_utf8(decoded)
+            .map(std::borrow::Cow::Owned)
+            .map_err(|_| ());
+    }
+    if value.trim() != value {
+        return Err(());
+    }
+    Ok(std::borrow::Cow::Borrowed(value))
 }
 
 fn single_mcp_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, ()> {
@@ -1542,11 +1645,19 @@ fn mcp_header_mismatch(payload: &Value, message: &str) -> Response {
     mcp_request_error(payload, StatusCode::BAD_REQUEST, -32020, message)
 }
 
-fn mcp_request_error(payload: &Value, status: StatusCode, code: i64, message: &str) -> Response {
-    let id = payload.get("id").cloned().unwrap_or(Value::Null);
+fn mcp_request_error(payload: &Value, status: StatusCode, code: i32, message: &str) -> Response {
+    mcp_protocol_error(payload, status, McpJsonRpcError::new(code, message))
+}
+
+fn mcp_protocol_error(payload: &Value, status: StatusCode, error: McpJsonRpcError) -> Response {
+    let id = payload
+        .get("id")
+        .filter(|id| id.is_string() || id.as_i64().is_some())
+        .cloned()
+        .unwrap_or(Value::Null);
     (
         status,
-        Json(json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})),
+        Json(json!({"jsonrpc":"2.0", "id":id, "error":error})),
     )
         .into_response()
 }
@@ -2286,7 +2397,7 @@ mod tests {
         AccessStore, AppState, BrowserSessions, Error, ErrorKind, LocalClient, McpHandler,
         ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest, error_response, healthz,
         list_pools, mcp_post, same_origin, ui_pool_snapshot, validate_config,
-        validate_mcp_origin_header, validate_mcp_protocol_version,
+        validate_mcp_origin_header, validate_mcp_request_headers,
     };
     use axum::Json;
     use axum::extract::State;
@@ -2773,22 +2884,22 @@ mod tests {
             "MCP-Protocol-Version",
             HeaderValue::from_static("2025-11-25"),
         );
-        validate_mcp_protocol_version(&headers, &payload).unwrap();
+        validate_mcp_request_headers(&headers, &payload).unwrap();
         headers.remove("MCP-Protocol-Version");
         assert_eq!(
-            validate_mcp_protocol_version(&headers, &payload)
+            validate_mcp_request_headers(&headers, &payload)
                 .unwrap_err()
                 .status(),
             axum::http::StatusCode::BAD_REQUEST
         );
         let initialize = json!({"jsonrpc":"2.0","id":2,"method":"initialize"});
-        validate_mcp_protocol_version(&headers, &initialize).unwrap();
+        validate_mcp_request_headers(&headers, &initialize).unwrap();
         headers.insert(
             "MCP-Protocol-Version",
             HeaderValue::from_static("not-supported"),
         );
         assert_eq!(
-            validate_mcp_protocol_version(&headers, &initialize)
+            validate_mcp_request_headers(&headers, &initialize)
                 .unwrap_err()
                 .status(),
             axum::http::StatusCode::BAD_REQUEST
@@ -2940,7 +3051,7 @@ mod tests {
                     "/mcp".parse().unwrap(),
                     headers.clone(),
                     None,
-                    Json(payload.clone()),
+                    Ok(Json(payload.clone())),
                 )
                 .await
                 .status(),
@@ -2956,7 +3067,7 @@ mod tests {
                 "/mcp".parse().unwrap(),
                 headers,
                 None,
-                Json(payload)
+                Ok(Json(payload))
             )
             .await
             .status(),

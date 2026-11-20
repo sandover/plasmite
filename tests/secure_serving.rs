@@ -283,3 +283,122 @@ fn mcp_stdio_uses_the_2025_handshake_and_shared_pool_tools() {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+#[test]
+fn mcp_stdio_uses_modern_requests_without_handshake() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut child = cli()
+        .args(["--dir", temp.path().to_str().unwrap(), "mcp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn MCP server");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let mut call = |id, method, mut params: Value| {
+        params["_meta"] = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {}
+        });
+        send_mcp(
+            &mut stdin,
+            &json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}),
+        );
+        read_mcp(&mut stdout)
+    };
+    let tools = call(1, "tools/list", json!({}));
+    assert_eq!(tools["result"]["resultType"], "complete");
+    assert_eq!(tools["result"]["tools"][0]["name"], "plasmite_pool_list");
+    let discover = call(2, "server/discover", json!({}));
+    assert_eq!(
+        discover["result"]["supportedVersions"],
+        json!(["2026-07-28", "2025-11-25"])
+    );
+    assert_eq!(
+        discover["result"]["capabilities"],
+        json!({"tools":{}, "resources":{}})
+    );
+    assert_eq!(
+        discover["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+        "plasmite"
+    );
+
+    let feed = call(
+        3,
+        "tools/call",
+        json!({"name":"plasmite_feed", "arguments":{"pool":"project","create":true,"data":{"handoff":"review"}}}),
+    );
+    assert_eq!(feed["result"]["structuredContent"]["message"]["seq"], 1);
+    let fetch = call(
+        4,
+        "tools/call",
+        json!({"name":"plasmite_fetch", "arguments":{"pool":"project","since":"oldest"}}),
+    );
+    assert_eq!(
+        fetch["result"]["structuredContent"]["messages"][0]["data"]["handoff"],
+        "review"
+    );
+    let resource = call(
+        5,
+        "resources/read",
+        json!({"uri":"plasmite:///pools/project"}),
+    );
+    assert_eq!(
+        resource["result"]["contents"][0]["uri"],
+        "plasmite:///pools/project"
+    );
+    assert_eq!(
+        call(
+            6,
+            "resources/read",
+            json!({"uri":"plasmite:///pools/missing"})
+        )["error"]["code"],
+        -32602
+    );
+
+    send_mcp(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"1900-01-01"}}}),
+    );
+    let unsupported = read_mcp(&mut stdout);
+    assert_eq!(unsupported["error"]["code"], -32022);
+    assert_eq!(
+        unsupported["error"]["data"],
+        json!({"requested":"1900-01-01","supported":["2026-07-28","2025-11-25"]})
+    );
+    send_mcp(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":8,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}),
+    );
+    assert_eq!(read_mcp(&mut stdout)["error"]["code"], -32602);
+    send_mcp(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":9,"method":"tools/list"}),
+    );
+    assert_eq!(read_mcp(&mut stdout)["error"]["code"], -32602);
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}
+    });
+    send_mcp(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{
+            "_meta":meta, "name":"plasmite_follow","arguments":{"pool":"project","timeout_ms":3000}
+        }}),
+    );
+    std::thread::sleep(Duration::from_millis(50));
+    let start = Instant::now();
+    send_mcp(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":10}}),
+    );
+    send_mcp(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":11,"method":"ping","params":{"_meta":meta}}),
+    );
+    assert_eq!(read_mcp(&mut stdout)["id"], 11);
+    assert!(start.elapsed() < Duration::from_secs(2));
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}

@@ -57,6 +57,8 @@ The integration targets in `tests/` run the real `plasmite` binary or the public
 
 `tests/fixtures/owned_views.json` states the intended input rules for message views, and `uv run python tests/owned_view_contract.py` checks that the cases agree with each other. No binding suite reads this file yet; each binding tests views through its own cases. Measurements live in the [language-boundary results](../performance/language-boundary-results/owned-views/README.md).
 
+To check MCP compatibility against the maintained Python SDK, build the binary with `cargo build --bin plasmite`, then run `uv run --no-project --with mcp==2.3.0 python scripts/mcp_protocol_smoke.py target/debug/plasmite`. It checks automatic discovery, direct modern requests, and the legacy handshake against disposable local pools.
+
 ## Bindings and the C ABI
 
 Each binding loads the major-versioned native library (`libplasmite.so.2`, `libplasmite.2.dylib` or `plasmite2.dll`). The `just` recipes build the library and stage that name with `scripts/stage_versioned_library.sh`, so run binding tests through them:

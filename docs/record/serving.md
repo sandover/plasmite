@@ -304,6 +304,8 @@ An installed server keeps its UDP settings through restarts and updates. Enable 
 
 `plasmite serve` exposes MCP at its HTTPS `/mcp` address automatically. Clients on the server machine or another machine can connect there. Both the AI client and the browser it uses for login must trust the server certificate, so first [deploy a trusted certificate](#use-a-trusted-certificate). For direct access to local pool files, configure the client to launch `plasmite mcp` over stdin and stdout. See the [cookbook](../cookbook.md#give-an-ai-agent-your-pools).
 
+Both connection paths support MCP 2026-07-28 and the 2025-11-25 handshake used by older clients. A modern client works without an initialization handshake; a legacy client can keep its existing configuration. They see the same available tools and pool resources. The protocol upgrade does not itself make a pool update start a new agent turn.
+
 For Claude Code:
 
 ```console
