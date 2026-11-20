@@ -1237,3 +1237,13 @@
 {"version":1,"task_id":"TEZNC7","kind":"created","at":"2026-11-20T23:11:36.347478Z"}
 {"version":1,"task_id":"7N4U6N","kind":"created","at":"2026-11-20T23:11:36.391298Z"}
 {"version":1,"task_id":"FXJ3GC","kind":"created","at":"2026-11-20T23:11:36.391319Z"}
+{"version":1,"task_id":"YOOHZK","kind":"block","at":"2026-11-20T23:13:38.418238Z","text":"Automated checks cover loading old settings and writing the replacement startup command. A real launchd or systemd update needs an administrator. Both available hosts require a password."}
+{"version":1,"task_id":"VF2NUJ","kind":"created","at":"2026-11-20T23:16:43.770143Z"}
+{"version":1,"task_id":"5SB7N4","kind":"created","at":"2026-11-20T23:16:43.770172Z"}
+{"version":1,"task_id":"YUH2ZP","kind":"created","at":"2026-11-20T23:16:43.770175Z"}
+{"version":1,"task_id":"SUVAUA","kind":"created","at":"2026-11-20T23:16:43.817866Z"}
+{"version":1,"task_id":"3LUQQT","kind":"created","at":"2026-11-20T23:16:43.817887Z"}
+{"version":1,"task_id":"AEKQS7","kind":"created","at":"2026-11-20T23:16:43.817889Z"}
+{"version":1,"task_id":"IXYDRJ","kind":"created","at":"2026-11-20T23:16:43.865454Z"}
+{"version":1,"task_id":"TWPCPC","kind":"created","at":"2026-11-20T23:16:43.865474Z"}
+{"version":1,"task_id":"V62ZWS","kind":"result","at":"2026-11-20T23:16:45.935479Z","text":"Mixed 1,032-reader tests delivered every matching message on macOS and Debian ARM64. Native x64 runs remain.","file":{"path":"docs/performance/watcher-capacity/README.md","sha256":"3463e9eadbc862f2e8b3866d56699f063dd467494b3720b6ff8302adb445fdfa","mtime":"2026-11-20T23:16:45.892474761Z","git_commit":"106509e5a6fbfa0863a8dabb80b67e1de69f5e32"}}
