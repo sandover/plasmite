@@ -112,10 +112,14 @@ of local loopback traffic at 20 writes per second. Every trial delivered all
 | One MCP Events stream | 2.30–3.24 ms | 3.24–3.67 ms |
 | One HTTP follower | 2.24–3.14 ms | 3.53–3.70 ms |
 
-These samples leave the single-reader latency target open. The Debian and
-Windows virtual machines were also working on the host. The candidate
-schedules a short read after the common waiter signals. In the baseline,
-the same blocking thread waits and reads.
+The Debian and Windows virtual machines were also working during those
+pairs. [A quiet repeat](results/macos-single-quiet.json) used five seconds
+per trial, with both virtual machines off and the build and count trials
+complete. It delivered all 50 tagged messages in every run. Events p95
+went from 3.12 to 3.42 ms, and HTTP follow p95 went from 2.96 to 3.64 ms.
+The single-reader latency target remains open. The candidate schedules a
+short read after the common waiter signals. In the baseline, the same
+blocking thread waits and reads.
 
 ## Release baseline on macOS
 
