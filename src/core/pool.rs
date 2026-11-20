@@ -657,7 +657,6 @@ impl Pool {
         Ok(header)
     }
 
-    #[cfg(not(any(target_os = "linux", windows)))]
     #[doc(hidden)]
     pub fn path(&self) -> &Path {
         &self.path

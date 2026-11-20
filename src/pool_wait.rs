@@ -18,6 +18,8 @@ type Sources = Arc<Mutex<HashMap<String, Source>>>;
 pub(crate) struct PoolWaiters {
     sources: Sources,
     reads: Arc<Semaphore>,
+    #[cfg(test)]
+    force_poll: bool,
 }
 
 impl Default for PoolWaiters {
@@ -27,6 +29,8 @@ impl Default for PoolWaiters {
         Self {
             sources: Sources::default(),
             reads: Arc::new(Semaphore::new(workers)),
+            #[cfg(test)]
+            force_poll: false,
         }
     }
 }
@@ -74,6 +78,8 @@ impl PoolWaiters {
         // between these operations still shows up at the next recovery check.
         let newest = observer.bounds()?.newest_seq;
         let notify = open_for_pool(&observer);
+        #[cfg(test)]
+        let notify = if self.force_poll { None } else { notify };
         let worker_pool = observer.clone();
         let (source, receiver) = watch::channel(());
         let worker_source = source.clone();
@@ -171,7 +177,9 @@ impl PoolWaiters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plasmite::api::{Feed, LocalClient, PoolOptions, PoolRef};
+    use plasmite::api::{
+        Feed, HostedRead, LocalClient, PoolOptions, PoolRef, Read, ReadStatus, Since,
+    };
 
     #[tokio::test]
     async fn shares_a_notification_and_retires_after_the_last_reader() {
@@ -202,5 +210,78 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+    #[tokio::test]
+    async fn checks_for_progress_without_a_write_notification() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let name = PoolRef::name("fallback");
+        let mut writer = client.create_pool(&name, PoolOptions::new(65536)).unwrap();
+        let waiters = PoolWaiters {
+            force_poll: true,
+            ..PoolWaiters::default()
+        };
+        let (pool, mut changes) = waiters
+            .subscribe_owned(client.open_pool(&name, false).unwrap())
+            .unwrap();
+        let mut reader = HostedRead::new(pool, Read::new()).unwrap();
+        changes.acknowledge();
+        assert!(matches!(reader.turn(&mut 32).unwrap(), ReadStatus::Waiting));
+        writer.feed_json(b"{}", Feed::new()).unwrap();
+        // The write lands after the read, before the watcher awaits.
+        tokio::time::timeout(Duration::from_secs(2), changes.changed())
+            .await
+            .unwrap();
+        let ReadStatus::Message(frame) = reader.turn(&mut 32).unwrap() else {
+            panic!("the write must remain visible when it precedes the wait");
+        };
+        assert_eq!(frame.seq, 1);
+    }
+
+    #[tokio::test]
+    async fn a_replaced_pool_gets_its_own_waiter() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let name = PoolRef::name("replaceable");
+        let pool = client.create_pool(&name, PoolOptions::new(65536)).unwrap();
+        let waiters = PoolWaiters::default();
+        let (old, mut changes) = waiters.subscribe_owned(pool).unwrap();
+        let mut old_reader = HostedRead::new(old.clone(), Read::new()).unwrap();
+        let identity = old.incarnation().unwrap();
+        client.delete_pool(&name).unwrap();
+        let new = client.create_pool(&name, PoolOptions::new(65536)).unwrap();
+        let (new, _changes) = waiters.subscribe_owned(new).unwrap();
+        assert_ne!(new.incarnation().unwrap(), identity);
+        tokio::time::timeout(Duration::from_secs(2), changes.changed())
+            .await
+            .unwrap();
+        assert!(
+            matches!(old_reader.turn(&mut 32), Err(error) if error.kind() == ErrorKind::NotFound)
+        );
+    }
+
+    #[test]
+    fn a_read_turn_yields_after_examining_its_share_of_filtered_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let name = PoolRef::name("filtered");
+        let mut pool = client.create_pool(&name, PoolOptions::new(65536)).unwrap();
+        for _ in 0..32 {
+            pool.feed_json(b"{}", Feed::new()).unwrap();
+        }
+        pool.feed_json(b"{}", Feed::new().tags(["keep"])).unwrap();
+        let mut reader =
+            HostedRead::new(Arc::new(pool), Read::since(Since::Oldest).tags(["keep"])).unwrap();
+        let mut budget = 32;
+        assert!(matches!(
+            reader.turn(&mut budget).unwrap(),
+            ReadStatus::Waiting
+        ));
+        assert_eq!(budget, 0);
+        assert_eq!(reader.position(), Some(33));
+        let ReadStatus::Message(frame) = reader.turn(&mut 32).unwrap() else {
+            panic!("the next turn should reach the matching record");
+        };
+        assert_eq!(frame.seq, 33);
     }
 }
