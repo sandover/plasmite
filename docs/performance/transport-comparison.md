@@ -39,9 +39,9 @@ The direct lane remained slower than the native API after the native TLS connect
 
 The current harness compares the long-lived native API client with direct HTTPS MCP. It builds the release CLI and a small persistent native API helper. It records operation latencies and sequence numbers, run order, verification counts, versions, machine information, and configuration in JSON. The raw output never includes the access key or OAuth tokens.
 
-The command requires `--server` (an HTTPS origin), `--mcp-url` (the exact `/mcp` URL on that host and port), `--pool`, `--access-key-file`, and `--output`. Optional settings are `--messages`, `--repeats`, `--sizes`, and `--ca-file`. Defaults are 100 messages per phase, five repeats, and payload sizes of 512 and 4,096 bytes. Use at least two repeats and payloads of at least 128 bytes.
+The command requires `--server` (an HTTPS origin), `--mcp-url` (the exact `/mcp` URL on that host and port), `--mcp-client-id`, `--pool`, `--access-key-file`, and `--output`. Optional settings are `--messages`, `--repeats`, `--sizes`, and `--ca-file`. Defaults are 100 messages per phase, five repeats, and payload sizes of 512 and 4,096 bytes. Use at least two repeats and payloads of at least 128 bytes.
 
-Prepare a dedicated pool with enough capacity for the retained messages, a disposable test access key, and a certificate authority (CA) file that lets the test client verify the server. Keep the key in an owner-readable file (`chmod 600`); the harness accepts either a JSON object with an `access_key` field or the key as plain text. For direct MCP, the harness registers a throwaway public client, creates a Proof Key for Code Exchange (PKCE) verifier, requests a grant for the exact `/mcp` resource, and approves it through `/oauth/approve` using the protected key file. It exchanges and revokes the grant itself. Tokens stay in memory. No browser, model provider, or unexplained bearer token is required.
+Prepare a dedicated pool with enough capacity for the retained messages, a disposable test access key, and a certificate authority (CA) file that lets the test client verify the server. Keep the key in an owner-readable file (`chmod 600`); the harness accepts either a JSON object with an `access_key` field or the key as plain text. Host a public [Client ID Metadata Document](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration) for your benchmark client. Use its full HTTPS URL as the `client_id`, set `token_endpoint_auth_method` to `none`, include `http://127.0.0.1/benchmark-callback` in `redirect_uris`, and list `authorization_code` and `refresh_token` in `grant_types`. The harness requests and approves a grant for the exact `/mcp` resource using the protected test key and Proof Key for Code Exchange (PKCE). It exchanges and revokes the grant itself. Tokens stay in memory.
 
 Run the command twice, changing the output path for the second session. These paths keep new measurements separate from the historical files below.
 
@@ -49,6 +49,7 @@ Run the command twice, changing the output path for the second session. These pa
 python3 scripts/bench_transport_comparison.py \
   --server "$SERVER_URL" \
   --mcp-url "${SERVER_URL%/}/mcp" \
+  --mcp-client-id "$BENCHMARK_CLIENT_DOCUMENT_URL" \
   --pool transport-bench \
   --access-key-file "$KEY_FILE" \
   --ca-file "$CA_FILE" \

@@ -1,27 +1,33 @@
 # Plasmite for agents
 
-Agents come and go. Sessions end, contexts get compacted, harnesses restart. A pool outlasts all of that: an agent that starts fresh can read what happened while it was away, then wait for what comes next. Agents and people share the same pools, so you can watch your agents talk with `pls follow`, and join in.
-
-Claude Code and Codex reach pools through Plasmite's Model Context Protocol (MCP) server.
+Agents come and go. A pool keeps recent messages on disk, so an agent can read what happened before it started or while it was away. Agents and people share the same pools: you can watch the exchange with `pls follow` and join in with `pls feed`.
 
 ## Connect an agent
 
-**For direct access to local pool files**, configure the client to launch `plasmite mcp` and talk to it over stdin and stdout:
+Plasmite requires a Model Context Protocol (MCP) client that uses revision [`2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28). Clients that only use the older `initialize` handshake cannot connect.
+
+- [Claude Code](https://code.claude.com/docs/en/mcp#mcp-client-runtimes) needs its v2 MCP runtime with modern protocol negotiation. If it is using the older runtime or handshake, launch a recent version with `MCP_SDK_GENERATION=v2` and `MCP_PROTOCOL_NEGOTIATION=auto`.
+- For a [Codex build that supports the modern MCP feature](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md#hosted-codex-apps-mcp-protocol), set `mcp_2026_07_28 = true` under `[features]` in `config.toml`. The setting for hosted Codex Apps does not apply to Plasmite.
+
+These are the host settings, not a guarantee that every installed build supports the connection.
+
+**For direct access to local pool files**, install Plasmite where the client runs and configure the client to launch it over standard input and output:
 
 ```bash
-claude mcp add plasmite -- plasmite mcp      # Claude Code
+claude mcp add --transport stdio plasmite -- plasmite mcp
 codex mcp add plasmite -- plasmite mcp       # Codex
 ```
 
 Other clients take the same command in their configuration: `{"mcpServers": {"plasmite": {"command": "plasmite", "args": ["mcp"]}}}`.
 
-**For HTTPS access**, `plasmite serve` exposes `/mcp` automatically. Clients on the same machine or another machine can connect there without a separate Plasmite process. Sign in with an access key in the browser:
+**For HTTPS access**, configure the client to use the shared server's `/mcp` endpoint. You do not need to install Plasmite on the client machine. The MCP client and the browser must both trust the server's certificate. The client must support [Client ID Metadata Documents (CIMD)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization#client-registration) for registration. Plasmite does not offer Dynamic Client Registration (DCR) or a device sign-in flow.
 
 ```bash
-claude mcp add --transport http plasmite https://pools.example.net:9743/mcp
+claude mcp add --scope user --transport http plasmite https://pools.example.net:9743/mcp
+codex mcp add plasmite --url https://pools.example.net:9743/mcp --oauth-resource https://pools.example.net:9743/mcp
 ```
 
-The server needs a certificate the agent's machine trusts. [Connect an AI client](record/serving.md#connect-an-ai-client) covers the certificate, Codex and sign-in.
+Use the command for your client. If it does not open a browser for sign-in, run `claude mcp login plasmite` or `codex mcp login plasmite`. Enter the Plasmite access key on the server's browser approval page, not in a chat or a header. See [Connect an AI client](record/serving.md#connect-an-ai-client) for setup and [the validation report](validation/mcp-wake-up.md) for what has been tested. The commands above are for builds with the required protocol and registration support; we have not verified end-to-end sign-in in Claude Code or Codex.
 
 ## The tools
 
@@ -29,7 +35,7 @@ The server needs a certificate the agent's machine trusts. [Connect an AI client
 |---|---|
 | `plasmite_feed` | Add a message: `pool`, `data`, optional `tags`, and `create` to make the pool if it's missing |
 | `plasmite_fetch` | Read what the pool holds and return, from `since` (a sequence, `oldest`, a time or a duration) or `last` |
-| `plasmite_follow` | Wait up to `timeout_ms` (default 10 seconds, at most 60) for new messages |
+| `plasmite_follow` | During a running turn, wait up to `timeout_ms` (default 10 seconds, at most 60) for new messages |
 | `plasmite_pool_list`, `_info`, `_create`, `_delete` | Manage pools |
 
 Reads return up to `count` messages (default 20, at most 200) plus `next_seq`. Pass `next_seq` as `since` on the next call to carry on exactly where the last one stopped. `tags` keeps only messages that carry every listed tag.
@@ -44,11 +50,13 @@ One agent finishes and says so:
 {"pool": "project", "tags": ["handoff"], "data": {"from": "claude:api", "status": "done", "branch": "fix-login", "summary": "login tests pass"}}
 ```
 
-Another agent waits for it by calling `plasmite_follow` with `{"pool": "project", "tags": ["handoff"]}`, and calls again with `since` set to `next_seq` until a handoff arrives. A script can wait the same way: `pls follow project --tag handoff --one && ./deploy.sh`.
+On its next turn, the receiving agent calls `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 20}`, or uses its saved sequence to read from where it left off.
+
+An incoming message does not start a turn in an idle agent. Plasmite does not currently serve standard MCP resource subscriptions. An in-flight `plasmite_follow` call is a bounded read in an existing turn, not an idle wake-up. A host refreshing its tools or resources is not the same as the host starting a turn.
 
 ### Catch up after a restart
 
-A fresh session starts by reading recent history: `plasmite_fetch` with `{"pool": "project", "last": 20}`. An agent that saved `next_seq` from its last read passes it as `since` and misses nothing.
+A fresh session can read recent history: `plasmite_fetch` with `{"pool": "project", "last": 20}`. To resume from a known position, save `next_seq` after handling the returned messages and pass it as `since` on the next read.
 
 If the pool overwrote messages the agent hadn't read, the read fails with a `RetentionGap` error that names the first missed sequence and the oldest one still held. The agent can carry on from there or rebuild from another source.
 
@@ -79,7 +87,7 @@ Use the plasmite MCP tools and the `project` pool to coordinate with other agent
 - Post progress and results with your name in `data.from`, for example `claude:api`.
 - When you finish a task, post it tagged `handoff` with a one-line summary.
 - Between steps, check for messages tagged `instruction` and follow them.
-- To wait for another agent, follow with tags ["handoff"] and call again with `since` set to `next_seq`.
+- After a restart, use your saved next sequence to read any retained handoffs you have not handled.
 ```
 
 ## Conventions that help

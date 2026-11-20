@@ -199,7 +199,7 @@ fn serve_exits_successfully_after_sigterm() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
-fn mcp_stdio_uses_the_2025_handshake_and_shared_pool_tools() {
+fn mcp_stdio_rejects_obsolete_handshake_without_enabling_legacy_requests() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     let mut child = cli()
@@ -213,61 +213,39 @@ fn mcp_stdio_uses_the_2025_handshake_and_shared_pool_tools() {
 
     send_mcp(
         &mut stdin,
-        &json!({
-            "jsonrpc":"2.0","id":1,"method":"initialize",
-            "params":{
-                "protocolVersion":"2025-11-25",
-                "capabilities":{},
-                "clientInfo":{"name":"test","version":"1"}
-            }
-        }),
+        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "protocolVersion":"2025-11-25","capabilities":{},
+            "clientInfo":{"name":"test","version":"1"}
+        }}),
     );
-    let initialized = read_mcp(&mut stdout);
-    assert_eq!(initialized["id"], json!(1));
-    assert_eq!(
-        initialized["result"]["protocolVersion"],
-        json!("2025-11-25")
-    );
-    assert_eq!(
-        initialized["result"]["capabilities"]["tools"]["listChanged"],
-        json!(false)
-    );
-    assert_eq!(
-        initialized["result"]["capabilities"]["resources"]["subscribe"],
-        json!(false)
-    );
+    let obsolete = read_mcp(&mut stdout);
+    assert_eq!(obsolete["id"], 1);
+    assert_eq!(obsolete["error"]["code"], -32601);
+    let message = obsolete["error"]["message"].as_str().unwrap();
+    assert!(message.contains("2026-07-28") && message.contains("server/discover"));
 
     send_mcp(
         &mut stdin,
         &json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
     );
-
     send_mcp(
         &mut stdin,
-        &json!({
-            "jsonrpc":"2.0","id":2,"method":"tools/list","params":{}
-        }),
+        &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
     );
-    assert_eq!(
-        read_mcp(&mut stdout)["result"]["tools"][0]["name"],
-        json!("plasmite_pool_list")
-    );
-
+    let reply = read_mcp(&mut stdout);
+    assert_eq!(reply["id"], 2);
+    assert_eq!(reply["error"]["code"], -32602);
     send_mcp(
         &mut stdin,
-        &json!({
-            "jsonrpc":"2.0","id":3,"method":"tools/call",
-            "params":{
-                "name":"plasmite_pool_create",
-                "arguments":{"name":"demo"}
-            }
-        }),
+        &json!({"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"_meta":{
+            "io.modelcontextprotocol/protocolVersion":"2025-11-25",
+            "io.modelcontextprotocol/clientCapabilities":{}
+        }}}),
     );
-    let created = read_mcp(&mut stdout);
-    assert_eq!(
-        created["result"]["structuredContent"]["pool"]["name"],
-        json!("demo")
-    );
+    let reply = read_mcp(&mut stdout);
+    assert_eq!(reply["id"], 3);
+    assert_eq!(reply["error"]["code"], -32022);
+    assert_eq!(reply["error"]["data"]["supported"], json!(["2026-07-28"]));
 
     drop(stdin);
     let started = Instant::now();
@@ -313,7 +291,7 @@ fn mcp_stdio_uses_modern_requests_without_handshake() {
     let discover = call(2, "server/discover", json!({}));
     assert_eq!(
         discover["result"]["supportedVersions"],
-        json!(["2026-07-28", "2025-11-25"])
+        json!(["2026-07-28"])
     );
     assert_eq!(
         discover["result"]["capabilities"],
@@ -365,7 +343,7 @@ fn mcp_stdio_uses_modern_requests_without_handshake() {
     assert_eq!(unsupported["error"]["code"], -32022);
     assert_eq!(
         unsupported["error"]["data"],
-        json!({"requested":"1900-01-01","supported":["2026-07-28","2025-11-25"]})
+        json!({"requested":"1900-01-01","supported":["2026-07-28"]})
     );
     send_mcp(
         &mut stdin,

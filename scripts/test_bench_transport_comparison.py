@@ -31,14 +31,13 @@ class GrantCleanupTests(unittest.TestCase):
         self.patches.enter_context(patch("http.client.HTTPSConnection", return_value=self.connection))
         self.authorize = self.patches.enter_context(patch.object(
             HttpsMcp, "authorize", return_value=("test-client", "https://example.invalid/mcp", "test-grant")))
-        self.initialize = self.patches.enter_context(patch.object(
-            HttpsMcp, "call", return_value={"protocolVersion": PROTOCOL_VERSION}))
-        self.notify = self.patches.enter_context(patch.object(HttpsMcp, "notify_initialized"))
+        self.discover = self.patches.enter_context(patch.object(
+            HttpsMcp, "call", return_value={"supportedVersions": [PROTOCOL_VERSION]}))
         self.revoke = self.patches.enter_context(patch.object(
             HttpsMcp, "request_form", return_value=(200, {}, None)))
 
     def connect(self):
-        return HttpsMcp("https://example.invalid/mcp", "test-key", None)
+        return HttpsMcp("https://example.invalid/mcp", "test-key", "https://example.invalid/client.json", None)
 
     def assert_revoked(self):
         self.revoke.assert_called_once_with(
@@ -52,26 +51,26 @@ class GrantCleanupTests(unittest.TestCase):
         self.revoke.assert_not_called()
         self.connection.close.assert_called_once()
 
-    def test_initialize_failure_revokes_grant(self):
-        self.initialize.side_effect = RuntimeError("initialize failed")
-        with self.assertRaisesRegex(RuntimeError, "initialize failed"):
+    def test_discovery_failure_revokes_grant(self):
+        self.discover.side_effect = RuntimeError("discovery failed")
+        with self.assertRaisesRegex(RuntimeError, "discovery failed"):
             self.connect()
         self.assert_revoked()
 
     def test_protocol_mismatch_revokes_grant(self):
-        self.initialize.return_value = {"protocolVersion": "unexpected"}
-        with self.assertRaisesRegex(RuntimeError, "unexpected protocol version"):
+        self.discover.return_value = {"supportedVersions": ["unexpected"]}
+        with self.assertRaisesRegex(RuntimeError, "did not advertise"):
             self.connect()
         self.assert_revoked()
 
-    def test_initialized_notification_failure_revokes_grant(self):
-        self.notify.side_effect = RuntimeError("notification failed")
-        with self.assertRaisesRegex(RuntimeError, "notification failed"):
-            self.connect()
-        self.assert_revoked()
+    def test_initial_call_uses_modern_discovery(self):
+        client = self.connect()
+        self.discover.assert_called_once_with("server/discover", {})
+        self.authorize.assert_called_once_with("test-key", "https://example.invalid/client.json")
+        client.close()
 
     def test_interrupted_setup_revokes_grant(self):
-        self.initialize.side_effect = KeyboardInterrupt()
+        self.discover.side_effect = KeyboardInterrupt()
         with self.assertRaises(KeyboardInterrupt):
             self.connect()
         self.assert_revoked()
@@ -109,7 +108,8 @@ class RunnerCleanupTests(unittest.TestCase):
         key_file.write_text("test-key", encoding="utf-8")
         key_file.chmod(0o600)
         self.args = argparse.Namespace(access_key_file=str(key_file), server="https://example.invalid",
-                                       pool="test", mcp_url="https://example.invalid/mcp", ca_file=None)
+                                       pool="test", mcp_url="https://example.invalid/mcp",
+                                       mcp_client_id="https://example.invalid/client.json", ca_file=None)
         self.native = Mock()
         self.native.poll.return_value = None
         self.direct = Mock()

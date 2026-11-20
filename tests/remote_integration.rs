@@ -943,65 +943,87 @@ fn local_ui_tail_reads_reported_oldest_after_small_pool_wrap() -> TestResult<()>
     Ok(())
 }
 
-fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, Box<ureq::Error>> {
-    let method = payload["method"]
-        .as_str()
-        .expect("MCP request method")
-        .to_owned();
-    let request = ureq::post(&format!("{base_url}/mcp"))
+fn mcp_payload(payload: &Value) -> Value {
+    let mut payload = payload.clone();
+    if payload.get("params").is_none() {
+        payload["params"] = json!({});
+    }
+    payload["params"]["_meta"] = json!({
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}
+    });
+    payload
+}
+
+fn mcp_request(base_url: &str, payload: &Value) -> ureq::Request {
+    let method = payload["method"].as_str().expect("MCP request method");
+    let mut request = ureq::post(&format!("{base_url}/mcp"))
         .set("Content-Type", "application/json")
-        .set("Accept", "application/json, text/event-stream");
-    let request = if method == "initialize" {
-        request
-    } else {
-        request.set("MCP-Protocol-Version", "2025-11-25")
+        .set("Accept", "application/json, text/event-stream")
+        .set("MCP-Protocol-Version", "2026-07-28")
+        .set("Mcp-Method", method);
+    let name = match method {
+        "tools/call" => payload["params"]["name"].as_str(),
+        "resources/read" => payload["params"]["uri"].as_str(),
+        _ => None,
     };
-    request.send_string(&payload.to_string()).map_err(Box::new)
+    if let Some(name) = name {
+        request = request.set("Mcp-Name", name);
+    }
+    request
+}
+
+fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, Box<ureq::Error>> {
+    mcp_request(base_url, payload)
+        .send_json(mcp_payload(payload))
+        .map_err(Box::new)
 }
 
 #[test]
-fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
+fn remote_mcp_http_profile_request_obsolete_lifecycle_and_get() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
 
-    let initialize = mcp_post(
+    let response = mcp_post(
         &server.local_url,
         &json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {},
-                "clientInfo": { "name": "integration-test", "version": "1" }
-            }
+            "jsonrpc":"2.0", "id":1, "method":"server/discover"
         }),
     )
-    .expect("initialize");
-    assert_eq!(initialize.status(), 200);
+    .expect("discovery");
+    assert_eq!(response.status(), 200);
     assert!(
-        initialize
+        response
             .header("content-type")
             .unwrap_or_default()
             .starts_with("application/json")
     );
-    let initialize_json: Value = serde_json::from_str(&initialize.into_string()?)?;
-    assert_eq!(initialize_json["id"], json!(1));
+    let discovery: Value = serde_json::from_str(&response.into_string()?)?;
+    assert_eq!(discovery["id"], 1);
     assert_eq!(
-        initialize_json["result"]["protocolVersion"],
-        json!("2025-11-25")
+        discovery["result"]["supportedVersions"],
+        json!(["2026-07-28"])
     );
 
-    let notification = mcp_post(
-        &server.local_url,
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized"
-        }),
-    )
-    .expect("notification");
-    assert_eq!(notification.status(), 202);
-    assert_eq!(notification.into_string()?, "");
+    for payload in [
+        json!({"jsonrpc":"2.0", "id":2, "method":"initialize", "params":{"protocolVersion":"2025-11-25"}}),
+        json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+    ] {
+        let response = ureq::post(&format!("{}/mcp", server.local_url))
+            .set("Content-Type", "application/json")
+            .send_json(payload);
+        let Err(ureq::Error::Status(400, response)) = response else {
+            panic!("obsolete lifecycle was not rejected");
+        };
+        let rejected: Value = serde_json::from_str(&response.into_string()?)?;
+        assert_eq!(rejected["error"]["code"], -32601);
+        assert!(
+            rejected["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("2026-07-28")
+        );
+    }
 
     let response_payload = ureq::post(&format!("{}/mcp", server.local_url))
         .set("Content-Type", "application/json")
@@ -1032,27 +1054,6 @@ fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
 fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
-
-    let initialize = mcp_post(
-        &server.local_url,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {},
-                "clientInfo": { "name": "integration-test", "version": "1" }
-            }
-        }),
-    )
-    .expect("initialize");
-    assert_eq!(initialize.status(), 200);
-    let initialized: Value = serde_json::from_str(&initialize.into_string()?)?;
-    assert_eq!(
-        initialized["result"]["protocolVersion"],
-        json!("2025-11-25")
-    );
 
     let tools_list = mcp_post(
         &server.local_url,
@@ -1201,22 +1202,29 @@ fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
         "params": {}
     });
 
-    match ureq::post(&format!("{}/mcp", server.local_url))
-        .set("Content-Type", "application/json")
-        .set("MCP-Protocol-Version", "not-supported")
-        .send_string(&payload.to_string())
-    {
-        Ok(_) => return Err("expected unsupported protocol version to fail".into()),
-        Err(ureq::Error::Status(code, _)) => assert_eq!(code, 400),
-        Err(err) => return Err(err.into()),
-    }
+    let mut obsolete = mcp_payload(&payload);
+    obsolete["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = json!("2025-11-25");
+    let response = mcp_request(&server.local_url, &payload)
+        .set("MCP-Protocol-Version", "2025-11-25")
+        .send_json(obsolete);
+    let Err(ureq::Error::Status(400, response)) = response else {
+        panic!("obsolete transport version was not rejected");
+    };
+    let rejected: Value = serde_json::from_str(&response.into_string()?)?;
+    assert_eq!(rejected["error"]["code"], -32022);
+    assert_eq!(
+        rejected["error"]["data"],
+        json!({
+            "requested":"2025-11-25", "supported":["2026-07-28"]
+        })
+    );
 
     let supported = mcp_post(&server.local_url, &payload).expect("supported protocol");
     assert_eq!(supported.status(), 200);
 
     let absent = ureq::post(&format!("{}/mcp", server.local_url))
         .set("Content-Type", "application/json")
-        .send_string(&payload.to_string());
+        .send_json(mcp_payload(&payload));
     assert!(matches!(absent, Err(ureq::Error::Status(400, _))));
     Ok(())
 }
@@ -1232,22 +1240,18 @@ fn remote_mcp_origin_header_validation() -> TestResult<()> {
         "params": {}
     });
 
-    match ureq::post(&format!("{}/mcp", server.local_url))
-        .set("Content-Type", "application/json")
-        .set("MCP-Protocol-Version", "2025-11-25")
+    match mcp_request(&server.local_url, &payload)
         .set("Origin", "not a valid origin")
-        .send_string(&payload.to_string())
+        .send_json(mcp_payload(&payload))
     {
         Ok(_) => return Err("expected invalid Origin to fail".into()),
         Err(ureq::Error::Status(code, _)) => assert_eq!(code, 403),
         Err(err) => return Err(err.into()),
     }
 
-    let valid = ureq::post(&format!("{}/mcp", server.local_url))
-        .set("Content-Type", "application/json")
-        .set("MCP-Protocol-Version", "2025-11-25")
+    let valid = mcp_request(&server.local_url, &payload)
         .set("Origin", &server.local_url)
-        .send_string(&payload.to_string())
+        .send_json(mcp_payload(&payload))
         .expect("valid Origin");
     assert_eq!(valid.status(), 200);
     Ok(())

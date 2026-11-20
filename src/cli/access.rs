@@ -417,9 +417,7 @@ fn setup_commands(destination: &str) -> [String; 2] {
     let endpoint = shell_quote(&endpoint);
     [
         format!("claude mcp add --scope user --transport http plasmite {endpoint}"),
-        format!(
-            "codex mcp add plasmite --url {endpoint} --oauth-client-registration dcr --oauth-resource {endpoint}"
-        ),
+        format!("codex mcp add plasmite --url {endpoint} --oauth-resource {endpoint}"),
     ]
 }
 
@@ -569,9 +567,7 @@ mod tests {
             commands,
             [
                 format!("claude mcp add --scope user --transport http plasmite {endpoint}"),
-                format!(
-                    "codex mcp add plasmite --url {endpoint} --oauth-client-registration dcr --oauth-resource {endpoint}"
-                ),
+                format!("codex mcp add plasmite --url {endpoint} --oauth-resource {endpoint}"),
             ]
         );
         assert!(

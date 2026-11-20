@@ -7,7 +7,7 @@ Specs hold the contracts that users and other programs rely on. The 2.0 entries 
 - [2.0 contract](v2/SPEC.md): read before changing the CLI, libraries, HTTP, UDP or Model Context Protocol (MCP) behavior.
 - [UDP transport v1](udp/v1/SPEC.md): read when changing UDP feed and follow, subscription controls or delivery events. 2.0 UDP follows this spec.
 - [UDP input v0](udp/v0/SPEC.md): read when changing the UDP datagram format or listener. 2.0 UDP keeps this wire format.
-- [MCP contract](mcp/2025-11-25/SPEC.md): read when changing MCP lifecycle, transports or authorization. See the 2.0 contract for tool and resource behavior.
+- [MCP contract](mcp/2025-11-25/SPEC.md): historical 1.x wire contract. See the 2.0 contract for current lifecycle, transport, tool and resource behavior.
 
 ## Plasmite 1.x
 

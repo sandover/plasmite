@@ -304,7 +304,7 @@ An installed server keeps its UDP settings through restarts and updates. Enable 
 
 `plasmite serve` exposes MCP at its HTTPS `/mcp` address automatically. Clients on the server machine or another machine can connect there. Both the AI client and the browser it uses for login must trust the server certificate, so first [deploy a trusted certificate](#use-a-trusted-certificate). For direct access to local pool files, configure the client to launch `plasmite mcp` over stdin and stdout. See the [cookbook](../cookbook.md#give-an-ai-agent-your-pools).
 
-Both connection paths support MCP 2026-07-28 and the 2025-11-25 handshake used by older clients. A modern client works without an initialization handshake; a legacy client can keep its existing configuration. They see the same available tools and pool resources. The protocol upgrade does not itself make a pool update start a new agent turn.
+Both connection paths require MCP `2026-07-28`. Clients that only use the older initialization handshake cannot connect. Check [the client settings](../agents.md#connect-an-agent) before connecting. A pool update does not start a new agent turn.
 
 For Claude Code:
 
@@ -316,14 +316,16 @@ claude mcp login pools
 For Codex CLI:
 
 ```console
-codex mcp add pools --url https://pools.example.net:9743/mcp --oauth-client-registration dcr --oauth-resource https://pools.example.net:9743/mcp
+codex mcp add pools --url https://pools.example.net:9743/mcp --oauth-resource https://pools.example.net:9743/mcp
 ```
 
-The client opens an authorization page that shows the client, the requested `/mcp` address and the callback. Check those details, enter the Plasmite access key, and choose **Authorize**. Ask the client to list pools and read `chat` to confirm access. Changing the server's address requires fresh authorization. To sign in again for an existing Codex entry, run `codex mcp login pools --oauth-client-registration dcr`. Claude Code also offers login through `/mcp` in an interactive session.
+The client opens an authorization page that shows the client, the requested `/mcp` address and the callback. Check those details, enter the Plasmite access key, and choose **Authorize**. Ask the client to list pools and read `chat` to confirm access. Changing the server's address requires fresh authorization. To sign in again for an existing Codex entry, run `codex mcp login pools`. Claude Code also offers login through `/mcp` in an interactive session.
 
-The server supports both [Client ID Metadata Documents (CIMD)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration) and older Dynamic Client Registration (DCR). With CIMD, the approval page also shows the hostname that supplied the metadata. Plasmite fetches metadata only from public HTTPS hosts on port 443 with normal certificate verification. It does not follow redirects, use an outbound proxy, or load remote images on the approval page. Client metadata cannot grant access by itself. A client that advertises renewal can refresh its credentials while the callback stays registered and the access key remains active. Revoking the access key stops its existing OAuth tokens.
+Browser sign-in requires [Client ID Metadata Documents (CIMD)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration). No separate client registration is needed. The approval page shows the hostname that supplied the metadata. Plasmite fetches metadata only from public HTTPS hosts on port 443 with normal certificate verification. It does not follow redirects, use an outbound proxy, or load remote images on the approval page. Client metadata cannot grant access by itself. A client that advertises renewal can refresh its credentials while the callback stays registered and the access key remains active. Revoking the access key stops its existing OAuth tokens.
 
-[Codex's client code](https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth_client_registration.rs) and [Claude Code's documentation](https://code.claude.com/docs/en/mcp#use-pre-configured-oauth-credentials) describe CIMD support. The server's CIMD tests use a fictional client, not a live login from either host. The Codex command above and the command printed by `access connect` still select the DCR fallback.
+If your client previously used Dynamic Client Registration (DCR), sign in again with a current CIMD-capable client. Previously issued access tokens keep their original expiration, but cannot renew under the old client ID. You do not need a new Plasmite access key.
+
+[Codex's client code](https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth_client_registration.rs) and [Claude Code's documentation](https://code.claude.com/docs/en/mcp#use-pre-configured-oauth-credentials) describe automatic CIMD support. Plasmite's CIMD tests use a fictional client, not a live login from either host.
 
 ## Troubleshoot a connection
 

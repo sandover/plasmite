@@ -67,10 +67,10 @@ use plasmite::api::{
     Durability, Error, ErrorKind, Feed, LocalClient, Pool, PoolInfo, PoolOptions, PoolRef,
 };
 use plasmite::mcp::{
-    DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION,
-    MODERN_MCP_PROTOCOL_VERSION, McpDispatcher, McpHandler, McpResource, McpTool, McpToolAccess,
-    PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest, ToolCallResult,
-    request_protocol_version, uses_modern_mcp,
+    DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION, McpDispatcher,
+    McpHandler, McpResource, McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest,
+    ResourceReadResult, ToolCallRequest, ToolCallResult, obsolete_lifecycle_error,
+    request_protocol_version,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -1327,16 +1327,15 @@ async fn mcp_post(
             "JSON-RPC responses are not accepted",
         );
     }
-    let modern = match validate_mcp_request_headers(&headers, &payload) {
-        Ok(modern) => modern,
-        Err(response) => return response,
-    };
-    if modern && payload.get("id").is_none() {
+    if let Err(response) = validate_mcp_request_headers(&headers, &payload) {
+        return response;
+    }
+    if payload.get("id").is_none() {
         return mcp_request_error(
             &payload,
             StatusCode::BAD_REQUEST,
             -32600,
-            "modern HTTP MCP only accepts requests",
+            "HTTP MCP only accepts requests",
         );
     }
 
@@ -1380,12 +1379,17 @@ async fn mcp_post(
     };
 
     match outcome {
-        DispatchOutcome::NoResponse => accepted_response(),
+        DispatchOutcome::NoResponse => mcp_request_error(
+            &Value::Null,
+            StatusCode::BAD_REQUEST,
+            -32600,
+            "HTTP MCP only accepts requests",
+        ),
         DispatchOutcome::Response(response) => {
             let status = match response.error.as_ref().map(|error| error.code) {
                 Some(-32601) => StatusCode::NOT_FOUND,
                 Some(-32022..=-32020) => StatusCode::BAD_REQUEST,
-                Some(-32602 | -32600) if modern => StatusCode::BAD_REQUEST,
+                Some(-32602 | -32600) => StatusCode::BAD_REQUEST,
                 _ => StatusCode::OK,
             };
             let payload = match serde_json::to_value(response) {
@@ -1533,84 +1537,70 @@ fn mcp_wait_busy_tool_result() -> ToolCallResult {
     )
 }
 
-fn validate_mcp_request_headers(headers: &HeaderMap, payload: &Value) -> Result<bool, Response> {
+fn validate_mcp_request_headers(headers: &HeaderMap, payload: &Value) -> Result<(), Response> {
     let method = payload.get("method").and_then(Value::as_str);
-    let header_version = single_mcp_header(headers, "MCP-Protocol-Version")
-        .map_err(|_| mcp_header_mismatch(payload, "invalid MCP-Protocol-Version header"))?;
-    let modern = header_version == Some(MODERN_MCP_PROTOCOL_VERSION)
-        || method.is_some_and(|method| uses_modern_mcp(method, payload.get("params")));
-    if modern {
-        let Some(body_version) = request_protocol_version(payload) else {
-            return Err(mcp_request_error(
-                payload,
-                StatusCode::BAD_REQUEST,
-                -32602,
-                "missing or invalid protocol version in params._meta",
-            ));
-        };
-        if header_version != Some(body_version) {
-            return Err(mcp_header_mismatch(
-                payload,
-                "MCP-Protocol-Version header must match params._meta",
-            ));
-        }
-        if body_version != MODERN_MCP_PROTOCOL_VERSION {
-            return Err(mcp_protocol_error(
-                payload,
-                StatusCode::BAD_REQUEST,
-                McpJsonRpcError::unsupported_version(body_version),
-            ));
-        }
-        let header_method = single_mcp_header(headers, "Mcp-Method")
-            .map_err(|_| mcp_header_mismatch(payload, "invalid Mcp-Method header"))?;
-        if header_method.is_none() || header_method != method {
-            return Err(mcp_header_mismatch(
-                payload,
-                "Mcp-Method header must match method",
-            ));
-        }
-        let name_field = match method {
-            Some("tools/call" | "prompts/get") => Some("name"),
-            Some("resources/read") => Some("uri"),
-            _ => None,
-        };
-        if let Some(field) = name_field {
-            let name = payload
-                .get("params")
-                .and_then(|params| params.get(field))
-                .and_then(Value::as_str);
-            let header_name = single_mcp_header(headers, "Mcp-Name")
-                .and_then(|value| value.ok_or(()))
-                .and_then(decode_mcp_header)
-                .map_err(|_| mcp_header_mismatch(payload, "missing or invalid Mcp-Name header"))?;
-            if name != Some(header_name.as_ref()) {
-                return Err(mcp_header_mismatch(
-                    payload,
-                    "Mcp-Name header must match request name or URI",
-                ));
-            }
-        }
-        return Ok(true);
-    }
-    if header_version == Some(MCP_PROTOCOL_VERSION)
-        || (header_version.is_none()
-            && matches!(method, Some("initialize" | "notifications/initialized")))
-    {
-        return Ok(false);
-    }
-    if let Some(version) = header_version {
+    if matches!(method, Some("initialize" | "notifications/initialized")) {
         return Err(mcp_protocol_error(
             payload,
             StatusCode::BAD_REQUEST,
-            McpJsonRpcError::unsupported_version(version),
+            obsolete_lifecycle_error(),
         ));
     }
-    Err(mcp_request_error(
-        payload,
-        StatusCode::BAD_REQUEST,
-        -32600,
-        "unsupported or missing MCP-Protocol-Version",
-    ))
+    let header_version = single_mcp_header(headers, "MCP-Protocol-Version")
+        .map_err(|_| mcp_header_mismatch(payload, "invalid MCP-Protocol-Version header"))?;
+    let header_version = header_version
+        .ok_or_else(|| mcp_header_mismatch(payload, "missing MCP-Protocol-Version header"))?;
+    let Some(body_version) = request_protocol_version(payload) else {
+        return Err(mcp_request_error(
+            payload,
+            StatusCode::BAD_REQUEST,
+            -32602,
+            "missing or invalid protocol version in params._meta",
+        ));
+    };
+    if header_version != body_version {
+        return Err(mcp_header_mismatch(
+            payload,
+            "MCP-Protocol-Version header must match params._meta",
+        ));
+    }
+    if body_version != MCP_PROTOCOL_VERSION {
+        return Err(mcp_protocol_error(
+            payload,
+            StatusCode::BAD_REQUEST,
+            McpJsonRpcError::unsupported_version(body_version),
+        ));
+    }
+    let header_method = single_mcp_header(headers, "Mcp-Method")
+        .map_err(|_| mcp_header_mismatch(payload, "invalid Mcp-Method header"))?;
+    if header_method.is_none() || header_method != method {
+        return Err(mcp_header_mismatch(
+            payload,
+            "Mcp-Method header must match method",
+        ));
+    }
+    let name_field = match method {
+        Some("tools/call" | "prompts/get") => Some("name"),
+        Some("resources/read") => Some("uri"),
+        _ => None,
+    };
+    if let Some(field) = name_field {
+        let name = payload
+            .get("params")
+            .and_then(|params| params.get(field))
+            .and_then(Value::as_str);
+        let header_name = single_mcp_header(headers, "Mcp-Name")
+            .and_then(|value| value.ok_or(()))
+            .and_then(decode_mcp_header)
+            .map_err(|_| mcp_header_mismatch(payload, "missing or invalid Mcp-Name header"))?;
+        if name != Some(header_name.as_ref()) {
+            return Err(mcp_header_mismatch(
+                payload,
+                "Mcp-Name header must match request name or URI",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn decode_mcp_header(value: &str) -> Result<std::borrow::Cow<'_, str>, ()> {
@@ -1699,15 +1689,6 @@ fn is_jsonrpc_response_payload(payload: &Value) -> bool {
         && object.contains_key("id")
         && !object.contains_key("method")
         && (object.contains_key("result") || object.contains_key("error"))
-}
-
-fn accepted_response() -> Response {
-    let mut response = Response::new(Body::empty());
-    *response.status_mut() = StatusCode::ACCEPTED;
-    response
-        .headers_mut()
-        .insert("plasmite-version", HeaderValue::from_static("0"));
-    response
 }
 
 async fn ui_index() -> Response {
@@ -2877,13 +2858,9 @@ mod tests {
     }
 
     #[test]
-    fn mcp_http_requires_the_negotiated_version_after_initialize() {
-        let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/list"});
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "MCP-Protocol-Version",
-            HeaderValue::from_static("2025-11-25"),
-        );
+    fn mcp_http_requires_stateless_protocol_headers() {
+        let payload = discovery_payload();
+        let mut headers = discovery_headers();
         validate_mcp_request_headers(&headers, &payload).unwrap();
         headers.remove("MCP-Protocol-Version");
         assert_eq!(
@@ -2893,17 +2870,29 @@ mod tests {
             axum::http::StatusCode::BAD_REQUEST
         );
         let initialize = json!({"jsonrpc":"2.0","id":2,"method":"initialize"});
-        validate_mcp_request_headers(&headers, &initialize).unwrap();
-        headers.insert(
-            "MCP-Protocol-Version",
-            HeaderValue::from_static("not-supported"),
-        );
         assert_eq!(
             validate_mcp_request_headers(&headers, &initialize)
                 .unwrap_err()
                 .status(),
             axum::http::StatusCode::BAD_REQUEST
         );
+    }
+
+    fn discovery_payload() -> serde_json::Value {
+        json!({"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{
+            "io.modelcontextprotocol/protocolVersion": super::MCP_PROTOCOL_VERSION,
+            "io.modelcontextprotocol/clientCapabilities": {}
+        }}})
+    }
+
+    fn discovery_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(super::MCP_PROTOCOL_VERSION),
+        );
+        headers.insert("Mcp-Method", HeaderValue::from_static("server/discover"));
+        headers
     }
 
     #[tokio::test]
@@ -3037,12 +3026,8 @@ mod tests {
                 .status(),
             axum::http::StatusCode::LOCKED
         );
-        let payload = json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{"protocolVersion":super::MCP_PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"test","version":"1"}}});
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "MCP-Protocol-Version",
-            HeaderValue::from_static(super::MCP_PROTOCOL_VERSION),
-        );
+        let payload = discovery_payload();
+        let headers = discovery_headers();
         tokio::time::timeout(std::time::Duration::from_millis(100), async {
             assert_eq!(healthz().await.status(), axum::http::StatusCode::OK);
             assert_eq!(

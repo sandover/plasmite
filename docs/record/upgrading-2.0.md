@@ -137,6 +137,8 @@ A clock step can make the next message's timestamp smaller. This loop continues 
 
 ## Migrate MCP clients
 
+Upgrade the MCP client as well as Plasmite. Local and HTTPS access both require MCP `2026-07-28`; a client using only the older initialization handshake cannot connect. For HTTPS sign-in, use a client that supports Client ID Metadata Documents and approve it in the browser with your Plasmite access key. The server does not offer Dynamic Client Registration. The native CLI still uses `plasmite access connect`; the printed client commands leave registration on automatic. If you previously signed in through dynamic registration, sign in again with an updated client before the existing token expires. See [Plasmite for agents](../agents.md#connect-an-agent) for client settings and the two connection paths.
+
 | 1.x tool or field | 2.0 |
 | --- | --- |
 | `plasmite_fetch {pool, seq: N}` | `plasmite_fetch {pool, since: N, count: 1}` |

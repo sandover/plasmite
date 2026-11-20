@@ -21,9 +21,8 @@ use crate::interface_wire::{ErrorKindWire, MessageWire, error_policy};
 use crate::{api::Durability, since::parse_rfc3339_ns};
 
 const JSON_RPC_VERSION: &str = "2.0";
-pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
-pub const MODERN_MCP_PROTOCOL_VERSION: &str = "2026-07-28";
-const SUPPORTED_PROTOCOL_VERSIONS: [&str; 2] = [MODERN_MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION];
+pub const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
+const SUPPORTED_PROTOCOL_VERSIONS: [&str; 1] = [MCP_PROTOCOL_VERSION];
 const VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 const CLIENT_CAPABILITIES_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
 const SERVER_INFO_KEY: &str = "io.modelcontextprotocol/serverInfo";
@@ -157,18 +156,6 @@ pub fn request_protocol_version(payload: &Value) -> Option<&str> {
         .as_str()
 }
 
-pub fn uses_modern_mcp(method: &str, params: Option<&Value>) -> bool {
-    method == "server/discover"
-        || params
-            .and_then(|p| p.get("_meta"))
-            .and_then(Value::as_object)
-            .is_some_and(|meta| {
-                meta.contains_key(VERSION_KEY)
-                    || meta.contains_key(CLIENT_CAPABILITIES_KEY)
-                    || meta.contains_key("io.modelcontextprotocol/clientInfo")
-            })
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum DispatchOutcome {
     Response(JsonRpcResponse),
@@ -179,7 +166,6 @@ pub enum DispatchOutcome {
 pub struct ServerMetadata {
     pub name: String,
     pub version: String,
-    pub protocol_version: String,
 }
 
 impl Default for ServerMetadata {
@@ -187,44 +173,8 @@ impl Default for ServerMetadata {
         Self {
             name: "plasmite".to_string(),
             version: env!("PLASMITE_BUILD_VERSION").to_string(),
-            protocol_version: MCP_PROTOCOL_VERSION.to_string(),
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InitializeResult {
-    #[serde(rename = "protocolVersion")]
-    pub protocol_version: String,
-    pub capabilities: ServerCapabilities,
-    #[serde(rename = "serverInfo")]
-    pub server_info: ServerInfo,
-    pub instructions: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServerCapabilities {
-    pub tools: ToolsCapability,
-    pub resources: ResourcesCapability,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolsCapability {
-    #[serde(rename = "listChanged")]
-    pub list_changed: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResourcesCapability {
-    pub subscribe: bool,
-    #[serde(rename = "listChanged")]
-    pub list_changed: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServerInfo {
-    pub name: String,
-    pub version: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -560,50 +510,35 @@ impl<H: McpHandler> McpDispatcher<H> {
     }
 
     pub fn dispatch_value(&mut self, value: Value) -> DispatchOutcome {
-        self.dispatch_value_with_mode(value, false)
-    }
-
-    pub fn dispatch_value_with_mode(
-        &mut self,
-        value: Value,
-        require_modern: bool,
-    ) -> DispatchOutcome {
         match parse_jsonrpc_request(value) {
-            Ok(request) => self.dispatch_request_with_mode(request, require_modern),
+            Ok(request) => self.dispatch_request(request),
             Err(response) => DispatchOutcome::Response(*response),
         }
     }
 
     pub fn dispatch_request(&mut self, request: JsonRpcRequest) -> DispatchOutcome {
-        self.dispatch_request_with_mode(request, false)
-    }
-
-    fn dispatch_request_with_mode(
-        &mut self,
-        request: JsonRpcRequest,
-        require_modern: bool,
-    ) -> DispatchOutcome {
         let Some(id) = request.id.clone() else {
             // Notifications never invoke request methods (which may write a pool).
             return DispatchOutcome::NoResponse;
         };
-        let modern = require_modern || uses_modern_mcp(&request.method, request.params.as_ref());
-        let result = if modern {
-            self.route_modern(request)
-        } else {
-            self.route_method(request)
-        };
+        let result = self.route_request(request);
         DispatchOutcome::Response(match result {
             Ok(result) => JsonRpcResponse::success(id, result),
             Err(error) => JsonRpcResponse::error(id, error),
         })
     }
 
-    fn route_modern(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
+    fn route_request(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
         if request.id == Some(JsonRpcId::Null) {
             return Err(JsonRpcError::invalid_request(
                 "MCP requests need a non-null id",
             ));
+        }
+        if matches!(
+            request.method.as_str(),
+            "initialize" | "notifications/initialized"
+        ) {
+            return Err(obsolete_lifecycle_error());
         }
         let params = request
             .params
@@ -620,7 +555,7 @@ impl<H: McpHandler> McpDispatcher<H> {
             .ok_or_else(|| {
                 JsonRpcError::invalid_params("missing or invalid protocol version in params._meta")
             })?;
-        if version != MODERN_MCP_PROTOCOL_VERSION {
+        if version != MCP_PROTOCOL_VERSION {
             return Err(JsonRpcError::unsupported_version(version));
         }
         if !meta
@@ -654,25 +589,22 @@ impl<H: McpHandler> McpDispatcher<H> {
                 "instructions": MCP_INSTRUCTIONS,
             }),
             "resources/templates/list" => json!({"resourceTemplates": []}),
-            "initialize" | "notifications/initialized" => {
-                return Err(JsonRpcError::method_not_found(
-                    "use server/discover for modern MCP",
-                ));
-            }
-            _ => self.route_method(request).map_err(|mut error| {
-                if error.code == -32002
-                    || (error.code == -32000
-                        && error
-                            .data
-                            .as_ref()
-                            .and_then(|data| data.get("error_kind"))
-                            .and_then(Value::as_str)
-                            == Some("NotFound"))
-                {
-                    error.code = INVALID_PARAMS_CODE;
-                }
-                error
-            })?,
+            _ => self
+                .route_method(&request.method, params)
+                .map_err(|mut error| {
+                    if error.code == -32002
+                        || (error.code == -32000
+                            && error
+                                .data
+                                .as_ref()
+                                .and_then(|data| data.get("error_kind"))
+                                .and_then(Value::as_str)
+                                == Some("NotFound"))
+                    {
+                        error.code = INVALID_PARAMS_CODE;
+                    }
+                    error
+                })?,
         };
         result["resultType"] = json!("complete");
         if cacheable {
@@ -687,74 +619,34 @@ impl<H: McpHandler> McpDispatcher<H> {
         Ok(result)
     }
 
-    fn route_method(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
-        match request.method.as_str() {
-            "initialize" => {
-                ensure_object_or_absent(request.params.as_ref())?;
-                to_value(self.initialize_result())
-            }
-            "notifications/initialized" => {
-                ensure_object_or_absent(request.params.as_ref())?;
-                Ok(json!({}))
-            }
-            "ping" => {
-                ensure_object_or_absent(request.params.as_ref())?;
-                Ok(json!({}))
-            }
-            "tools/list" => {
-                ensure_object_or_absent(request.params.as_ref())?;
-                let tools = self.handler.list_tools()?;
-                Ok(json!({ "tools": tools }))
-            }
+    fn route_method(
+        &mut self,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Result<Value, JsonRpcError> {
+        match method {
+            "ping" => Ok(json!({})),
+            "tools/list" => Ok(json!({"tools": self.handler.list_tools()?})),
             "tools/call" => {
-                let params = require_object_params(
-                    request.params.as_ref(),
-                    "tools/call requires object params",
-                )?;
-                let tool_request = parse_tool_call_params(params)?;
-                let result = self.handler.call_tool(tool_request)?;
-                to_value(result)
+                let request = parse_tool_call_params(params)?;
+                to_value(self.handler.call_tool(request)?)
             }
-            "resources/list" => {
-                ensure_object_or_absent(request.params.as_ref())?;
-                let resources = self.handler.list_resources()?;
-                Ok(json!({ "resources": resources }))
-            }
+            "resources/list" => Ok(json!({"resources": self.handler.list_resources()?})),
             "resources/read" => {
-                let params = require_object_params(
-                    request.params.as_ref(),
-                    "resources/read requires object params",
-                )?;
-                let read_request = parse_resource_read_params(params)?;
-                let result = self.handler.read_resource(read_request)?;
-                to_value(result)
+                let request = parse_resource_read_params(params)?;
+                to_value(self.handler.read_resource(request)?)
             }
             _ => Err(JsonRpcError::method_not_found(format!(
-                "method not found: {}",
-                request.method
+                "method not found: {method}"
             ))),
         }
     }
+}
 
-    fn initialize_result(&self) -> InitializeResult {
-        InitializeResult {
-            protocol_version: self.metadata.protocol_version.clone(),
-            capabilities: ServerCapabilities {
-                tools: ToolsCapability {
-                    list_changed: false,
-                },
-                resources: ResourcesCapability {
-                    subscribe: false,
-                    list_changed: false,
-                },
-            },
-            server_info: ServerInfo {
-                name: self.metadata.name.clone(),
-                version: self.metadata.version.clone(),
-            },
-            instructions: MCP_INSTRUCTIONS.to_string(),
-        }
-    }
+pub fn obsolete_lifecycle_error() -> JsonRpcError {
+    JsonRpcError::method_not_found(format!(
+        "MCP {MCP_PROTOCOL_VERSION} requires per-request metadata; use server/discover instead of initialize"
+    ))
 }
 
 #[derive(Clone, Debug)]
@@ -1268,25 +1160,6 @@ fn parse_jsonrpc_id(value: Value) -> Result<JsonRpcId, JsonRpcError> {
     }
 }
 
-fn require_object_params<'a>(
-    params: Option<&'a Value>,
-    message: &'static str,
-) -> Result<&'a Map<String, Value>, JsonRpcError> {
-    match params {
-        Some(Value::Object(map)) => Ok(map),
-        _ => Err(JsonRpcError::invalid_params(message)),
-    }
-}
-
-fn ensure_object_or_absent(params: Option<&Value>) -> Result<(), JsonRpcError> {
-    match params {
-        None | Some(Value::Null) | Some(Value::Object(_)) => Ok(()),
-        _ => Err(JsonRpcError::invalid_params(
-            "params must be an object when provided",
-        )),
-    }
-}
-
 fn parse_tool_call_params(params: &Map<String, Value>) -> Result<ToolCallRequest, JsonRpcError> {
     let name = params
         .get("name")
@@ -1738,12 +1611,12 @@ mod tests {
             "id": id,
             "method": method,
         });
-        if let Some(params) = params {
-            object
-                .as_object_mut()
-                .expect("object")
-                .insert("params".to_string(), params);
-        }
+        let mut params = params.unwrap_or_else(|| json!({}));
+        params["_meta"] = json!({
+            VERSION_KEY: MCP_PROTOCOL_VERSION,
+            CLIENT_CAPABILITIES_KEY: {}
+        });
+        object["params"] = params;
         object
     }
 
@@ -1755,31 +1628,22 @@ mod tests {
     }
 
     #[test]
-    fn initialize_reports_protocol_capabilities_and_server_info() {
+    fn discover_reports_protocol_capabilities_and_server_info() {
         let handler = StubHandler::default();
         let mut dispatcher = McpDispatcher::new(handler);
         let response = expect_response(dispatcher.dispatch_value(request(
             JsonRpcId::Number(1),
-            "initialize",
-            Some(json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": { "name": "test-client", "version": "1" }
-            })),
+            "server/discover",
+            None,
         )));
         let result = response.result.expect("result");
         assert_eq!(response.error, None);
-        assert_eq!(result["protocolVersion"], json!(MCP_PROTOCOL_VERSION));
-        assert_eq!(result["capabilities"]["tools"]["listChanged"], json!(false));
+        assert_eq!(result["supportedVersions"], json!([MCP_PROTOCOL_VERSION]));
         assert_eq!(
-            result["capabilities"]["resources"]["listChanged"],
-            json!(false)
+            result["capabilities"],
+            json!({"tools": {}, "resources": {}})
         );
-        assert_eq!(
-            result["capabilities"]["resources"]["subscribe"],
-            json!(false)
-        );
-        assert_eq!(result["serverInfo"]["name"], json!("plasmite"));
+        assert_eq!(result["_meta"][SERVER_INFO_KEY]["name"], "plasmite");
         assert!(result["instructions"].as_str().is_some_and(|instructions| {
             instructions.contains("append-only ring buffers")
                 && instructions.contains("most users can ignore sequence numbers")
@@ -1790,7 +1654,7 @@ mod tests {
     }
 
     #[test]
-    fn initialized_notification_returns_no_response() {
+    fn obsolete_notification_returns_no_response() {
         let handler = StubHandler::default();
         let mut dispatcher = McpDispatcher::new(handler);
         let outcome = dispatcher.dispatch_value(json!({
@@ -1810,7 +1674,7 @@ mod tests {
             Some(json!({})),
         )));
         assert_eq!(response.error, None);
-        assert_eq!(response.result, Some(json!({})));
+        assert_eq!(response.result.unwrap()["resultType"], "complete");
     }
 
     #[test]

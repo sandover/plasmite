@@ -183,13 +183,13 @@ The adapter turns each OSC message into data such as `{"address": "/fader/1", "a
 
 ## Give an AI agent your pools
 
-Add Plasmite to the agent's Model Context Protocol (MCP) configuration:
+For a client that uses Model Context Protocol (MCP) `2026-07-28`, configure it to launch a local Plasmite installation:
 
 ```json
 {"mcpServers": {"plasmite": {"command": "plasmite", "args": ["mcp"]}}}
 ```
 
-The agent can list pools and call `plasmite_feed`, `plasmite_fetch` and `plasmite_follow`. [Plasmite for agents](agents.md) shows handoffs, catching up after a restart, and instructions to paste into `AGENTS.md`. For a shared server, connect the agent to `https://pools.example.net:9743/mcp`; see [Connect an AI client](record/serving.md#connect-an-ai-client).
+The agent can list pools and call `plasmite_feed`, `plasmite_fetch` and `plasmite_follow` during a turn. A pool update does not start a new turn. [Plasmite for agents](agents.md) covers compatible clients, handoffs and restart catch-up. For a shared server, use its trusted HTTPS `/mcp` endpoint with a client that supports Client ID Metadata Documents for browser sign-in. See [Connect an AI client](record/serving.md#connect-an-ai-client).
 
 ## Use Plasmite from Python, JavaScript and Go
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 
-PROTOCOL_VERSION = "2025-11-25"
+PROTOCOL_VERSION = "2026-07-28"
 LANES = ("native_api", "https_mcp")
 
 
@@ -34,7 +34,7 @@ def command_output(*command: str) -> str:
 
 
 class HttpsMcp:
-    def __init__(self, endpoint: str, access_key: str, ca_file: str | None):
+    def __init__(self, endpoint: str, access_key: str, client_id: str, ca_file: str | None):
         parts = urlsplit(endpoint)
         if parts.scheme != "https" or not parts.hostname or parts.query or parts.fragment:
             raise ValueError("--mcp-url must be an HTTPS URL without query or fragment")
@@ -50,18 +50,13 @@ class HttpsMcp:
         self.next_id = 1
         self.refresh_token = ""
         try:
-            self.client_id, self.resource, self.refresh_token = self.authorize(access_key)
+            self.client_id, self.resource, self.refresh_token = self.authorize(access_key, client_id)
             self.expires_at = time.monotonic() + 840
             self.refresh_count = 0
-            initialized = self.call("initialize", {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "plasmite-transport-benchmark", "version": "1"},
-            })
-            if initialized.get("protocolVersion") != PROTOCOL_VERSION:
-                raise RuntimeError(f"HTTPS MCP negotiated unexpected protocol version: {initialized.get('protocolVersion')}")
-            self.notify_initialized()
-            self.server_info = initialized.get("serverInfo", {})
+            discovery = self.call("server/discover", {})
+            if PROTOCOL_VERSION not in discovery.get("supportedVersions", []):
+                raise RuntimeError(f"HTTPS MCP did not advertise {PROTOCOL_VERSION}: {discovery.get('supportedVersions')}")
+            self.server_info = discovery.get("serverInfo", {})
         except BaseException:
             self.close()
             raise
@@ -93,21 +88,13 @@ class HttpsMcp:
             value = {}
         return response.status, value, response
 
-    def authorize(self, access_key: str) -> tuple[str, str, str]:
+    def authorize(self, access_key: str, client_id: str) -> tuple[str, str, str]:
         issuer = f"https://{self.host}:{self.port}" if self.port != 443 else f"https://{self.host}"
         self.resource = f"{issuer}/mcp"
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             redirect_uri = f"http://127.0.0.1:{listener.getsockname()[1]}/benchmark-callback"
 
-        status, registration, _ = self.request_json(
-            "/oauth/register", "POST",
-            {"client_name": "Plasmite transport benchmark", "redirect_uris": [redirect_uri],
-             "token_endpoint_auth_method": "none"},
-        )
-        if status != 201 or not registration.get("client_id"):
-            raise RuntimeError(f"OAuth dynamic client registration failed with HTTP {status}: {registration}")
-        client_id = registration["client_id"]
         verifier = secrets.token_urlsafe(48)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
         state = secrets.token_urlsafe(24)
@@ -131,11 +118,11 @@ class HttpsMcp:
             raise RuntimeError("OAuth authorization page did not return its approval cookie and request id")
 
         print(
-            f"Authorizing benchmark client for {self.resource} using a one-time DCR + PKCE grant.",
+            f"Authorizing benchmark client for {self.resource} using public client metadata and PKCE.",
             file=sys.stderr,
         )
         status, approval, response = self.request_form(
-            "/oauth/approve", {"request": request_id, "access_key": access_key},
+            "/oauth/approve", {"request": request_id, "access_key": access_key, "decision": "approve"},
             {"Cookie": cookie, "Origin": issuer},
         )
         location = response.getheader("Location", "")
@@ -143,7 +130,9 @@ class HttpsMcp:
             raise RuntimeError(f"OAuth approval failed with HTTP {status}: {approval}")
         callback = urlsplit(location)
         callback_values = parse_qs(callback.query)
-        if callback_values.get("state") != [state] or callback_values.get("iss") != [issuer]:
+        if (callback._replace(query="", fragment="").geturl() != redirect_uri
+                or callback.fragment or callback_values.get("state") != [state]
+                or callback_values.get("iss") != [issuer]):
             raise RuntimeError("OAuth approval callback did not match the benchmark request")
         code = callback_values.get("code", [None])[0]
         if not code:
@@ -177,9 +166,12 @@ class HttpsMcp:
         self.refresh_if_needed()
         request_id = self.next_id
         self.next_id += 1
-        headers = {"Authorization": f"Bearer {self.bearer}"}
-        if method != "initialize":
-            headers["MCP-Protocol-Version"] = PROTOCOL_VERSION
+        headers = {"Authorization": f"Bearer {self.bearer}", "MCP-Protocol-Version": PROTOCOL_VERSION,
+                   "Mcp-Method": method}
+        if method == "tools/call":
+            headers["Mcp-Name"] = params["name"]
+        params = {**params, "_meta": {"io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
+                                    "io.modelcontextprotocol/clientCapabilities": {}}}
         status, value, _ = self.request_json(
             self.path, "POST", {"jsonrpc": "2.0", "id": request_id,
                                  "method": method, "params": params}, headers
@@ -191,16 +183,6 @@ class HttpsMcp:
         if value.get("id") != request_id:
             raise RuntimeError(f"HTTPS MCP returned mismatched request id for {method}")
         return value["result"]
-
-    def notify_initialized(self) -> None:
-        headers = {"Authorization": f"Bearer {self.bearer}",
-                   "MCP-Protocol-Version": PROTOCOL_VERSION}
-        status, _, _ = self.request_json(
-            self.path, "POST",
-            {"jsonrpc": "2.0", "method": "notifications/initialized"}, headers,
-        )
-        if status not in (200, 202, 204):
-            raise RuntimeError(f"HTTPS MCP initialized notification returned HTTP {status}")
 
     def tool(self, name: str, arguments: dict[str, object]) -> dict[str, object]:
         result = self.call("tools/call", {"name": name, "arguments": arguments})
@@ -355,7 +337,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     raw_runs: list[dict[str, object]] = []
     try:
         native_info = native_request(native, {"op": "info"})["result"]["file_size"]
-        direct = HttpsMcp(args.mcp_url, access_key, args.ca_file)
+        direct = HttpsMcp(args.mcp_url, access_key, args.mcp_client_id, args.ca_file)
         clients = {"native_api": native, "https_mcp": direct}
         versions = {
             "plasmite_cli": command_output(str(binary), "--version"),
@@ -461,8 +443,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "repeats": args.repeats,
             "concurrency": 1,
             "durability": "fast",
-            "warmup": "HTTPS MCP completed initialize/initialized and pool-info checks. Both lanes performed an untimed append and exact fetch for every payload size before timing.",
-            "oauth": "Registered a dynamic public client, approved the exact MCP resource with the protected key file, exchanged a PKCE code, and revoked the grant at exit; bearer and refresh tokens stayed in memory.",
+            "warmup": "HTTPS MCP completed server discovery and pool-info checks. Both lanes performed an untimed append and exact fetch for every payload size before timing.",
+            "oauth": "Used the supplied public client metadata document, approved the exact MCP resource with the protected key file, exchanged a PKCE code, and revoked the grant at exit; bearer and refresh tokens stayed in memory.",
             "oauth_refreshes": direct.refresh_count,
             "timed_calls": "One append or one exact fetch per operation; no batching and no model provider.",
             "limitations": "Native API uses the saved-connection RemoteClient. Timing excludes process startup and measures client calls; HTTPS MCP uses one persistent HTTPS connection.",
@@ -475,6 +457,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", required=True, help="HTTPS server origin used by the native saved connection")
     parser.add_argument("--mcp-url", required=True, help="Exact HTTPS MCP endpoint, normally SERVER/mcp")
+    parser.add_argument("--mcp-client-id", required=True, help="HTTPS URL of your public benchmark client metadata document")
     parser.add_argument("--pool", required=True, help="Existing dedicated pool with enough free capacity")
     parser.add_argument("--access-key-file", required=True, help="Mode-600 file containing one native access key")
     parser.add_argument("--messages", type=int, default=100)
@@ -491,6 +474,10 @@ def main() -> int:
         parser.error("--server must be the HTTPS server origin without a path, query, or fragment")
     if (server.hostname, server.port or 443) != (mcp.hostname, mcp.port or 443):
         parser.error("--server and --mcp-url must name the same host and port")
+    client_id = urlsplit(args.mcp_client_id)
+    if (client_id.scheme != "https" or not client_id.hostname or client_id.username is not None
+            or client_id.port not in (None, 443) or client_id.path in ("", "/") or client_id.query or client_id.fragment):
+        parser.error("--mcp-client-id must be a public HTTPS document on port 443, with no credentials, query, or fragment")
     result = run(args)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
