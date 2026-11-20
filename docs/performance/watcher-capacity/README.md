@@ -3,8 +3,9 @@
 The shared-wait implementation served 1,000 Model Context Protocol (MCP) Events
 streams, 16 HTTP followers and 16 MCP follow calls across ten pools. The release
 build delivered every tagged message to every matching reader in the mixed
-trials below. The short-request checks passed on both connection shapes in
-the macOS repeats and the Debian ARM64 runs.
+trials below. The longer HTTP/1.1 repeats met the short-request target on
+macOS. The HTTP/2 write-rate trials found cases where short requests exceeded
+twice their idle latency.
 
 ## HTTPS mixed load
 
@@ -33,9 +34,10 @@ The server still had 49–57 threads after the wait, with ten pool waiters
 and MCP follow calls that renewed every five seconds.
 
 On macOS, the separate-connection trial used 1,054 server descriptors with
-the readers idle, compared with 43 for shared HTTP/2. The first stalled
-follower raised resident memory to 68.38 MiB on HTTP/1.1 and 28.59 MiB on
-HTTP/2. These samples include the pool pages the benchmark touched.
+the readers idle, compared with 43 for shared HTTP/2. In the five-second
+trials with a stalled follower, resident memory reached 68.38 MiB on HTTP/1.1
+and 28.59 MiB on HTTP/2. These samples include the pool pages the benchmark
+touched.
 
 The [Debian baseline](results/baseline-debian-arm64-event-64.json) admitted 64
 quiet local streams and grew from six to 69 idle threads. It used 1.00% of one
@@ -45,20 +47,26 @@ is available for comparison.
 
 ## Raise the write rate
 
-The [Debian ARM64 shared HTTP/2 trial](results/debian-arm64-h2-ramp.json)
-increased the rate with the same 1,032 readers and stalled follower. Each step
-ran for eight seconds. All scheduled writes committed and all matching
-readers received their messages at every rate.
+Each step ran for eight seconds with 1,032 readers and one stalled follower.
+Both macOS connection shapes and Debian ARM64 shared HTTP/2 committed all
+scheduled writes and delivered all matching messages. The highest measured
+rate was 100 writes and 5,160 matching receipts per second.
 
-| Writes per second | Tagged receipts | p95 to last receipt |
-| ---: | ---: | ---: |
-| 20 | 8,256/8,256 | 48.27 ms |
-| 50 | 20,640/20,640 | 51.17 ms |
-| 100 | 41,280/41,280 | 49.44 ms |
+| Writes per second | Tagged receipts per trial | macOS, shared HTTP/2 p95 | macOS, separate HTTP/1.1 p95 | Debian ARM64, shared HTTP/2 p95 |
+| ---: | ---: | ---: | ---: | ---: |
+| 20 | 8,256/8,256 | 11.80 ms | 14.17 ms | 48.27 ms |
+| 50 | 20,640/20,640 | 10.91 ms | 13.09 ms | 51.17 ms |
+| 100 | 41,280/41,280 | 9.14 ms | 11.53 ms | 49.44 ms |
 
-Short requests all succeeded. Several p95 comparisons exceeded twice their
-idle times. In the two faster trials, finite fetch p95 reached about 42–46 ms
-under load, so this run leaves the short-request latency target open.
+All short requests succeeded. The latency target remains open. At 100
+writes per second, finite fetch p95 reached 2.37 times idle on macOS shared
+HTTP/2, 3.29 times idle on macOS separate HTTP/1.1 and 14.58 times idle on
+Debian shared HTTP/2. On Debian the loaded p95 was about 42–46 ms in the
+two faster trials.
+
+See the [macOS HTTP/2](results/macos-h2-ramp.json),
+[macOS HTTP/1.1](results/macos-h1-ramp.json), and
+[Debian ARM64 HTTP/2](results/debian-arm64-h2-ramp.json) samples.
 
 ## One reader on macOS
 

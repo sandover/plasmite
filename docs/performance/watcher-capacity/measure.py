@@ -18,11 +18,15 @@ import platform
 import re
 import socket
 import ssl
+import sys
 import time
 import uuid
 
 import httpx
 import psutil
+
+# Keep generated Python files out of the source checkout.
+sys.dont_write_bytecode = True
 
 from fixture import temporary_server
 from http2_transport import Http2Transport
@@ -76,7 +80,7 @@ def client(server, http2=False, stall=False):
     transport = httpx.AsyncHTTPTransport(
         verify=server.verify,
         trust_env=False,
-        limits=httpx.Limits(max_connections=1, max_keepalive_connections=1),
+        limits=httpx.Limits(max_connections=1, max_keepalive_connections=1, keepalive_expiry=None),
         socket_options=[(socket.SOL_SOCKET, socket.SO_RCVBUF, 8192)] if stall else None,
     )
     return httpx.AsyncClient(base_url=server.url, transport=transport, trust_env=False, timeout=15)
@@ -226,7 +230,7 @@ def event_sequence(line, pool, active):
     return None
 
 
-async def watch(server, session, mode, pool, delivery, started, request_id):
+async def watch(server, session, mode, pool, delivery, started, request_id, dedicated):
     active = asyncio.Event()
     previous = 0
     try:
@@ -265,6 +269,8 @@ async def watch(server, session, mode, pool, delivery, started, request_id):
                     previous = seq
             raise RuntimeError("Watch ended")
     except (httpx.HTTPError, RuntimeError, ValueError) as error:
+        if dedicated:
+            await session.aclose()
         if not started.done():
             started.set_result(error_label(error))
         else:
@@ -348,10 +354,12 @@ async def publish(server, session, pools, delivery, args, rate):
         delivery.messages[(pool, seq)] = item
         try:
             actual = await feed(server, session, pool, payload, WATCH_TAG if matched else "skip")
-        except httpx.HTTPStatusError as error:
-            failures[f"HTTP {error.response.status_code}"] += 1
+        except httpx.HTTPError as error:
+            failures[error_label(error)] += 1
             del delivery.messages[(pool, seq)]
-            continue
+            if isinstance(error, httpx.HTTPStatusError):
+                continue
+            break
         if actual != seq:
             raise RuntimeError(f"Expected sequence {seq} in {pool}, got {actual}")
         sequences[pool] = actual
@@ -412,7 +420,7 @@ async def measure(server, args, rate):
         await create_pool(server, control_session, control, 1024 * 1024)
         for pool in pools:
             await create_pool(server, control_session, pool, args.pool_mib * 1024 * 1024)
-            await feed(server, control_session, pool, {"seed": True}, "skip")
+            await feed(server, publish_session, pool, {"seed": True}, "skip")
         if args.stall:
             await create_pool(server, control_session, stall_pool, 64 * 1024 * 1024)
         await timed_controls(server, control_session, control, 1)
@@ -435,7 +443,7 @@ async def measure(server, args, rate):
             if mode == "mcp":
                 runner = mcp_follow(server, shared, pool, delivery, ready)
             else:
-                runner = watch(server, shared, mode, pool, delivery, ready, number + 1)
+                runner = watch(server, shared, mode, pool, delivery, ready, number + 1, not h2)
             tasks.append(asyncio.create_task(runner))
             if (number + 1) % 50 == 0:
                 # Build up the steady load without overflowing the kernel's
@@ -552,13 +560,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    trials = []
-    # Each rate starts from fresh readers and pools. Local runs also start a
-    # fresh server, so cached blocking workers cannot carry over to later rates.
-    for _ in range(args.repeats):
-        for rate in args.rates:
-            with endpoint(args) as server:
-                trials.append(asyncio.run(measure(server, args, rate)))
     result = {
         "revision": args.revision,
         "platform": platform.platform(),
@@ -575,9 +576,17 @@ def main():
             "controls": args.controls,
             "server_arguments": args.server_arg,
         },
-        "trials": trials,
+        "trials": [],
     }
-    args.output.write_text(json.dumps(result, indent=2) + "\n")
+    # Save each finished trial so a later interruption preserves earlier data.
+    for _ in range(args.repeats):
+        for rate in args.rates:
+            with endpoint(args) as server:
+                trial = asyncio.run(measure(server, args, rate))
+            result["trials"].append(trial)
+            partial = args.output.with_suffix(args.output.suffix + ".partial")
+            partial.write_text(json.dumps(result, indent=2) + "\n")
+            partial.replace(args.output)
 
 
 if __name__ == "__main__":
