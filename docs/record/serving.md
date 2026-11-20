@@ -158,13 +158,15 @@ The positional `SERVER` URL names the HTTPS origin recipients use: scheme, hostn
 
 `--bind` moves the local listener, which must stay on loopback. `--remote-bind` takes a numeric IP and port (bracket an IPv6 address) and overrides the URL's port, for example to bind one interface or to sit behind a proxy that uses a different backend port.
 
-The HTTPS listener holds at most 128 connections, and these limits apply before any access-key check:
+The HTTPS listener accepts up to 2,048 connections, including connections that have yet to authenticate. An HTTP/1.1 event stream occupies a connection for its lifetime. Its agent can use a second connection to fetch a message while the stream stays open. HTTP/2 can carry both requests on one connection.
 
-- It closes a TLS handshake that takes longer than 5 seconds, waits at most 10 seconds for HTTP/1 headers, and times out a request body after 30 seconds without data.
-- It pings HTTP/2 clients every 15 seconds and closes a connection that fails to answer within 10 seconds. Idle HTTP/2 connections that answer stay open and count toward the limit, so requests above it must retry.
-- It serves at most 64 live reads at once: HTTP follows, MCP `plasmite_follow` calls and MCP event streams share this limit, and a read over it fails as busy. An agent that watches a pool holds one live read for as long as it watches, so a team of agents watching pools uses one each. `--max-tail-concurrency` changes the limit; each live read costs one waiting thread.
-- It ends an HTTP follow whose output queue stays full for 30 seconds. `--max-tail-timeout-ms` changes that duration; the same setting limits how long a read takes to open and how long one fetch response may run.
+- The server closes a TLS handshake after 5 seconds, waits at most 10 seconds for HTTP/1.1 headers, and times out a request body after 30 seconds without data.
+- It pings HTTP/2 clients every 15 seconds and closes connections that fail to answer within 10 seconds. Idle connections that answer still count toward the limit.
+- Each HTTP listener admits up to 1,536 live reads across HTTP follows, MCP follow calls and MCP event streams. Live reads share one waiter per watched pool file. Each listener separately allows 64 finite fetches, 64 ordinary MCP calls and 64 short storage operations at a time.
+- A read has 30 seconds to open, a finite fetch has 30 seconds per response, and an HTTP follow ends if its output stalls for 30 seconds.
 - The OAuth authorization page allows 30 requests per minute per TCP source address. Each source can hold 32 pending approvals, with up to 8 for the same client. A reverse proxy shares one source address among its clients.
+
+On Unix, the server raises its soft open-file limit toward 4,096 when the hard limit allows it. Check the service account's hard limit if the server runs out of file descriptors before it reaches the connection limit.
 
 Put an Internet-facing server behind a proxy or firewall that also limits connection rates.
 
@@ -297,7 +299,7 @@ Bare `--udp` listens on `127.0.0.1:9701`; `--udp=IP:PORT` binds another numeric 
 
 The listener can feed every pool in the directory, including pools created later, and it checks no credentials. A non-loopback bind gives that access to every sender that can reach it, so bind one only on a network whose rules limit senders. Use HTTPS when a sender needs authentication or confirmation that the server stored its message.
 
-`--udp-follow` also lets clients `fetch`, `follow` and `duplex` over `udp://HOST:PORT/POOL`, and implies `--udp`. Any client that reaches the socket can then read every pool. Plasmite first checks that the client receives replies at its address, which stops spoofed requests from aiming large replies at a victim; the check proves no identity. Readers receive messages in arrival order, including late messages and duplicates, and a `fetch` can end with messages still in flight. The [UDP transport contract](../../spec/udp/v1/SPEC.md) covers leases, controls and notices. `--max-tail-concurrency` limits UDP followers separately from HTTP followers, and a slow follower never holds up input.
+`--udp-follow` also lets clients `fetch`, `follow` and `duplex` over `udp://HOST:PORT/POOL`, and implies `--udp`. Any client that reaches the socket can then read every pool. Plasmite first checks that the client receives replies at its address, which stops spoofed requests from aiming large replies at a victim; the check proves no identity. Readers receive messages in arrival order, including late messages and duplicates, and a `fetch` can end with messages still in flight. The [UDP transport contract](../../spec/udp/v1/SPEC.md) covers leases, controls and notices. The UDP listener admits up to 64 subscriptions independently of the HTTP listeners. A slow follower never holds up input.
 
 An installed server keeps its UDP settings through restarts and updates. Enable input with `serve install --udp` and reads with `serve install --udp-follow`. `serve install --no-udp-follow` withdraws reads and keeps input; `serve install --no-udp` removes both.
 

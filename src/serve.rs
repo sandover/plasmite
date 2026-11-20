@@ -70,9 +70,10 @@ use plasmite::api::{
     Durability, Error, ErrorKind, Feed, LocalClient, Pool, PoolInfo, PoolOptions, PoolRef,
 };
 use plasmite::mcp::{
-    DispatchOutcome, JsonRpcError as McpJsonRpcError, LEGACY_MCP_PROTOCOL_VERSION,
-    MCP_PROTOCOL_VERSION, McpDispatcher, McpHandler, McpResource, McpTool, McpToolAccess,
-    PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest, ToolCallResult,
+    DispatchOutcome, FollowTurn, HostedFollow, HostedFollowRequest,
+    JsonRpcError as McpJsonRpcError, LEGACY_MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION,
+    McpDispatcher, McpHandler, McpResource, McpTool, McpToolAccess, PlasmiteMcpHandler,
+    ResourceReadRequest, ResourceReadResult, ToolCallRequest, ToolCallResult,
     request_protocol_version, uses_modern_mcp,
 };
 
@@ -84,10 +85,38 @@ const UI_COMMON_JS: &str = include_str!("../ui/common.js");
 const UI_INCONSOLATA_WOFF2: &[u8] =
     include_bytes!("../ui/fonts/inconsolata-latin-wght-normal.woff2");
 const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
-// Bound sockets before authentication, including incomplete TLS handshakes.
-const MAX_TLS_CONNECTIONS: usize = 128;
+// Leave room for agents to open a second connection while their streams stay open.
+// This bound includes incomplete TLS handshakes.
+const MAX_TLS_CONNECTIONS: usize = 2048;
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+const LIVE_READ_LIMIT: usize = 1536;
+const SHORT_STORAGE_LIMIT: usize = 64;
+const MCP_REQUEST_LIMIT: usize = 64;
+const FETCH_LIMIT: usize = 64;
+const UDP_SUBSCRIPTION_LIMIT: usize = 64;
+const READ_TIMEOUT_MS: u64 = 30_000;
+
+pub(crate) fn read_timeout_ms() -> u64 {
+    test_limit("PLASMITE_TEST_READ_TIMEOUT_MS", READ_TIMEOUT_MS)
+}
+
+pub(crate) fn live_read_limit() -> usize {
+    test_limit("PLASMITE_TEST_LIVE_READ_LIMIT", LIVE_READ_LIMIT)
+}
+
+fn test_limit<T: Copy + Default + PartialEq + std::str::FromStr>(name: &str, default: T) -> T {
+    if cfg!(debug_assertions)
+        && let Some(value) = std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<T>().ok())
+        && value != T::default()
+    {
+        return value;
+    }
+    default
+}
+
 const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
@@ -183,6 +212,7 @@ struct AppState {
     local_admin: bool,
     max_tail_timeout_ms: u64,
     tail_semaphore: Arc<Semaphore>,
+    fetch_semaphore: Arc<Semaphore>,
     mcp_semaphore: Arc<Semaphore>,
     storage_executor: StorageExecutor,
     pool_waiters: PoolWaiters,
@@ -362,7 +392,11 @@ pub(crate) async fn serve_secure_pair(
             LocalClient::new().with_pool_dir(&local.pool_dir),
             shutdown_rx,
             udp_follow,
-            local.max_concurrent_tails,
+            test_limit(
+                "PLASMITE_TEST_UDP_SUBSCRIPTION_LIMIT",
+                UDP_SUBSCRIPTION_LIMIT,
+            ),
+            pool_waiters,
         ));
     }
     // Publish readiness only after every listener has bound and started.
@@ -470,10 +504,9 @@ async fn prepare_server_with_access(
         local_admin,
         max_tail_timeout_ms: config.max_tail_timeout_ms,
         tail_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
-        mcp_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
-        // Reuse the existing server concurrency budget instead of adding another
-        // public tuning flag. Storage operations are shorter lived than tails.
-        storage_executor: StorageExecutor::new(config.max_concurrent_tails),
+        mcp_semaphore: Arc::new(Semaphore::new(MCP_REQUEST_LIMIT)),
+        fetch_semaphore: Arc::new(Semaphore::new(FETCH_LIMIT)),
+        storage_executor: StorageExecutor::new(SHORT_STORAGE_LIMIT),
         pool_waiters,
         ui_pool_watch: Mutex::new(None),
         activity,
@@ -763,12 +796,14 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
             .with_message("--max-body-bytes must fit in memory and be greater than zero"));
     }
     if config.max_tail_timeout_ms == 0 {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--max-tail-timeout-ms must be greater than zero"));
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("read timeout must be greater than zero")
+        );
     }
     if config.max_concurrent_tails == 0 {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--max-tail-concurrency must be greater than zero"));
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("live read limit must be greater than zero")
+        );
     }
     Ok(())
 }
@@ -1367,6 +1402,23 @@ async fn mcp_post(
         return mcp_events::open(state, shutdown, authorization, activity, payload).await;
     }
 
+    if let Some(request) = HostedFollowRequest::parse(&payload, modern) {
+        if let Some(Extension(activity)) = &activity
+            && let Some((pool, operation)) = mcp_activity_pool(&payload)
+        {
+            activity.pool(pool, operation);
+        }
+        let result = tokio::select! {
+            biased;
+            _ = wait_for_revocation(grant.as_ref()) => mcp_revoked_tool_result(),
+            _ = wait_for_shutdown(shutdown) => HostedFollow::error(
+                Error::new(ErrorKind::Io).with_message("server is shutting down"),
+            ),
+            result = wait_for_mcp_messages(&state, &request) => result,
+        };
+        return json_response(request.response(result, modern));
+    }
+
     let permit = match state.mcp_semaphore.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -1386,11 +1438,7 @@ async fn mcp_post(
     let dispatch = tokio::task::spawn_blocking(move || {
         let _activity = activity;
         let _permit = permit;
-        let handler = ServeMcpHandler::new(
-            dispatch_state.client.clone(),
-            dispatch_state.tail_semaphore.clone(),
-        )
-        .with_grant(grant);
+        let handler = ServeMcpHandler::new(dispatch_state.client.clone()).with_grant(grant);
         let mut dispatcher = McpDispatcher::new(handler);
         dispatcher.dispatch_value_with_legacy(payload, !modern)
     })
@@ -1462,17 +1510,67 @@ fn mcp_activity_pool(payload: &Value) -> Option<(String, String)> {
     }
 }
 
+async fn wait_for_mcp_messages(state: &AppState, request: &HostedFollowRequest) -> ToolCallResult {
+    let Ok(_permit) = acquire_tail_permit(state) else {
+        return mcp_wait_busy_tool_result();
+    };
+    let selection = match request.selection() {
+        Ok(selection) => selection,
+        Err(error) => return error,
+    };
+    let wait = selection.wait();
+    let client = state.client.clone();
+    let waiters = state.pool_waiters.clone();
+    let (mut follow, mut changes) = match state
+        .pool_waiters
+        .read(move || {
+            let (pool, changes) = waiters.subscribe_owned(selection.open_pool(&client)?)?;
+            Ok((selection.open(pool)?, changes))
+        })
+        .await
+    {
+        Ok(opened) => opened,
+        Err(error) => return HostedFollow::error(error),
+    };
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        changes.acknowledge();
+        let (returned, outcome) = match state
+            .pool_waiters
+            .read(move || {
+                let outcome = follow.turn()?;
+                Ok((follow, outcome))
+            })
+            .await
+        {
+            Ok(turn) => turn,
+            Err(error) => return HostedFollow::error(error),
+        };
+        follow = returned;
+        match outcome {
+            FollowTurn::Done => return follow.finish(),
+            FollowTurn::More => {}
+            FollowTurn::Waiting => {
+                if tokio::time::timeout_at(deadline, changes.changed())
+                    .await
+                    .is_err()
+                {
+                    return follow.finish();
+                }
+            }
+        }
+    }
+}
+
 struct ServeMcpHandler {
     inner: PlasmiteMcpHandler,
-    wait_semaphore: Arc<Semaphore>,
     grant: Option<AccessGrant>,
 }
 
 impl ServeMcpHandler {
-    fn new(client: LocalClient, wait_semaphore: Arc<Semaphore>) -> Self {
+    fn new(client: LocalClient) -> Self {
         Self {
             inner: PlasmiteMcpHandler::with_client(client),
-            wait_semaphore,
             grant: None,
         }
     }
@@ -1503,14 +1601,6 @@ impl McpHandler for ServeMcpHandler {
         if self.revoked() {
             return Ok(mcp_revoked_tool_result());
         }
-        let _wait_permit = if request.name == "plasmite_follow" {
-            match self.wait_semaphore.clone().try_acquire_owned() {
-                Ok(permit) => Some(permit),
-                Err(_) => return Ok(mcp_wait_busy_tool_result()),
-            }
-        } else {
-            None
-        };
         let is_write = PlasmiteMcpHandler::tool_access(&request.name) == Some(McpToolAccess::Write);
         let result = self.inner.call_tool(request);
         if !is_write && self.revoked() {
@@ -1561,7 +1651,7 @@ fn mcp_wait_busy_tool_result() -> ToolCallResult {
         Some(json!({
             "error_kind": "Busy",
             "tool": "plasmite_follow",
-            "hint": "Try again later; the server operator can raise --max-tail-concurrency.",
+            "hint": "Try again after a live read closes.",
         })),
     )
 }
@@ -2282,7 +2372,7 @@ fn tail_pool_ref_from_request(
     Ok((pool_ref_from_request(pool)?, grant))
 }
 
-fn acquire_tail_permit(state: &Arc<AppState>) -> Result<OwnedSemaphorePermit, Error> {
+fn acquire_tail_permit(state: &AppState) -> Result<OwnedSemaphorePermit, Error> {
     state
         .tail_semaphore
         .clone()
@@ -2293,7 +2383,7 @@ fn acquire_tail_permit(state: &Arc<AppState>) -> Result<OwnedSemaphorePermit, Er
 fn tail_busy_error() -> Error {
     Error::new(ErrorKind::Busy)
         .with_message("the server is at its limit of live reads (follows, MCP follow calls and event streams)")
-        .with_hint("Try again later; the server operator can raise --max-tail-concurrency.")
+        .with_hint("Try again after a live read closes.")
 }
 
 fn apply_sse_headers(response: &mut Response) {
@@ -2420,9 +2510,9 @@ mod pool_name_tests {
 mod tests {
     use super::{
         AccessStore, AppState, BrowserSessions, Error, ErrorKind, LocalClient, McpHandler,
-        PoolWaiters, ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest,
-        error_response, healthz, list_pools, mcp_post, same_origin, ui_pool_snapshot,
-        validate_config, validate_mcp_origin_header, validate_mcp_request_headers,
+        PoolWaiters, ServeConfig, ServeMcpHandler, StorageExecutor, error_response, healthz,
+        list_pools, mcp_post, same_origin, ui_pool_snapshot, validate_config,
+        validate_mcp_origin_header, validate_mcp_request_headers,
     };
     use axum::Json;
     use axum::extract::State;
@@ -2449,6 +2539,7 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
+            fetch_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
             pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
@@ -2645,12 +2736,13 @@ mod tests {
         cfg.pool_dir = temp.path().to_owned();
         cfg.max_tail_timeout_ms = 1_000;
         let activity = super::ActivityRegistry::default();
+        let (_stop, shutdown) = tokio::sync::watch::channel(false);
         let mut app = super::prepare_server_with_access(
             &cfg,
             None,
             true,
             activity.clone(),
-            tokio::sync::watch::channel(false).1,
+            shutdown,
             PoolWaiters::default(),
         )
         .await
@@ -3043,6 +3135,7 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
+            fetch_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
             pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
@@ -3120,6 +3213,7 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
+            fetch_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
             pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
@@ -3156,6 +3250,7 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
+            fetch_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
             pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
@@ -3175,89 +3270,101 @@ mod tests {
     fn https_and_stdio_mcp_register_the_same_tools() {
         let client = LocalClient::new();
         let mut stdio = super::PlasmiteMcpHandler::with_client(client.clone());
-        let mut https = ServeMcpHandler::new(client, Arc::new(Semaphore::new(1)));
+        let mut https = ServeMcpHandler::new(client);
         assert_eq!(stdio.list_tools().unwrap(), https.list_tools().unwrap());
     }
 
-    #[test]
-    fn mcp_wait_shares_reader_budget() {
-        let temp = tempfile::tempdir().unwrap();
-        let semaphore = Arc::new(Semaphore::new(1));
-        let _permit = semaphore.clone().try_acquire_owned().unwrap();
-        let mut handler =
-            ServeMcpHandler::new(LocalClient::new().with_pool_dir(temp.path()), semaphore);
-        let result = handler
-            .call_tool(ToolCallRequest {
-                name: "plasmite_follow".to_string(),
-                arguments: json!({"pool":"events","timeout_ms":10})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            })
-            .unwrap();
-        assert!(result.is_error);
-        assert_eq!(
-            result.structured_content.unwrap()["error_kind"],
-            json!("Busy")
-        );
-    }
+    #[tokio::test]
+    async fn waiting_mcp_calls_leave_short_requests_available() {
+        use super::*;
+        use plasmite::api::{Feed, PoolOptions};
 
-    #[test]
-    fn revocation_wakes_an_idle_mcp_wait() {
         let temp = tempfile::tempdir().unwrap();
-        let access = AccessStore::open(temp.path(), None, None, None).unwrap();
-        let key = access.issue("reader").unwrap();
-        let grant = access
-            .authorize_secret(key.rsplit('.').next().unwrap())
-            .unwrap();
-        let id = serde_json::to_value(access.list().unwrap()).unwrap()[0]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
         let client = LocalClient::new().with_pool_dir(temp.path());
-        client
-            .create_pool(
-                &plasmite::api::PoolRef::name("events"),
-                plasmite::api::PoolOptions::new(1024 * 1024),
-            )
+        let mut pool = client
+            .create_pool(&PoolRef::name("events"), PoolOptions::new(65536))
             .unwrap();
-        let wait_semaphore = Arc::new(Semaphore::new(1));
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
-        let thread_semaphore = wait_semaphore.clone();
-        std::thread::spawn(move || {
-            let mut handler =
-                ServeMcpHandler::new(client, thread_semaphore).with_grant(Some(grant));
-            let result = handler.call_tool(ToolCallRequest {
-                name: "plasmite_follow".into(),
-                arguments: json!({"pool":"events","timeout_ms":60_000})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            });
-            result_tx.send(result).unwrap();
+        let state = Arc::new(AppState {
+            client,
+            secure_access: None,
+            oauth: None,
+            browser_sessions: BrowserSessions::new(None).unwrap(),
+            local_admin: true,
+            max_tail_timeout_ms: 30_000,
+            tail_semaphore: Arc::new(Semaphore::new(2)),
+            mcp_semaphore: Arc::new(Semaphore::new(1)),
+            fetch_semaphore: Arc::new(Semaphore::new(1)),
+            storage_executor: StorageExecutor::new(1),
+            pool_waiters: PoolWaiters::default(),
+            ui_pool_watch: Mutex::new(None),
+            activity: Default::default(),
         });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while wait_semaphore.available_permits() != 0 {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "MCP wait was not admitted"
-            );
-            std::thread::yield_now();
-        }
-        assert!(matches!(
-            result_rx.recv_timeout(std::time::Duration::from_millis(100)),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-        ));
-        access.revoke(&id).unwrap();
-        let result = result_rx
-            .recv_timeout(std::time::Duration::from_secs(2))
-            .expect("revocation should wake the idle wait")
-            .unwrap();
-        assert!(result.is_error);
-        assert_eq!(
-            result.structured_content.unwrap()["error_kind"],
-            "Permission"
+        let call = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+            "name":"plasmite_follow","arguments":{"pool":"events","since":1,"count":1,"timeout_ms":3000}
+        }});
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(LEGACY_MCP_PROTOCOL_VERSION),
         );
+        let (_stop, shutdown) = watch::channel(false);
+        let mut tasks = JoinSet::new();
+        for _ in 0..2 {
+            tasks.spawn(mcp_post(
+                State(state.clone()),
+                Extension(shutdown.clone()),
+                "/mcp".parse().unwrap(),
+                headers.clone(),
+                None,
+                Ok(Json(call.clone())),
+            ));
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while state.tail_semaphore.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let ordinary = json!({"jsonrpc":"2.0","id":2,"method":"tools/list"});
+        let response = mcp_post(
+            State(state.clone()),
+            Extension(shutdown.clone()),
+            "/mcp".parse().unwrap(),
+            headers.clone(),
+            None,
+            Ok(Json(ordinary)),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let denied = mcp_post(
+            State(state.clone()),
+            Extension(shutdown.clone()),
+            "/mcp".parse().unwrap(),
+            headers,
+            None,
+            Ok(Json(call)),
+        )
+        .await;
+        let denied = axum::body::to_bytes(denied.into_body(), 65536)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&denied).unwrap()["result"]["structuredContent"]["error_kind"],
+            "Busy"
+        );
+        pool.feed_json(br#"{"ready":true}"#, Feed::new()).unwrap();
+        while let Some(response) = tasks.join_next().await {
+            let body = axum::body::to_bytes(response.unwrap().into_body(), 65536)
+                .await
+                .unwrap();
+            let response: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                response["result"]["structuredContent"]["messages"][0]["data"]["ready"],
+                true
+            );
+        }
+        assert_eq!(state.tail_semaphore.available_permits(), 2);
     }
 
     #[test]

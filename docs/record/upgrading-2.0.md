@@ -152,6 +152,12 @@ If you previously signed in through Dynamic Client Registration, sign in again w
 
 `plasmite_fetch` kept its name and changed its arguments, so a 1.x prompt or script that sends `{seq: N}` fails with an unknown-argument error. With no start or tags, 1.x `plasmite_read` returned the latest 20 messages. Pass `last: 20` to read that window in 2.0. With tags, `last` still counts all records before filtering. Increase the window if you need to search further back. Each fetch result carries `ended`: `complete` when it reaches the opening end, or `limit` when it reaches a batch limit. A reader that accepts incomplete history can resume at the `next_seq` in a `RetentionGap` error.
 
+## Update server startup commands
+
+Remove `--max-tail-concurrency` and `--max-tail-timeout-ms` from commands that start a foreground server. The 2.0 server sets those limits itself. Keep `--max-body-bytes` if you need a custom request size.
+
+For an installed server, run the new executable's `plasmite --dir DIR serve install` for its existing pool directory. The update reads the saved settings and rewrites the startup command without the retired flags.
+
 ## Upgrade HTTP clients and servers together
 
 A 2.0 server answers 1.x routes with an error that names the required protocol version, and a 2.0 client reports a 1.x server the same way.

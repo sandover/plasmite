@@ -69,8 +69,6 @@ fn load(pool_dir: &Path) -> Result<Option<Setup>, Error> {
             .and_then(|value| value.parse::<SocketAddr>().ok())
             .is_none()
         || setup.run.max_body_bytes.is_none()
-        || setup.run.max_tail_timeout_ms.is_none()
-        || setup.run.max_tail_concurrency.is_none()
     {
         return Err(Error::new(ErrorKind::Corrupt)
             .with_message("service setup is incomplete")
@@ -1225,6 +1223,31 @@ mod tests {
             home: "/home/alice".into(),
             run: effective_args(&ServeRunArgs::default()).unwrap(),
         }
+    }
+
+    #[test]
+    fn recognizes_an_old_service_and_drops_its_read_flags_on_update() {
+        let mut saved = serde_json::to_value(setup()).unwrap();
+        saved["run"]["max_tail_timeout_ms"] = serde_json::json!(1500);
+        saved["run"]["max_tail_concurrency"] = serde_json::json!(8);
+        saved["run"]["udp_follow"] = serde_json::json!(true);
+        saved["run"]["udp"] = serde_json::json!("127.0.0.1:9701");
+        let previous: Setup = serde_json::from_value(saved.clone()).unwrap();
+        let updated = Setup {
+            run: merge(Some(&previous), &ServeRunArgs::default(), false, false).unwrap(),
+            ..previous.clone()
+        };
+        for macos in [false, true] {
+            let installed = definition(&previous, macos);
+            assert!(installed.contains("--max-tail-timeout-ms") && installed.contains("1500"));
+            assert!(installed.contains("--max-tail-concurrency"));
+            verify_job_definition(&updated, &[&previous], Some(&installed), true, macos).unwrap();
+            assert!(!definition(&updated, macos).contains("--max-tail-"));
+        }
+        let run = saved["run"].as_object_mut().unwrap();
+        run.remove("max_tail_timeout_ms");
+        run.remove("max_tail_concurrency");
+        assert_eq!(serde_json::to_value(updated).unwrap(), saved);
     }
 
     #[test]

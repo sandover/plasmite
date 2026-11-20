@@ -7,7 +7,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{Semaphore, watch};
 
-type Sources = Arc<Mutex<HashMap<String, watch::Sender<()>>>>;
+struct Source {
+    pool: Arc<Pool>,
+    wake: watch::Sender<()>,
+}
+
+type Sources = Arc<Mutex<HashMap<String, Source>>>;
 
 #[derive(Clone)]
 pub(crate) struct PoolWaiters {
@@ -41,13 +46,27 @@ impl PoolChange {
 
 impl PoolWaiters {
     pub(crate) fn subscribe(&self, pool: &Pool) -> Result<PoolChange, Error> {
+        self.register(pool, || Pool::open(pool.path()).map(Arc::new))
+            .map(|(_, changes)| changes)
+    }
+
+    pub(crate) fn subscribe_owned(&self, pool: Pool) -> Result<(Arc<Pool>, PoolChange), Error> {
+        let pool = Arc::new(pool);
+        self.register(&pool, || Ok(pool.clone()))
+    }
+
+    fn register(
+        &self,
+        pool: &Pool,
+        open: impl FnOnce() -> Result<Arc<Pool>, Error>,
+    ) -> Result<(Arc<Pool>, PoolChange), Error> {
         let identity = pool.incarnation()?;
         let mut sources = self.sources.lock().expect("pool wait sources");
         if let Some(source) = sources.get(&identity) {
-            return Ok(PoolChange(source.subscribe()));
+            return Ok((source.pool.clone(), PoolChange(source.wake.subscribe())));
         }
 
-        let observer = Pool::open(pool.path())?;
+        let observer = open()?;
         if observer.incarnation()? != identity {
             return Err(Error::new(ErrorKind::NotFound).with_message("pool was replaced"));
         }
@@ -55,6 +74,7 @@ impl PoolWaiters {
         // between these operations still shows up at the next recovery check.
         let newest = observer.bounds()?.newest_seq;
         let notify = open_for_pool(&observer);
+        let worker_pool = observer.clone();
         let (source, receiver) = watch::channel(());
         let worker_source = source.clone();
         let registry = self.sources.clone();
@@ -82,9 +102,9 @@ impl PoolWaiters {
                             std::thread::sleep(Duration::from_millis(50));
                         }
                     }
-                    let next = observer
+                    let next = worker_pool
                         .check_current_path()
-                        .and_then(|()| observer.bounds());
+                        .and_then(|()| worker_pool.bounds());
                     let bounds = match next {
                         Ok(bounds) => bounds,
                         Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -111,8 +131,14 @@ impl PoolWaiters {
                     .with_message("could not start a pool waiter")
                     .with_source(err)
             })?;
-        sources.insert(identity, source);
-        Ok(PoolChange(receiver))
+        sources.insert(
+            identity,
+            Source {
+                pool: observer.clone(),
+                wake: source,
+            },
+        );
+        Ok((observer, PoolChange(receiver)))
     }
 
     // Live turns wait for a worker without taking a short-request permit.

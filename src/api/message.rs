@@ -487,7 +487,7 @@ impl HostedRead {
         self.turn_selected(remaining, |frame, tags| frame_json(&frame, Some(tags)))
     }
 
-    fn turn_selected<T>(
+    pub(crate) fn turn_selected<T>(
         &mut self,
         remaining: &mut usize,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,

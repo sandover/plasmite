@@ -316,15 +316,16 @@ fn duplex_since_reads_same_local_and_remote_history() {
     }
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn remote_finite_reads_continue_after_server_shortens_streams() {
     for cap in ["20", "1"] {
         let temp = tempfile::tempdir().expect("tempdir");
         seed(temp.path(), 5, 0);
-        let server = ServeProcess::start_with_args_and_scheme(
+        let server = ServeProcess::start_with_read_limits(
             temp.path(),
-            &["--max-tail-timeout-ms", cap],
             "http",
+            &[("PLASMITE_TEST_READ_TIMEOUT_MS", cap)],
         );
         let target = format!("{}/history", server.base_url);
         let output = history(temp.path(), &target, &["--format", "json"]);

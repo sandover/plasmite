@@ -1,9 +1,7 @@
 //! Shared service settings and platform-specific server lifecycle backends.
 
 use crate::cli::args::ServeRunArgs;
-use crate::cli::support::{
-    DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TAIL_CONCURRENCY, DEFAULT_MAX_TAIL_TIMEOUT_MS,
-};
+use crate::cli::support::DEFAULT_MAX_BODY_BYTES;
 use plasmite::api::{Error, ErrorKind};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -136,20 +134,10 @@ pub(crate) fn effective_args(run: &ServeRunArgs) -> Result<ServeRunArgs, Error> 
         return Err(usage("local and remote listeners need different addresses"));
     }
     run.max_body_bytes.get_or_insert(DEFAULT_MAX_BODY_BYTES);
-    run.max_tail_timeout_ms
-        .get_or_insert(DEFAULT_MAX_TAIL_TIMEOUT_MS);
-    run.max_tail_concurrency
-        .get_or_insert(DEFAULT_MAX_TAIL_CONCURRENCY);
     if run.max_body_bytes == Some(0) || run.max_body_bytes.unwrap() > usize::MAX as u64 {
         return Err(usage(
             "--max-body-bytes must fit in memory and be greater than zero",
         ));
-    }
-    if run.max_tail_timeout_ms == Some(0) {
-        return Err(usage("--max-tail-timeout-ms must be greater than zero"));
-    }
-    if run.max_tail_concurrency == Some(0) {
-        return Err(usage("--max-tail-concurrency must be greater than zero"));
     }
     if run.tls_cert.is_some() != run.tls_key.is_some() {
         return Err(usage("--tls-cert and --tls-key must be supplied together"));
@@ -206,9 +194,7 @@ pub(super) fn merge(
         front_cert,
         tls_cert,
         tls_key,
-        max_body_bytes,
-        max_tail_timeout_ms,
-        max_tail_concurrency
+        max_body_bytes
     );
     if no_udp {
         run.udp = None;
@@ -217,6 +203,8 @@ pub(super) fn merge(
     if no_udp_follow {
         run.udp_follow = Some(false);
     }
+    run.legacy_tail_timeout_ms = None;
+    run.legacy_tail_concurrency = None;
     effective_args(&run)
 }
 
@@ -262,8 +250,8 @@ impl Setup {
             argv.push("--udp-follow".into());
         }
         arg!("--max-body-bytes", self.run.max_body_bytes);
-        arg!("--max-tail-timeout-ms", self.run.max_tail_timeout_ms);
-        arg!("--max-tail-concurrency", self.run.max_tail_concurrency);
+        arg!("--max-tail-timeout-ms", self.run.legacy_tail_timeout_ms);
+        arg!("--max-tail-concurrency", self.run.legacy_tail_concurrency);
         for (flag, path) in [
             ("--tls-cert", &self.run.tls_cert),
             ("--tls-key", &self.run.tls_key),

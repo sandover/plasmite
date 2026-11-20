@@ -731,18 +731,18 @@ pub(crate) struct ServeRunArgs {
         help_heading = "Safety"
     )]
     pub(crate) max_body_bytes: Option<u64>,
-    #[arg(
-        long,
-        value_name = "MILLISECONDS",
-        help = "Timeout in milliseconds for opening a read, completing a fetch response, or a stalled follow (must be positive)",
-        help_heading = "Safety"
+    // Match the native job that a previous executable installed. An update
+    // drops these fields before writing the new job and its saved settings.
+    #[arg(skip)]
+    #[serde(
+        rename = "max_tail_timeout_ms",
+        skip_serializing_if = "Option::is_none"
     )]
-    pub(crate) max_tail_timeout_ms: Option<u64>,
-    #[arg(
-        long,
-        value_name = "N",
-        help = "Max concurrent live reads: HTTP follows, MCP follow calls and event streams (default 64)",
-        help_heading = "Safety"
+    pub(crate) legacy_tail_timeout_ms: Option<u64>,
+    #[arg(skip)]
+    #[serde(
+        rename = "max_tail_concurrency",
+        skip_serializing_if = "Option::is_none"
     )]
-    pub(crate) max_tail_concurrency: Option<usize>,
+    pub(crate) legacy_tail_concurrency: Option<usize>,
 }

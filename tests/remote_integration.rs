@@ -1358,13 +1358,14 @@ fn remote_mcp_origin_header_validation() -> TestResult<()> {
     Ok(())
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn http_follow_keeps_the_same_response_open_on_a_quiet_pool() -> TestResult<()> {
     let temp = tempfile::tempdir()?;
-    let server = TestServer::start_with_args_and_scheme(
+    let server = TestServer::start_with_read_limits(
         temp.path(),
-        &["--max-tail-timeout-ms", "500"],
         "http",
+        &[("PLASMITE_TEST_READ_TIMEOUT_MS", "500")],
     );
     let client = server.client()?;
     let pool = client.create_pool(&PoolRef::name("events"), PoolOptions::new(65536))?;
@@ -1382,15 +1383,16 @@ fn http_follow_keeps_the_same_response_open_on_a_quiet_pool() -> TestResult<()> 
     Ok(())
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn real_fetch_continues_after_cutoff_with_its_original_end() -> TestResult<()> {
     use plasmite::api::LocalClient;
 
     let temp = tempfile::tempdir()?;
-    let server = TestServer::start_with_args_and_scheme(
+    let server = TestServer::start_with_read_limits(
         temp.path(),
-        &["--max-tail-timeout-ms", "300"],
         "http",
+        &[("PLASMITE_TEST_READ_TIMEOUT_MS", "300")],
     );
     let mut writer = LocalClient::new().with_pool_dir(temp.path()).create_pool(
         &PoolRef::name("history"),
@@ -1535,18 +1537,17 @@ fn version_one_pool_routes_name_required_upgrade() -> TestResult<()> {
     Ok(())
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn v2_cancels_a_blocked_https_reader() -> TestResult<()> {
     let temp = tempfile::tempdir()?;
-    let server = TestServer::start_with_args_and_scheme(
+    let server = TestServer::start_with_read_limits(
         temp.path(),
-        &[
-            "--max-tail-timeout-ms",
-            "5000",
-            "--max-tail-concurrency",
-            "1",
-        ],
         "https",
+        &[
+            ("PLASMITE_TEST_READ_TIMEOUT_MS", "5000"),
+            ("PLASMITE_TEST_LIVE_READ_LIMIT", "1"),
+        ],
     );
     let client = server.client()?;
     let name = PoolRef::name("quiet");

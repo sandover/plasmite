@@ -32,28 +32,23 @@ fn read_mcp(stdout: &mut BufReader<impl std::io::Read>) -> Value {
 fn serve_rejects_invalid_bind_and_nonpositive_limits() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
-    for option in [
-        "--max-body-bytes",
-        "--max-tail-timeout-ms",
-        "--max-tail-concurrency",
-    ] {
-        let output = cli()
-            .args([
-                "--dir",
-                pool_dir.to_str().expect("pool dir"),
-                "serve",
-                option,
-                "0",
-            ])
-            .output()
-            .expect("serve with invalid limit");
-        assert_eq!(output.status.code(), Some(2), "{option} accepted zero");
-        assert!(output.stdout.is_empty());
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains(option), "{error}");
-        assert!(error.contains("greater than zero"), "{error}");
-    }
-
+    let output = cli()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool dir"),
+            "serve",
+            "--max-body-bytes",
+            "0",
+        ])
+        .output()
+        .expect("serve with invalid limit");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("--max-body-bytes") && error.contains("greater than zero"),
+        "{error}"
+    );
     let output = cli()
         .args([
             "--dir",

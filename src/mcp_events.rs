@@ -193,8 +193,7 @@ fn open_reader(
     max_age_ms: Option<u64>,
     tags: &[String],
 ) -> Result<EventReader, Error> {
-    let pool = Arc::new(pool);
-    let changes = waiters.subscribe(&pool)?;
+    let (pool, changes) = waiters.subscribe_owned(pool)?;
     let identity = pool.incarnation()?;
     let read = |start| make_read(start, tags);
     let (start, mut truncated) = match cursor {

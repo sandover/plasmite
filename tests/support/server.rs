@@ -29,12 +29,17 @@ impl TestServer {
     }
 
     pub fn start_with_args_and_scheme(pool_dir: &Path, extra_args: &[&str], scheme: &str) -> Self {
-        Self::try_start_with_options(pool_dir, extra_args, scheme)
+        Self::try_start_with_options(pool_dir, extra_args, scheme, &[])
+            .unwrap_or_else(|err| panic!("server ready: {err}"))
+    }
+
+    pub fn start_with_read_limits(pool_dir: &Path, scheme: &str, limits: &[(&str, &str)]) -> Self {
+        Self::try_start_with_options(pool_dir, &[], scheme, limits)
             .unwrap_or_else(|err| panic!("server ready: {err}"))
     }
 
     pub fn try_start(pool_dir: &Path) -> TestResult<Self> {
-        Self::try_start_with_options(pool_dir, &[], "https")
+        Self::try_start_with_options(pool_dir, &[], "https", &[])
     }
 
     /// OAuth needs the shared address to name the server's port before it starts, so
@@ -62,6 +67,7 @@ impl TestServer {
             "https",
             &format!("127.0.0.1:{port}"),
             &format!("https://localhost:{port}"),
+            &[],
         )
     }
 
@@ -69,6 +75,7 @@ impl TestServer {
         pool_dir: &Path,
         extra_args: &[&str],
         scheme: &str,
+        limits: &[(&str, &str)],
     ) -> TestResult<Self> {
         Self::try_start_with_addresses(
             pool_dir,
@@ -76,6 +83,7 @@ impl TestServer {
             scheme,
             "127.0.0.1:0",
             "https://localhost:9743",
+            limits,
         )
     }
 
@@ -85,6 +93,7 @@ impl TestServer {
         scheme: &str,
         remote_bind: &str,
         shared_address: &str,
+        limits: &[(&str, &str)],
     ) -> TestResult<Self> {
         let scratch = tempfile::tempdir()?;
         let ready_path = scratch.path().join("address");
@@ -102,6 +111,7 @@ impl TestServer {
             .arg("--shared-address")
             .arg(shared_address)
             .args(extra_args)
+            .envs(limits.iter().copied())
             .env("PLASMITE_SERVE_READY_FILE", &ready_path)
             .env("HOME", &home)
             .env("PLASMITE_ACCESS_HOME", &home)

@@ -87,8 +87,7 @@ secret. Cookies last ten seconds. The client echoes the selection and cookie.
 Only valid cookies permit pool access or tail admission. Disabled reads return
 Permission only after this proof. Cookies prove reachability, never identity.
 
-Admission uses the configured max-tail-concurrency (default 64) separately from
-existing HTTP listener allowances. Preparation occupies one slot and checks a
+The server admits up to 64 UDP subscriptions independently of its HTTP listeners. Preparation occupies one slot and checks a
 five-second deadline. Duplicate creation requests with identical selection
 share preparation or receive existing progress; they never restart a cursor.
 Conflicting selection returns Usage. Verified capacity failure returns Busy.

@@ -119,8 +119,6 @@ pub(crate) fn parse_remote_pool_target(input: &str) -> Result<PoolTarget, Error>
 
 pub(crate) const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_MAX_BODY_BYTES: u64 = 1024 * 1024;
-pub(crate) const DEFAULT_MAX_TAIL_TIMEOUT_MS: u64 = 30_000;
-pub(crate) const DEFAULT_MAX_TAIL_CONCURRENCY: usize = 64;
 
 pub(crate) fn add_missing_pool_hint(err: Error, input: &str) -> Error {
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {

@@ -47,7 +47,7 @@ async function main() {
     const port = held.address().port; await new Promise(resolve => held.close(resolve));
     const ready = path.join(dir,'ready'), home = path.join(dir,'home'); fs.mkdirSync(home);
     const binary = process.env.PLASMITE_BIN || path.resolve(__dirname,'../../../target/debug/plasmite');
-    server = spawn(binary,['--dir',dir,'serve','--bind','127.0.0.1:0','--remote-bind','127.0.0.1:0',`--udp=127.0.0.1:${port}`,'--udp-follow','--max-tail-concurrency=512'],{env:{...process.env,HOME:home,PLASMITE_ACCESS_HOME:home,PLASMITE_SERVE_READY_FILE:ready},stdio:['ignore','ignore','pipe']});
+    server = spawn(binary,['--dir',dir,'serve','--bind','127.0.0.1:0','--remote-bind','127.0.0.1:0',`--udp=127.0.0.1:${port}`,'--udp-follow'],{env:{...process.env,HOME:home,PLASMITE_ACCESS_HOME:home,PLASMITE_SERVE_READY_FILE:ready},stdio:['ignore','ignore','pipe']});
     let stderr=''; server.stderr.on('data',chunk=>{stderr+=chunk;});
     const deadline=Date.now()+10000;
     while (!fs.existsSync(ready)) { if (server.exitCode!==null || Date.now()>deadline) throw new Error(stderr || 'server not ready'); await sleep(10); }

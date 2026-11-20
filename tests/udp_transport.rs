@@ -66,8 +66,7 @@ impl Server {
                 "127.0.0.1:0",
             ])
             .arg(format!("--udp={udp_bind}"))
-            .arg("--max-tail-concurrency")
-            .arg(capacity.to_string())
+            .env("PLASMITE_TEST_UDP_SUBSCRIPTION_LIMIT", capacity.to_string())
             .stdout(Stdio::null())
             .stderr(fs::File::create(&log)?);
         if follow {

@@ -13,8 +13,8 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use crate::api::{
-    DEFAULT_POOL_SIZE, Error, ErrorKind, Feed, LocalClient, Message, Pool, PoolInfo, PoolOptions,
-    PoolRef, Read, ReadStatus, Since,
+    DEFAULT_POOL_SIZE, Error, ErrorKind, Feed, HostedRead, LocalClient, Message, Pool, PoolInfo,
+    PoolOptions, PoolRef, Read, ReadStatus, Since,
 };
 use crate::interface_wire::{ErrorKindWire, MessageWire, error_policy};
 #[cfg(test)]
@@ -652,16 +652,7 @@ impl<H: McpHandler> McpDispatcher<H> {
             "resources/templates/list" => json!({"resourceTemplates": []}),
             _ => self.route_method(&request.method, params)?,
         };
-        result["resultType"] = json!("complete");
-        if cacheable {
-            // Pool contents and permissions can change between requests.
-            result["ttlMs"] = json!(0);
-            result["cacheScope"] = json!("private");
-        }
-        result["_meta"][SERVER_INFO_KEY] = json!({
-            "name": self.metadata.name,
-            "version": self.metadata.version,
-        });
+        add_modern_result_fields(&mut result, &self.metadata, cacheable);
         Ok(result)
     }
 
@@ -687,6 +678,19 @@ impl<H: McpHandler> McpDispatcher<H> {
             ))),
         }
     }
+}
+
+fn add_modern_result_fields(result: &mut Value, metadata: &ServerMetadata, cacheable: bool) {
+    result["resultType"] = json!("complete");
+    if cacheable {
+        // Pool contents and permissions can change between requests.
+        result["ttlMs"] = json!(0);
+        result["cacheScope"] = json!("private");
+    }
+    result["_meta"][SERVER_INFO_KEY] = json!({
+        "name": metadata.name,
+        "version": metadata.version,
+    });
 }
 
 pub fn parse_modern_request(value: Value) -> Result<(JsonRpcId, Map<String, Value>), JsonRpcError> {
@@ -931,52 +935,9 @@ impl PlasmiteMcpHandler {
     }
 
     fn tool_read(&self, args: &Map<String, Value>, live: bool) -> ToolCallResult {
-        let (tool, fields): (&str, &[&str]) = if live {
-            (
-                "plasmite_follow",
-                &["pool", "since", "last", "tags", "count", "timeout_ms"],
-            )
-        } else {
-            (
-                "plasmite_fetch",
-                &["pool", "since", "last", "tags", "count"],
-            )
-        };
-        if let Some(result) = reject_unknown_args(tool, args, fields) {
-            return result;
-        }
-        let pool = match required_string_arg(args, "pool") {
-            Ok(name) => name,
-            Err(detail) => return invalid_argument_result(tool, "pool", detail),
-        };
-        let count = match optional_usize_arg(args, "count") {
-            Ok(None) => DEFAULT_READ_COUNT,
-            Ok(Some(count)) if (1..=MAX_READ_COUNT).contains(&count) => count,
-            Ok(Some(_)) => {
-                return invalid_argument_result(
-                    tool,
-                    "count",
-                    format!("must be between 1 and {MAX_READ_COUNT}"),
-                );
-            }
-            Err(detail) => return invalid_argument_result(tool, "count", detail),
-        };
-        let wait_ms = match optional_u64_arg(args, "timeout_ms") {
-            Ok(None) if live => DEFAULT_WAIT_TIMEOUT_MS,
-            Ok(None) => 0,
-            Ok(Some(value)) if value <= MAX_WAIT_TIMEOUT_MS => value,
-            Ok(Some(_)) => {
-                return invalid_argument_result(
-                    tool,
-                    "timeout_ms",
-                    format!("must be at most {MAX_WAIT_TIMEOUT_MS}"),
-                );
-            }
-            Err(detail) => return invalid_argument_result(tool, "timeout_ms", detail),
-        };
-        let mut options = match read_selection(args) {
-            Ok(options) => options,
-            Err((field, detail)) => return invalid_argument_result(tool, field, detail),
+        let (tool, pool, mut options, count, wait) = match read_arguments(args, live) {
+            Ok(selection) => selection,
+            Err(error) => return error,
         };
         if let Some(cancel) = &self.cancel {
             options = options.cancel(cancel.clone());
@@ -988,19 +949,212 @@ impl PlasmiteMcpHandler {
                 return api_error_tool_result(tool, with_missing_pool_hint(err, &pool, false));
             }
         };
-        match read_batch(
-            &opened,
-            options,
-            live,
-            count,
-            Duration::from_millis(wait_ms),
-        ) {
-            Ok(payload) => ToolCallResult::success_with_structured(
-                format!("Read {} message(s) from `{pool}`.", payload.messages.len()),
-                payload.into_json(),
-            ),
+        match read_batch(&opened, options, live, count, wait) {
+            Ok(payload) => payload.tool_result(&pool),
             Err(error) => api_error_tool_result(tool, error),
         }
+    }
+}
+
+fn read_arguments(
+    args: &Map<String, Value>,
+    live: bool,
+) -> Result<(&'static str, String, Read, usize, Duration), ToolCallResult> {
+    let (tool, fields): (&str, &[&str]) = if live {
+        (
+            "plasmite_follow",
+            &["pool", "since", "last", "tags", "count", "timeout_ms"],
+        )
+    } else {
+        (
+            "plasmite_fetch",
+            &["pool", "since", "last", "tags", "count"],
+        )
+    };
+    if let Some(result) = reject_unknown_args(tool, args, fields) {
+        return Err(result);
+    }
+    let pool = match required_string_arg(args, "pool") {
+        Ok(name) => name,
+        Err(detail) => return Err(invalid_argument_result(tool, "pool", detail)),
+    };
+    let count = match optional_usize_arg(args, "count") {
+        Ok(None) => DEFAULT_READ_COUNT,
+        Ok(Some(count)) if (1..=MAX_READ_COUNT).contains(&count) => count,
+        Ok(Some(_)) => {
+            return Err(invalid_argument_result(
+                tool,
+                "count",
+                format!("must be between 1 and {MAX_READ_COUNT}"),
+            ));
+        }
+        Err(detail) => return Err(invalid_argument_result(tool, "count", detail)),
+    };
+    let wait_ms = match optional_u64_arg(args, "timeout_ms") {
+        Ok(None) if live => DEFAULT_WAIT_TIMEOUT_MS,
+        Ok(None) => 0,
+        Ok(Some(value)) if value <= MAX_WAIT_TIMEOUT_MS => value,
+        Ok(Some(_)) => {
+            return Err(invalid_argument_result(
+                tool,
+                "timeout_ms",
+                format!("must be at most {MAX_WAIT_TIMEOUT_MS}"),
+            ));
+        }
+        Err(detail) => return Err(invalid_argument_result(tool, "timeout_ms", detail)),
+    };
+    let options = match read_selection(args) {
+        Ok(options) => options,
+        Err((field, detail)) => return Err(invalid_argument_result(tool, field, detail)),
+    };
+    Ok((tool, pool, options, count, Duration::from_millis(wait_ms)))
+}
+
+/// Validate hosted follow calls with the same parsers the dispatcher uses.
+#[doc(hidden)]
+pub struct HostedFollowRequest {
+    id: JsonRpcId,
+    request: ToolCallRequest,
+}
+
+impl HostedFollowRequest {
+    pub fn parse(value: &Value, modern: bool) -> Option<Self> {
+        if value["method"] != "tools/call" || value["params"]["name"] != "plasmite_follow" {
+            return None;
+        }
+        let request = parse_jsonrpc_request(value.clone()).ok()?;
+        let id = request.id.filter(|id| *id != JsonRpcId::Null)?;
+        let params = if modern {
+            modern_params(request.params.as_ref()).ok()?
+        } else {
+            request.params.as_ref()?.as_object()?
+        };
+        let request = parse_tool_call_params(params).ok()?;
+        Some(Self { id, request })
+    }
+
+    pub fn selection(&self) -> Result<HostedFollowSelection, ToolCallResult> {
+        let (_, name, options, count, wait) = read_arguments(&self.request.arguments, true)?;
+        Ok(HostedFollowSelection {
+            name,
+            options,
+            count,
+            wait,
+        })
+    }
+
+    pub fn response(self, result: ToolCallResult, modern: bool) -> Value {
+        let mut result = serde_json::to_value(result).expect("tool result is serializable");
+        if modern {
+            add_modern_result_fields(&mut result, &ServerMetadata::default(), false);
+        }
+        serde_json::to_value(JsonRpcResponse::success(self.id, result))
+            .expect("MCP response is serializable")
+    }
+}
+
+#[doc(hidden)]
+pub struct HostedFollowSelection {
+    name: String,
+    options: Read,
+    count: usize,
+    wait: Duration,
+}
+
+impl HostedFollowSelection {
+    pub fn wait(&self) -> Duration {
+        self.wait
+    }
+
+    pub fn open_pool(&self, client: &LocalClient) -> Result<Pool, Error> {
+        client
+            .open_pool(&PoolRef::name(&self.name), false)
+            .map_err(|error| with_missing_pool_hint(error, &self.name, false))
+    }
+
+    pub fn open(self, pool: Arc<Pool>) -> Result<HostedFollow, Error> {
+        let reader = HostedRead::new(pool, self.options)?;
+        let next_seq = reader.position();
+        Ok(HostedFollow {
+            reader,
+            name: self.name,
+            count: self.count,
+            examined: 0,
+            batch: ReadBatch {
+                messages: Vec::new(),
+                next_seq,
+                ended: "limit",
+            },
+        })
+    }
+}
+
+#[doc(hidden)]
+pub struct HostedFollow {
+    reader: HostedRead,
+    name: String,
+    count: usize,
+    examined: usize,
+    batch: ReadBatch,
+}
+
+#[doc(hidden)]
+pub enum FollowTurn {
+    Waiting,
+    More,
+    Done,
+}
+
+impl HostedFollow {
+    pub fn turn(&mut self) -> Result<FollowTurn, Error> {
+        let budget = (MAX_EXAMINED_COUNT - self.examined).min(32);
+        let mut remaining = budget;
+        while remaining != 0 {
+            let status = self.reader.turn_selected(&mut remaining, |frame, tags| {
+                // A skipped record still counts against the scan limit.
+                select_mcp_message(frame, tags).map(Some)
+            });
+            self.batch.next_seq = self.reader.position();
+            match status {
+                Ok(ReadStatus::Message(message)) => self.batch.messages.extend(message),
+                Ok(ReadStatus::Waiting) if remaining == 0 => break,
+                Ok(ReadStatus::Waiting) => {
+                    self.examined += budget - remaining;
+                    return Ok(FollowTurn::Waiting);
+                }
+                Ok(ReadStatus::Complete) => {
+                    self.batch.ended = "complete";
+                    return Ok(FollowTurn::Done);
+                }
+                Ok(ReadStatus::Cancelled) => {
+                    return Err(
+                        Error::new(ErrorKind::Permission).with_message("access key was revoked")
+                    );
+                }
+                Err(error) if !self.batch.messages.is_empty() => {
+                    self.batch.next_seq = error.missing().or(self.batch.next_seq);
+                    return Ok(FollowTurn::Done);
+                }
+                Err(error) => return Err(error),
+            }
+            if self.batch.messages.len() == self.count {
+                return Ok(FollowTurn::Done);
+            }
+        }
+        self.examined += budget;
+        if self.examined == MAX_EXAMINED_COUNT {
+            Ok(FollowTurn::Done)
+        } else {
+            Ok(FollowTurn::More)
+        }
+    }
+
+    pub fn finish(self) -> ToolCallResult {
+        self.batch.tool_result(&self.name)
+    }
+
+    pub fn error(error: Error) -> ToolCallResult {
+        api_error_tool_result("plasmite_follow", error)
     }
 }
 
@@ -1419,6 +1573,21 @@ fn message_json_value(message: crate::api::Message) -> Value {
     .into_json()
 }
 
+fn select_mcp_message(
+    frame: crate::api::FrameRef,
+    tags: &[String],
+) -> Result<Option<Value>, Error> {
+    if crate::api::frame_matches_tags(&frame, tags)? {
+        Ok(Some(message_json_value(Message::from_lite3(
+            frame.seq,
+            frame.time,
+            &frame.payload,
+        )?)))
+    } else {
+        Ok(None)
+    }
+}
+
 struct ReadBatch {
     messages: Vec<Value>,
     next_seq: Option<u64>,
@@ -1426,6 +1595,13 @@ struct ReadBatch {
 }
 
 impl ReadBatch {
+    fn tool_result(self, pool: &str) -> ToolCallResult {
+        ToolCallResult::success_with_structured(
+            format!("Read {} message(s) from `{pool}`.", self.messages.len()),
+            self.into_json(),
+        )
+    }
+
     fn into_json(self) -> Value {
         json!({"messages": self.messages, "next_seq": self.next_seq, "ended": self.ended})
     }
@@ -1446,17 +1622,8 @@ fn read_batch(
     let (_, upper) = reader.position();
     collect_batch(count, wait, upper, |remaining| {
         let result = reader.poll_selected(remaining, |frame, tags| {
-            let message = if crate::api::frame_matches_tags(&frame, tags)? {
-                Some(message_json_value(Message::from_lite3(
-                    frame.seq,
-                    frame.time,
-                    &frame.payload,
-                )?))
-            } else {
-                None
-            };
             // Even a filtered record counts against the per-call scan limit.
-            Ok(Some(message))
+            select_mcp_message(frame, tags).map(Some)
         });
         (result, reader.position().0)
     })

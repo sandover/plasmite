@@ -274,13 +274,11 @@ impl ReadWorker {
         let registry = waiters.clone();
         let (incarnation, initial) = waiters
             .read(move || {
-                let pool = Arc::new(client.open_pool(&pool_ref, false)?);
+                let pool = client.open_pool(&pool_ref, false)?;
                 let incarnation = pool.incarnation()?;
-                let initial = match HostedRead::new(pool.clone(), options) {
-                    Ok(reader) => {
-                        let changes = registry.subscribe(&pool)?;
-                        Ok((reader, changes))
-                    }
+                let (pool, changes) = registry.subscribe_owned(pool)?;
+                let initial = match HostedRead::new(pool, options) {
+                    Ok(reader) => Ok((reader, changes)),
                     Err(error) if error.kind() == ErrorKind::RetentionGap => Err(error),
                     Err(error) => return Err(error),
                 };
