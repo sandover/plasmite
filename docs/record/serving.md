@@ -163,7 +163,7 @@ The HTTPS listener holds at most 128 connections, and these limits apply before 
 - It closes a TLS handshake that takes longer than 5 seconds, waits at most 10 seconds for HTTP/1 headers, and times out a request body after 30 seconds without data.
 - It pings HTTP/2 clients every 15 seconds and closes a connection that fails to answer within 10 seconds. Idle HTTP/2 connections that answer stay open and count toward the limit, so requests above it must retry.
 - It ends an HTTP follow whose output queue stays full for 30 seconds. `--max-tail-timeout-ms` changes that duration; the same setting limits how long a read takes to open and how long one fetch response may run.
-- OAuth registration and authorization pages allow 30 requests per minute from each TCP source address. One client can hold 8 pending approvals and one source address 32. A reverse proxy shares one source address among its clients.
+- The OAuth authorization page allows 30 requests per minute per TCP source address. Each source can hold 32 pending approvals, with up to 8 for the same client. A reverse proxy shares one source address among its clients.
 
 Put an Internet-facing server behind a proxy or firewall that also limits connection rates.
 
@@ -302,30 +302,9 @@ An installed server keeps its UDP settings through restarts and updates. Enable 
 
 ## Connect an AI client
 
-`plasmite serve` exposes MCP at its HTTPS `/mcp` address automatically. Clients on the server machine or another machine can connect there. Both the AI client and the browser it uses for login must trust the server certificate, so first [deploy a trusted certificate](#use-a-trusted-certificate). For direct access to local pool files, configure the client to launch `plasmite mcp` over stdin and stdout. See the [cookbook](../cookbook.md#give-an-ai-agent-your-pools).
+A shared server exposes MCP at its HTTPS `/mcp` endpoint. [Deploy a certificate](#use-a-trusted-certificate) that both the client and browser trust. Give the recipient the endpoint URL and a [named access key](#share-your-first-pool), then send them to the [agent setup guide](../agents.md#connect-an-agent).
 
-Both connection paths require MCP `2026-07-28`. Clients that only use the older initialization handshake cannot connect. Check [the client settings](../agents.md#connect-an-agent) before connecting. A pool update does not start a new agent turn.
-
-For Claude Code:
-
-```console
-claude mcp add --scope user --transport http pools https://pools.example.net:9743/mcp
-claude mcp login pools
-```
-
-For Codex CLI:
-
-```console
-codex mcp add pools --url https://pools.example.net:9743/mcp --oauth-resource https://pools.example.net:9743/mcp
-```
-
-The client opens an authorization page that shows the client, the requested `/mcp` address and the callback. Check those details, enter the Plasmite access key, and choose **Authorize**. Ask the client to list pools and read `chat` to confirm access. Changing the server's address requires fresh authorization. To sign in again for an existing Codex entry, run `codex mcp login pools`. Claude Code also offers login through `/mcp` in an interactive session.
-
-Browser sign-in requires [Client ID Metadata Documents (CIMD)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration). No separate client registration is needed. The approval page shows the hostname that supplied the metadata. Plasmite fetches metadata only from public HTTPS hosts on port 443 with normal certificate verification. It does not follow redirects, use an outbound proxy, or load remote images on the approval page. Client metadata cannot grant access by itself. A client that advertises renewal can refresh its credentials while the callback stays registered and the access key remains active. Revoking the access key stops its existing OAuth tokens.
-
-If your client previously used Dynamic Client Registration (DCR), sign in again with a current CIMD-capable client. Previously issued access tokens keep their original expiration, but cannot renew under the old client ID. You do not need a new Plasmite access key.
-
-[Codex's client code](https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth_client_registration.rs) and [Claude Code's documentation](https://code.claude.com/docs/en/mcp#use-pre-configured-oauth-credentials) describe automatic CIMD support. Plasmite's CIMD tests use a fictional client, not a live login from either host.
+The approval page shows the client metadata hostname and the callback. Plasmite fetches client metadata directly from public HTTPS hosts on port 443 and checks the certificate. It follows no redirects and loads no remote images on the approval page. Clients that support credential renewal can refresh while the callback stays registered and the access key stays active. Changing the server address requires fresh approval. Revoking the access key also ends its MCP grants.
 
 ## Troubleshoot a connection
 

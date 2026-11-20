@@ -293,6 +293,7 @@ fn emit_status(
         }
         if let Some(commands) = setup {
             super::output::write_stdout(b"\nAdd Plasmite to your MCP client:\n")?;
+            super::output::write_stdout(b"Setup guide: https://github.com/sandover/plasmite/blob/main/docs/agents.md#connect-an-agent\n")?;
             super::output::write_stdout(
                 format!("Claude Code: {}\n", human_literal(&commands[0])).as_bytes(),
             )?;
@@ -417,7 +418,7 @@ fn setup_commands(destination: &str) -> [String; 2] {
     let endpoint = shell_quote(&endpoint);
     [
         format!("claude mcp add --scope user --transport http plasmite {endpoint}"),
-        format!("codex mcp add plasmite --url {endpoint} --oauth-resource {endpoint}"),
+        format!("codex mcp add plasmite --url {endpoint}"),
     ]
 }
 
@@ -567,7 +568,7 @@ mod tests {
             commands,
             [
                 format!("claude mcp add --scope user --transport http plasmite {endpoint}"),
-                format!("codex mcp add plasmite --url {endpoint} --oauth-resource {endpoint}"),
+                format!("codex mcp add plasmite --url {endpoint}"),
             ]
         );
         assert!(

@@ -18,10 +18,10 @@ IVQ245_PORT=38045 uv run --python 3.12 --with mcp==2.3.0 python client.py
 
 The server binds only to loopback. Restart it before repeating the fixture. The test prints the received resource update, the result of the catch-up read, and whether the new stream replayed an event.
 
-## Host evidence and recommendation
+## Host evidence and decision
 
 **Codex CLI 0.172.0-alpha.2:** the normal app-server could not open its state database in the read-only home. An isolated scratch home let it initialize, but its ephemeral thread hit the sandbox socket-directory check. `codex exec --ephemeral` also stopped at initialization with a read-only filesystem error. Neither attempt reached the MCP fixture. [Exact-version source](https://github.com/openai/codex/blob/rust-v0.172.0-alpha.2/codex-rs/rmcp-client/src/tool_list_changes.rs) shows a tool-list tracker; it does not prove an agent wake-up.
 
 **Claude Code:** no authenticated client was available for either the Haiku Monitor or resource-subscription test. [Claude Code’s MCP docs](https://code.claude.com/docs/en/mcp#mcp-client-runtimes) distinguish list refresh from the separate legacy-only Channels path; neither establishes that a standard resource update starts a turn.
 
-**Decision:** Wait for standard MCP support in a target host that demonstrably starts an idle agent turn on a notification. Do not build subscriptions just for agent wake-up or use a host-specific workaround or bridge. The SDK fixture verifies notification delivery to custom code, not a host starting an agent turn. The tagged CLI follow and saved sequence remain useful for programs that are already running.
+Plasmite will revisit agent wake-up when standard MCP resource notifications can start an idle turn in a target client. For now, agents read pool messages during a turn and use saved sequence numbers to catch up after a restart.

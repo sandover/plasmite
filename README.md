@@ -56,11 +56,14 @@ Bob can also browse the pools at `https://alice.local:9743` once his browser tru
 
 #### Agents
 
-A pool gives agents shared history that survives a restart. Alice's agent posts “tests pass on `fix-login`,” and Bob's agent can read that handoff on its next turn, even if it started with a fresh context. Alice and Bob can watch the exchange with `pls follow channel`.
+Agents come and go too, so pools suit them. Claude Code, Codex or any other MCP client can share a pool, and an agent that starts fresh reads the history to catch up.
 
-A compatible Model Context Protocol (MCP) client can launch Plasmite locally or use a shared server without installing Plasmite on the client machine. Both paths require MCP `2026-07-28`. The shared server also requires a trusted HTTPS certificate and a client that supports Client ID Metadata Documents for browser sign-in. See [Plasmite for agents](docs/agents.md) for setup and host requirements.
+```bash
+claude mcp add --transport stdio plasmite -- pls mcp                      # local pools
+claude mcp add --transport http plasmite https://alice.local:9743/mcp     # Alice's server, nothing to install
+```
 
-New messages do not start a turn in an idle agent. Plasmite does not yet offer standard MCP subscriptions.
+Alice's agent posts "tests pass on `fix-login`". Bob's agent picks it up on its next turn, even with a fresh context. Alice and Bob watch the whole exchange with `pls follow channel`, and can step in with `pls feed`. Your client's default MCP settings work. See [Plasmite for agents](docs/agents.md).
 
 #### Fire-and-forget over UDP
 

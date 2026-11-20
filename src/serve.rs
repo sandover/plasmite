@@ -67,10 +67,10 @@ use plasmite::api::{
     Durability, Error, ErrorKind, Feed, LocalClient, Pool, PoolInfo, PoolOptions, PoolRef,
 };
 use plasmite::mcp::{
-    DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION, McpDispatcher,
-    McpHandler, McpResource, McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest,
-    ResourceReadResult, ToolCallRequest, ToolCallResult, obsolete_lifecycle_error,
-    request_protocol_version,
+    DispatchOutcome, JsonRpcError as McpJsonRpcError, LEGACY_MCP_PROTOCOL_VERSION,
+    MCP_PROTOCOL_VERSION, McpDispatcher, McpHandler, McpResource, McpTool, McpToolAccess,
+    PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest, ToolCallResult,
+    request_protocol_version, uses_modern_mcp,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -1327,10 +1327,11 @@ async fn mcp_post(
             "JSON-RPC responses are not accepted",
         );
     }
-    if let Err(response) = validate_mcp_request_headers(&headers, &payload) {
-        return response;
-    }
-    if payload.get("id").is_none() {
+    let modern = match validate_mcp_request_headers(&headers, &payload) {
+        Ok(modern) => modern,
+        Err(response) => return response,
+    };
+    if modern && payload.get("id").is_none() {
         return mcp_request_error(
             &payload,
             StatusCode::BAD_REQUEST,
@@ -1364,7 +1365,7 @@ async fn mcp_post(
         )
         .with_grant(grant);
         let mut dispatcher = McpDispatcher::new(handler);
-        dispatcher.dispatch_value(payload)
+        dispatcher.dispatch_value_with_legacy(payload, !modern)
     })
     .await;
     let outcome = match dispatch {
@@ -1379,17 +1380,18 @@ async fn mcp_post(
     };
 
     match outcome {
-        DispatchOutcome::NoResponse => mcp_request_error(
-            &Value::Null,
-            StatusCode::BAD_REQUEST,
-            -32600,
-            "HTTP MCP only accepts requests",
-        ),
+        DispatchOutcome::NoResponse => {
+            let mut response = StatusCode::ACCEPTED.into_response();
+            response
+                .headers_mut()
+                .insert("plasmite-version", HeaderValue::from_static("0"));
+            response
+        }
         DispatchOutcome::Response(response) => {
             let status = match response.error.as_ref().map(|error| error.code) {
-                Some(-32601) => StatusCode::NOT_FOUND,
+                Some(-32601) if modern => StatusCode::NOT_FOUND,
                 Some(-32022..=-32020) => StatusCode::BAD_REQUEST,
-                Some(-32602 | -32600) => StatusCode::BAD_REQUEST,
+                Some(-32602 | -32600) if modern => StatusCode::BAD_REQUEST,
                 _ => StatusCode::OK,
             };
             let payload = match serde_json::to_value(response) {
@@ -1478,11 +1480,7 @@ impl McpHandler for ServeMcpHandler {
         } else {
             None
         };
-        let is_write = self
-            .inner
-            .list_tools()?
-            .iter()
-            .any(|tool| tool.name == request.name && tool.access == McpToolAccess::Write);
+        let is_write = PlasmiteMcpHandler::tool_access(&request.name) == Some(McpToolAccess::Write);
         let result = self.inner.call_tool(request);
         if !is_write && self.revoked() {
             Ok(mcp_revoked_tool_result())
@@ -1537,17 +1535,29 @@ fn mcp_wait_busy_tool_result() -> ToolCallResult {
     )
 }
 
-fn validate_mcp_request_headers(headers: &HeaderMap, payload: &Value) -> Result<(), Response> {
+fn validate_mcp_request_headers(headers: &HeaderMap, payload: &Value) -> Result<bool, Response> {
     let method = payload.get("method").and_then(Value::as_str);
-    if matches!(method, Some("initialize" | "notifications/initialized")) {
-        return Err(mcp_protocol_error(
-            payload,
-            StatusCode::BAD_REQUEST,
-            obsolete_lifecycle_error(),
-        ));
-    }
     let header_version = single_mcp_header(headers, "MCP-Protocol-Version")
         .map_err(|_| mcp_header_mismatch(payload, "invalid MCP-Protocol-Version header"))?;
+    let modern = header_version == Some(MCP_PROTOCOL_VERSION)
+        || headers.contains_key("Mcp-Method")
+        || headers.contains_key("Mcp-Name")
+        || method.is_some_and(|method| uses_modern_mcp(method, payload.get("params")));
+    if !modern {
+        return match header_version {
+            Some(LEGACY_MCP_PROTOCOL_VERSION) => Ok(false),
+            None if matches!(method, Some("initialize" | "notifications/initialized")) => Ok(false),
+            Some(version) => Err(mcp_protocol_error(
+                payload,
+                StatusCode::BAD_REQUEST,
+                McpJsonRpcError::unsupported_version(version),
+            )),
+            None => Err(mcp_header_mismatch(
+                payload,
+                "missing MCP-Protocol-Version header",
+            )),
+        };
+    }
     let header_version = header_version
         .ok_or_else(|| mcp_header_mismatch(payload, "missing MCP-Protocol-Version header"))?;
     let Some(body_version) = request_protocol_version(payload) else {
@@ -1600,7 +1610,7 @@ fn validate_mcp_request_headers(headers: &HeaderMap, payload: &Value) -> Result<
             ));
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 fn decode_mcp_header(value: &str) -> Result<std::borrow::Cow<'_, str>, ()> {
@@ -2870,12 +2880,8 @@ mod tests {
             axum::http::StatusCode::BAD_REQUEST
         );
         let initialize = json!({"jsonrpc":"2.0","id":2,"method":"initialize"});
-        assert_eq!(
-            validate_mcp_request_headers(&headers, &initialize)
-                .unwrap_err()
-                .status(),
-            axum::http::StatusCode::BAD_REQUEST
-        );
+        headers.clear();
+        assert!(!validate_mcp_request_headers(&headers, &initialize).unwrap());
     }
 
     fn discovery_payload() -> serde_json::Value {

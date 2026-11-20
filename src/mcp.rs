@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use crate::api::{
@@ -22,7 +22,8 @@ use crate::{api::Durability, since::parse_rfc3339_ns};
 
 const JSON_RPC_VERSION: &str = "2.0";
 pub const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
-const SUPPORTED_PROTOCOL_VERSIONS: [&str; 1] = [MCP_PROTOCOL_VERSION];
+pub const LEGACY_MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+const SUPPORTED_PROTOCOL_VERSIONS: [&str; 2] = [MCP_PROTOCOL_VERSION, LEGACY_MCP_PROTOCOL_VERSION];
 const VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 const CLIENT_CAPABILITIES_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
 const SERVER_INFO_KEY: &str = "io.modelcontextprotocol/serverInfo";
@@ -154,6 +155,18 @@ pub fn request_protocol_version(payload: &Value) -> Option<&str> {
         .get("_meta")?
         .get(VERSION_KEY)?
         .as_str()
+}
+
+pub fn uses_modern_mcp(method: &str, params: Option<&Value>) -> bool {
+    method == "server/discover"
+        || params
+            .and_then(|params| params.get("_meta"))
+            .and_then(Value::as_object)
+            .is_some_and(|meta| {
+                meta.contains_key(VERSION_KEY)
+                    || meta.contains_key(CLIENT_CAPABILITIES_KEY)
+                    || meta.contains_key("io.modelcontextprotocol/clientInfo")
+            })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -510,36 +523,83 @@ impl<H: McpHandler> McpDispatcher<H> {
     }
 
     pub fn dispatch_value(&mut self, value: Value) -> DispatchOutcome {
+        self.dispatch_value_with_legacy(value, false)
+    }
+
+    pub fn dispatch_value_with_legacy(
+        &mut self,
+        value: Value,
+        allow_legacy: bool,
+    ) -> DispatchOutcome {
         match parse_jsonrpc_request(value) {
-            Ok(request) => self.dispatch_request(request),
+            Ok(request) => self.dispatch(request, allow_legacy),
             Err(response) => DispatchOutcome::Response(*response),
         }
     }
 
     pub fn dispatch_request(&mut self, request: JsonRpcRequest) -> DispatchOutcome {
+        self.dispatch(request, false)
+    }
+
+    fn dispatch(&mut self, request: JsonRpcRequest, allow_legacy: bool) -> DispatchOutcome {
         let Some(id) = request.id.clone() else {
             // Notifications never invoke request methods (which may write a pool).
             return DispatchOutcome::NoResponse;
         };
-        let result = self.route_request(request);
+        let result = if id == JsonRpcId::Null {
+            Err(JsonRpcError::invalid_request(
+                "MCP requests need a non-null id",
+            ))
+        } else if allow_legacy && !uses_modern_mcp(&request.method, request.params.as_ref()) {
+            self.route_legacy(request)
+        } else {
+            self.route_modern(request)
+        };
         DispatchOutcome::Response(match result {
             Ok(result) => JsonRpcResponse::success(id, result),
             Err(error) => JsonRpcResponse::error(id, error),
         })
     }
 
-    fn route_request(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
-        if request.id == Some(JsonRpcId::Null) {
-            return Err(JsonRpcError::invalid_request(
-                "MCP requests need a non-null id",
-            ));
+    fn route_legacy(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
+        let empty = Map::new();
+        let params = match request.params.as_ref() {
+            Some(Value::Object(params)) => params,
+            None | Some(Value::Null) => &empty,
+            _ => {
+                return Err(JsonRpcError::invalid_params(
+                    "params must be an object when provided",
+                ));
+            }
+        };
+        match request.method.as_str() {
+            "initialize" => Ok(json!({
+                "protocolVersion": LEGACY_MCP_PROTOCOL_VERSION,
+                "capabilities": {"tools": {}, "resources": {}},
+                "serverInfo": {"name": self.metadata.name, "version": self.metadata.version},
+                "instructions": MCP_INSTRUCTIONS,
+            })),
+            "resources/templates/list" => Ok(json!({"resourceTemplates": []})),
+            _ => self
+                .route_method(&request.method, params)
+                .map_err(|mut error| {
+                    if request.method == "resources/read"
+                        && error.code == INVALID_PARAMS_CODE
+                        && error
+                            .data
+                            .as_ref()
+                            .and_then(|data| data.get("error_kind"))
+                            .and_then(Value::as_str)
+                            == Some("NotFound")
+                    {
+                        error.code = -32002;
+                    }
+                    error
+                }),
         }
-        if matches!(
-            request.method.as_str(),
-            "initialize" | "notifications/initialized"
-        ) {
-            return Err(obsolete_lifecycle_error());
-        }
+    }
+
+    fn route_modern(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
         let params = request
             .params
             .as_ref()
@@ -589,22 +649,7 @@ impl<H: McpHandler> McpDispatcher<H> {
                 "instructions": MCP_INSTRUCTIONS,
             }),
             "resources/templates/list" => json!({"resourceTemplates": []}),
-            _ => self
-                .route_method(&request.method, params)
-                .map_err(|mut error| {
-                    if error.code == -32002
-                        || (error.code == -32000
-                            && error
-                                .data
-                                .as_ref()
-                                .and_then(|data| data.get("error_kind"))
-                                .and_then(Value::as_str)
-                                == Some("NotFound"))
-                    {
-                        error.code = INVALID_PARAMS_CODE;
-                    }
-                    error
-                })?,
+            _ => self.route_method(&request.method, params)?,
         };
         result["resultType"] = json!("complete");
         if cacheable {
@@ -643,12 +688,6 @@ impl<H: McpHandler> McpDispatcher<H> {
     }
 }
 
-pub fn obsolete_lifecycle_error() -> JsonRpcError {
-    JsonRpcError::method_not_found(format!(
-        "MCP {MCP_PROTOCOL_VERSION} requires per-request metadata; use server/discover instead of initialize"
-    ))
-}
-
 #[derive(Clone, Debug)]
 pub struct PlasmiteMcpHandler {
     client: LocalClient,
@@ -670,6 +709,13 @@ impl PlasmiteMcpHandler {
     pub fn with_cancel(mut self, cancel: Option<Arc<AtomicBool>>) -> Self {
         self.cancel = cancel;
         self
+    }
+
+    pub fn tool_access(name: &str) -> Option<McpToolAccess> {
+        TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == name)
+            .map(|tool| tool.access)
     }
 
     fn tool_pool_list(&self, args: &Map<String, Value>) -> ToolCallResult {
@@ -916,9 +962,9 @@ impl Default for PlasmiteMcpHandler {
     }
 }
 
-impl McpHandler for PlasmiteMcpHandler {
-    fn list_tools(&mut self) -> Result<Vec<McpTool>, JsonRpcError> {
-        Ok(vec![
+impl PlasmiteMcpHandler {
+    fn build_tool_catalog() -> Vec<McpTool> {
+        vec![
             McpTool {
                 name: "plasmite_pool_list".to_string(),
                 description: "List the available named message pools. Start here when you do not already know which pool to use.".to_string(),
@@ -1013,7 +1059,15 @@ impl McpHandler for PlasmiteMcpHandler {
             },
             read_tool(false),
             read_tool(true),
-        ])
+        ]
+    }
+}
+
+static TOOL_CATALOG: LazyLock<Vec<McpTool>> = LazyLock::new(PlasmiteMcpHandler::build_tool_catalog);
+
+impl McpHandler for PlasmiteMcpHandler {
+    fn list_tools(&mut self) -> Result<Vec<McpTool>, JsonRpcError> {
+        Ok(TOOL_CATALOG.clone())
     }
 
     fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, JsonRpcError> {
@@ -1476,17 +1530,19 @@ fn api_error_tool_result(tool: &str, err: Error) -> ToolCallResult {
 
 fn api_error_jsonrpc(err: Error) -> JsonRpcError {
     let policy = error_policy(interface_error_kind(err.kind()));
+    let code = if err.kind() == ErrorKind::NotFound {
+        INVALID_PARAMS_CODE
+    } else {
+        -32000
+    };
     let mut rpc_error = JsonRpcError::new(
-        -32000,
+        code,
         err.message()
             .map(ToString::to_string)
             .unwrap_or_else(|| policy.mcp_error_kind.to_string()),
     );
     let mut data = Map::new();
-    data.insert(
-        "error_kind".to_string(),
-        json!(error_policy(interface_error_kind(err.kind())).mcp_error_kind),
-    );
+    data.insert("error_kind".to_string(), json!(policy.mcp_error_kind));
     if let Some(hint) = err.hint() {
         data.insert("hint".to_string(), json!(hint));
     }
@@ -1638,7 +1694,10 @@ mod tests {
         )));
         let result = response.result.expect("result");
         assert_eq!(response.error, None);
-        assert_eq!(result["supportedVersions"], json!([MCP_PROTOCOL_VERSION]));
+        assert_eq!(
+            result["supportedVersions"],
+            json!([MCP_PROTOCOL_VERSION, LEGACY_MCP_PROTOCOL_VERSION])
+        );
         assert_eq!(
             result["capabilities"],
             json!({"tools": {}, "resources": {}})
@@ -1654,7 +1713,7 @@ mod tests {
     }
 
     #[test]
-    fn obsolete_notification_returns_no_response() {
+    fn initialized_notification_returns_no_response() {
         let handler = StubHandler::default();
         let mut dispatcher = McpDispatcher::new(handler);
         let outcome = dispatcher.dispatch_value(json!({

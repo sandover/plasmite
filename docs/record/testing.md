@@ -43,7 +43,7 @@ The integration targets in `tests/` run the real `plasmite` binary or the public
 | `secure_sharing` | An access key across a server restart and a fresh client. |
 | `access_lifecycle` | Key listing, revocation of open streams and persistence. |
 | `browser_access` | Browser sessions against the same access records. |
-| `oauth_access` | OAuth for the HTTPS MCP endpoint across a restart. |
+| `oauth_access` | OAuth discovery and registration policy at the HTTPS endpoint. |
 | `remote_integration` | The HTTP protocol and Rust remote client, including errors and continuation across server limits. |
 | `udp_input`, `udp_client`, `udp_transport`, `udp_transport_cli` | UDP input, the client, the full transport through a lossy proxy, and the CLI over UDP. |
 | `conformance_v2` | The shared 2.0 read cases through the CLI and the Rust API. |
@@ -57,7 +57,7 @@ The integration targets in `tests/` run the real `plasmite` binary or the public
 
 `tests/fixtures/owned_views.json` states the intended input rules for message views, and `uv run python tests/owned_view_contract.py` checks that the cases agree with each other. No binding suite reads this file yet; each binding tests views through its own cases. Measurements live in the [language-boundary results](../performance/language-boundary-results/owned-views/README.md).
 
-To check MCP compatibility against the maintained Python SDK, build the binary with `cargo build --bin plasmite`, then run `uv run --no-project --with mcp==2.3.0 python scripts/mcp_protocol_smoke.py target/debug/plasmite`. It checks automatic discovery and explicitly selected 2026-07-28 requests against disposable local pools.
+Run `just mcp-smoke` to check MCP interoperability with the pinned Python SDK. It builds the CLI and checks automatic discovery, then exercises tool calls and resource reads over stdio with both protocol revisions. CI runs it once on Linux for each workflow run. When OAuth or client setup changes, repeat the HTTPS sign-in and pool read with Claude Code and Codex using their default protocol settings. See the [agent setup guide](../agents.md#connect-an-agent).
 
 ## Bindings and the C ABI
 

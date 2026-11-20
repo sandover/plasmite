@@ -42,6 +42,11 @@ cookbook-smoke:
 	bash scripts/cookbook_smoke.sh
 	@echo "cookbook-smoke complete"
 
+# Check the local MCP protocol with the pinned Python SDK.
+mcp-smoke:
+	cargo build --bin plasmite
+	uv run --no-project --python 3.12 --with mcp==2.3.0 python scripts/mcp_protocol_smoke.py target/debug/plasmite
+
 # Verify version alignment across release surfaces.
 check-version-alignment:
 	./scripts/check-version-alignment.sh

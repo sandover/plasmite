@@ -15,7 +15,7 @@ Short recipes for everyday tasks, from the shell and from Python, JavaScript and
 - [Collect sensor readings over UDP](#collect-sensor-readings-over-udp)
 - [Run a collector at boot](#run-a-collector-at-boot)
 - [Record TouchOSC messages](#record-touchosc-messages)
-- [Give an AI agent your pools](#give-an-ai-agent-your-pools)
+- [Hand off work between agents](#hand-off-work-between-agents)
 - [Use Plasmite from Python, JavaScript and Go](#use-plasmite-from-python-javascript-and-go)
 - [When Plasmite isn't the right fit](#when-plasmite-isnt-the-right-fit)
 
@@ -181,15 +181,16 @@ plasmite fetch osc --last 1
 
 The adapter turns each OSC message into data such as `{"address": "/fader/1", "args": [0.75]}`. To record a phone, start the adapter with `--host 0.0.0.0` on a trusted network and point a TouchOSC UDP connection at this computer's address, port 9000.
 
-## Give an AI agent your pools
+## Hand off work between agents
 
-For a client that uses Model Context Protocol (MCP) `2026-07-28`, configure it to launch a local Plasmite installation:
-
-```json
-{"mcpServers": {"plasmite": {"command": "plasmite", "args": ["mcp"]}}}
+```bash
+claude mcp add --transport stdio plasmite -- plasmite mcp     # once for each agent; Codex: codex mcp add plasmite -- plasmite mcp
+plasmite follow project --tag handoff                         # watch the handoffs yourself
 ```
 
-The agent can list pools and call `plasmite_feed`, `plasmite_fetch` and `plasmite_follow` during a turn. A pool update does not start a new turn. [Plasmite for agents](agents.md) covers compatible clients, handoffs and restart catch-up. For a shared server, use its trusted HTTPS `/mcp` endpoint with a client that supports Client ID Metadata Documents for browser sign-in. See [Connect an AI client](record/serving.md#connect-an-ai-client).
+Tell the first agent: "When the tests pass, post a handoff to the `project` pool." Tell the second: "Fetch the latest handoff from the `project` pool and pick up from there." The first calls `plasmite_feed` with `{"pool": "project", "create": true, "tags": ["handoff"], "data": {"from": "claude:api", "summary": "login tests pass"}}`, and the second calls `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 1}`.
+
+[Plasmite for agents](agents.md) covers shared servers and instructions to paste into `AGENTS.md`.
 
 ## Use Plasmite from Python, JavaScript and Go
 

@@ -1,4 +1,4 @@
-"""Exercise Plasmite's stateless stdio protocol using the published MCP SDK."""
+"""Exercise Plasmite's two stdio protocol paths using the published MCP SDK."""
 import argparse
 import asyncio
 from pathlib import Path
@@ -12,9 +12,10 @@ async def run(binary: Path) -> None:
         server = StdioServerParameters(
             command=str(binary.resolve()), args=["--dir", directory, "mcp"]
         )
-        for mode in ("auto", "2026-07-28"):
+        for mode in ("auto", "2026-07-28", "legacy"):
             async with Client(server, mode=mode, read_timeout_seconds=5) as client:
-                assert client.session.protocol_version == "2026-07-28"
+                expected = "2025-11-25" if mode == "legacy" else "2026-07-28"
+                assert client.session.protocol_version == expected
                 tools = await client.list_tools()
                 assert any(tool.name == "plasmite_feed" for tool in tools.tools)
                 pool = f"sdk-{mode}"

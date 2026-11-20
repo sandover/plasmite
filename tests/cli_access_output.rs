@@ -256,8 +256,11 @@ fn access_connect_prints_direct_http_oauth_setup_for_humans_and_json() {
         false,
     ));
     let human_text = String::from_utf8(human.stdout).unwrap();
+    assert!(human_text.contains("Setup guide"));
+    assert!(human_text.contains("docs/agents.md#connect-an-agent"));
     assert!(human_text.contains("claude mcp add --scope user --transport http plasmite"));
     assert!(human_text.contains("codex mcp add plasmite --url"));
+    assert!(!human_text.contains("--oauth-resource"));
     assert!(human_text.contains(&endpoint));
     assert!(human_text.contains("enter the access key in its browser approval page"));
     assert!(human_text.contains("does not sign in the MCP client"));

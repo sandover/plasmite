@@ -4,12 +4,7 @@ Agents come and go. A pool keeps recent messages on disk, so an agent can read w
 
 ## Connect an agent
 
-Plasmite requires a Model Context Protocol (MCP) client that uses revision [`2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28). Clients that only use the older `initialize` handshake cannot connect.
-
-- [Claude Code](https://code.claude.com/docs/en/mcp#mcp-client-runtimes) needs its v2 MCP runtime with modern protocol negotiation. If it is using the older runtime or handshake, launch a recent version with `MCP_SDK_GENERATION=v2` and `MCP_PROTOCOL_NEGOTIATION=auto`.
-- For a [Codex build that supports the modern MCP feature](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md#hosted-codex-apps-mcp-protocol), set `mcp_2026_07_28 = true` under `[features]` in `config.toml`. The setting for hosted Codex Apps does not apply to Plasmite.
-
-These are the host settings, not a guarantee that every installed build supports the connection.
+Plasmite supports Model Context Protocol (MCP) revisions `2025-11-25` and `2026-07-28` over stdio and HTTPS. Start with your client's default settings.
 
 **For direct access to local pool files**, install Plasmite where the client runs and configure the client to launch it over standard input and output:
 
@@ -20,14 +15,16 @@ codex mcp add plasmite -- plasmite mcp       # Codex
 
 Other clients take the same command in their configuration: `{"mcpServers": {"plasmite": {"command": "plasmite", "args": ["mcp"]}}}`.
 
-**For HTTPS access**, configure the client to use the shared server's `/mcp` endpoint. You do not need to install Plasmite on the client machine. The MCP client and the browser must both trust the server's certificate. The client must support [Client ID Metadata Documents (CIMD)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization#client-registration) for registration. Plasmite does not offer Dynamic Client Registration (DCR) or a device sign-in flow.
+**For HTTPS access**, use the shared server's `/mcp` endpoint. The client and browser must both trust the server's certificate. The client must support [Client ID Metadata Documents (CIMD)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization#client-registration) for sign-in. See the [serving guide](record/serving.md#connect-an-ai-client) for the server and access key.
 
 ```bash
 claude mcp add --scope user --transport http plasmite https://pools.example.net:9743/mcp
-codex mcp add plasmite --url https://pools.example.net:9743/mcp --oauth-resource https://pools.example.net:9743/mcp
+codex mcp add plasmite --url https://pools.example.net:9743/mcp
 ```
 
-Use the command for your client. If it does not open a browser for sign-in, run `claude mcp login plasmite` or `codex mcp login plasmite`. Enter the Plasmite access key on the server's browser approval page, not in a chat or a header. See [Connect an AI client](record/serving.md#connect-an-ai-client) for setup and [the validation report](validation/mcp-wake-up.md) for what has been tested. The commands above are for builds with the required protocol and registration support; we have not verified end-to-end sign-in in Claude Code or Codex.
+If the client needs sign-in, run `claude mcp login plasmite` or `codex mcp login plasmite`. Check the server address on the approval page, enter the Plasmite access key, and choose **Authorize**.
+
+To check either connection, ask the agent to list pools and read the latest message from a pool you can name. [Tested clients](validation/mcp-clients.md) lists the hosts and versions that passed.
 
 ## The tools
 
@@ -50,9 +47,7 @@ One agent finishes and says so:
 {"pool": "project", "tags": ["handoff"], "data": {"from": "claude:api", "status": "done", "branch": "fix-login", "summary": "login tests pass"}}
 ```
 
-On its next turn, the receiving agent calls `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 20}`, or uses its saved sequence to read from where it left off.
-
-An incoming message does not start a turn in an idle agent. Plasmite does not currently serve standard MCP resource subscriptions. An in-flight `plasmite_follow` call is a bounded read in an existing turn, not an idle wake-up. A host refreshing its tools or resources is not the same as the host starting a turn.
+When you start the receiving agent's next turn, it can call `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 20}`. If it's already in a turn, it can fetch the handoff or make a bounded `plasmite_follow` call. Plasmite provides no automatic agent wake-up or MCP resource subscriptions.
 
 ### Catch up after a restart
 

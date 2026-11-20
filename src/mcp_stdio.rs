@@ -113,6 +113,7 @@ fn dispatch_requests(
 ) -> Result<(), Error> {
     let mut writer = BufWriter::new(io::stdout().lock());
     let handler = PlasmiteMcpHandler::new(pool_dir);
+    let mut legacy_initialized = false;
     for Job {
         payload,
         id,
@@ -126,6 +127,7 @@ fn dispatch_requests(
                 continue;
             }
         };
+        let initialize = request.get("method").and_then(Value::as_str) == Some("initialize");
         let cancelled = || {
             cancel
                 .as_ref()
@@ -135,7 +137,7 @@ fn dispatch_requests(
             DispatchOutcome::NoResponse
         } else {
             let mut dispatcher = McpDispatcher::new(handler.clone().with_cancel(cancel.clone()));
-            dispatcher.dispatch_value(request)
+            dispatcher.dispatch_value_with_legacy(request, legacy_initialized || initialize)
         };
         let suppress = if let Some(id) = id {
             // Once removed, a later cancel is for a response already committed to the wire.
@@ -147,6 +149,7 @@ fn dispatch_requests(
             false
         };
         if !suppress && let DispatchOutcome::Response(response) = outcome {
+            legacy_initialized |= initialize && response.result.is_some();
             let payload = serde_json::to_value(response).map_err(|err| {
                 Error::new(ErrorKind::Internal)
                     .with_message("failed to encode MCP response")

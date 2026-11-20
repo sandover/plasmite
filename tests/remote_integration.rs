@@ -980,7 +980,7 @@ fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, Box<ureq:
 }
 
 #[test]
-fn remote_mcp_http_profile_request_obsolete_lifecycle_and_get() -> TestResult<()> {
+fn remote_mcp_http_negotiates_both_versions_and_rejects_get() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
 
@@ -1002,28 +1002,40 @@ fn remote_mcp_http_profile_request_obsolete_lifecycle_and_get() -> TestResult<()
     assert_eq!(discovery["id"], 1);
     assert_eq!(
         discovery["result"]["supportedVersions"],
-        json!(["2026-07-28"])
+        json!(["2026-07-28", "2025-11-25"])
     );
 
-    for payload in [
-        json!({"jsonrpc":"2.0", "id":2, "method":"initialize", "params":{"protocolVersion":"2025-11-25"}}),
-        json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
-    ] {
-        let response = ureq::post(&format!("{}/mcp", server.local_url))
+    let legacy_request = || {
+        ureq::post(&format!("{}/mcp", server.local_url))
             .set("Content-Type", "application/json")
-            .send_json(payload);
-        let Err(ureq::Error::Status(400, response)) = response else {
-            panic!("obsolete lifecycle was not rejected");
-        };
-        let rejected: Value = serde_json::from_str(&response.into_string()?)?;
-        assert_eq!(rejected["error"]["code"], -32601);
-        assert!(
-            rejected["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("2026-07-28")
-        );
-    }
+            .set("MCP-Protocol-Version", "2025-11-25")
+    };
+    let initialize = ureq::post(&format!("{}/mcp", server.local_url))
+        .set("Content-Type", "application/json")
+        .send_json(json!({"jsonrpc":"2.0", "id":2, "method":"initialize", "params":{
+            "protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}
+        }}))?
+        .into_json::<Value>()?;
+    assert_eq!(initialize["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(
+        legacy_request()
+            .send_json(json!({"jsonrpc":"2.0", "method":"notifications/initialized"}))?
+            .status(),
+        202
+    );
+    let tools = legacy_request()
+        .send_json(json!({"jsonrpc":"2.0", "id":3, "method":"tools/list"}))?
+        .into_json::<Value>()?;
+    assert!(tools["result"]["tools"].is_array());
+    assert!(tools["result"].get("resultType").is_none());
+    let missing = legacy_request()
+        .send_json(
+            json!({"jsonrpc":"2.0", "id":4, "method":"resources/read","params":{
+                "uri":"plasmite:///pools/missing"
+            }}),
+        )?
+        .into_json::<Value>()?;
+    assert_eq!(missing["error"]["code"], -32002);
 
     let response_payload = ureq::post(&format!("{}/mcp", server.local_url))
         .set("Content-Type", "application/json")
@@ -1202,20 +1214,20 @@ fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
         "params": {}
     });
 
-    let mut obsolete = mcp_payload(&payload);
-    obsolete["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = json!("2025-11-25");
+    let mut unsupported = mcp_payload(&payload);
+    unsupported["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = json!("1900-01-01");
     let response = mcp_request(&server.local_url, &payload)
-        .set("MCP-Protocol-Version", "2025-11-25")
-        .send_json(obsolete);
+        .set("MCP-Protocol-Version", "1900-01-01")
+        .send_json(unsupported);
     let Err(ureq::Error::Status(400, response)) = response else {
-        panic!("obsolete transport version was not rejected");
+        panic!("unsupported transport version was not rejected");
     };
     let rejected: Value = serde_json::from_str(&response.into_string()?)?;
     assert_eq!(rejected["error"]["code"], -32022);
     assert_eq!(
         rejected["error"]["data"],
         json!({
-            "requested":"2025-11-25", "supported":["2026-07-28"]
+            "requested":"1900-01-01", "supported":["2026-07-28","2025-11-25"]
         })
     );
 

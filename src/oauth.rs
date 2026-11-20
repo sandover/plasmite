@@ -1096,6 +1096,17 @@ mod tests {
             let name = format!("=?base64?{}?=", STANDARD.encode(uri));
             let result: serde_json::Value = call(Some(&bearer), "resources/read", Some(&name), json!({"uri":uri})).unwrap().into_json().unwrap();
             assert_eq!(result["result"]["contents"][0]["uri"], uri);
+
+            let legacy_read = json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":uri}});
+            let legacy_request = || agent.post(&resource)
+                .set("MCP-Protocol-Version", "2025-11-25")
+                .set("Accept", "application/json, text/event-stream");
+            assert!(matches!(legacy_request().send_json(legacy_read.clone()), Err(ureq::Error::Status(401, _))));
+            let result: serde_json::Value = legacy_request()
+                .set("Authorization", &format!("Bearer {bearer}"))
+                .send_json(legacy_read).unwrap().into_json().unwrap();
+            assert_eq!(result["result"]["contents"][0]["uri"], uri);
+            assert!(result["result"].get("resultType").is_none());
         })
         .await;
         stop.send(true).unwrap();

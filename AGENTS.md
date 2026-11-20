@@ -53,6 +53,7 @@ docs/
 │
 │   Dated platform checks
 ├── validation/README.md                       — Read when finding dated platform checks and their support limits
+├── validation/mcp-clients.md                   — Read when checking which MCP clients and versions connected over stdio and HTTPS
 ├── validation/mcp-wake-up.md                   — Read when evaluating resource notifications, sequence catch-up or agent wake-up evidence
 ├── validation/mcp-wake-up/                     — Run the disposable subscription fixture for the evidence above
 ├── validation/windows-boot-validation.md           — Read when assessing Windows service and macOS LaunchDaemon checks and their limits
