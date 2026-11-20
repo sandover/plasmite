@@ -366,12 +366,12 @@ impl Pool {
     pub fn continue_fetch_lite3(&self, read: Read, until: u64) -> Result<Lite3Follow<'_>, Error> {
         Ok(Lite3Follow(TailReader {
             pool: self,
-            state: self.read_state_until(read, false, Some(until))?,
+            state: self.read_state_until(read, false, Some(until), false)?,
         }))
     }
 
     pub(crate) fn read_state(&self, read: Read, live: bool) -> Result<TailState, Error> {
-        self.read_state_until(read, live, None)
+        self.read_state_until(read, live, None, live)
     }
 
     fn read_state_until(
@@ -379,6 +379,7 @@ impl Pool {
         read: Read,
         live: bool,
         until: Option<u64>,
+        notify: bool,
     ) -> Result<TailState, Error> {
         let mut cursor = Cursor::new();
         let (first, upper) = {
@@ -436,7 +437,7 @@ impl Pool {
             cancel: read.cancel,
             #[cfg(any(target_os = "linux", windows))]
             cancel_signal: None,
-            notify: live.then(|| open_for_pool(self)).flatten(),
+            notify: notify.then(|| open_for_pool(self)).flatten(),
             expected_seq: first,
             terminated: first.is_none()
                 || upper.zip(first).is_some_and(|(last, first)| first > last),
@@ -447,6 +448,76 @@ impl Pool {
 }
 
 pub struct Lite3Follow<'a>(TailReader<'a>);
+
+/// A live reader whose caller manages wake-ups and schedules bounded turns.
+#[doc(hidden)]
+pub struct HostedRead {
+    pool: Arc<Pool>,
+    state: TailState,
+}
+
+impl HostedRead {
+    pub fn new(pool: Arc<Pool>, read: Read) -> Result<Self, Error> {
+        let state = pool.read_state_until(read, true, None, false)?;
+        Ok(Self { pool, state })
+    }
+
+    pub fn start_position(pool: &Pool, read: Read) -> Result<Option<u64>, Error> {
+        Ok(pool.read_state_until(read, true, None, false)?.expected_seq)
+    }
+
+    pub fn pool(&self) -> &Pool {
+        &self.pool
+    }
+
+    pub fn restart(&mut self, read: Read) -> Result<(), Error> {
+        self.state = self.pool.read_state_until(read, true, None, false)?;
+        Ok(())
+    }
+
+    pub fn position(&self) -> Option<u64> {
+        self.state.expected_seq
+    }
+
+    pub fn turn(&mut self, remaining: &mut usize) -> Result<ReadStatus<FrameRef>, Error> {
+        self.turn_selected(remaining, select_lite3_frame)
+    }
+
+    pub fn turn_json(&mut self, remaining: &mut usize) -> Result<ReadStatus<Vec<u8>>, Error> {
+        self.turn_selected(remaining, |frame, tags| frame_json(&frame, Some(tags)))
+    }
+
+    fn turn_selected<T>(
+        &mut self,
+        remaining: &mut usize,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<ReadStatus<T>, Error> {
+        self.pool.check_current_path()?;
+        let outcome = self.state.next_wait_using(
+            Some(Duration::ZERO),
+            None,
+            |cursor, expected| {
+                let Some(left) = remaining.checked_sub(1) else {
+                    return Ok(CursorResult::WouldBlock);
+                };
+                match cursor.next_checked(&self.pool, expected)? {
+                    CursorResult::WouldBlock => Ok(CursorResult::WouldBlock),
+                    result => {
+                        *remaining = left;
+                        Ok(result)
+                    }
+                }
+            },
+            select,
+        )?;
+        Ok(match outcome {
+            TailOutcome::Item(item) => ReadStatus::Message(item),
+            TailOutcome::WaitExpired => ReadStatus::Waiting,
+            TailOutcome::Finished => ReadStatus::Complete,
+            TailOutcome::Cancelled => ReadStatus::Cancelled,
+        })
+    }
+}
 
 struct TailReader<'a> {
     pool: &'a Pool,

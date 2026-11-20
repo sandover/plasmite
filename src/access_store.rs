@@ -62,22 +62,52 @@ struct AccessState {
 }
 
 struct AccessRuntime {
-    revoked: Arc<AtomicBool>,
+    revoked: Arc<Revocation>,
     last_used_at: Option<u64>,
+}
+
+#[derive(Debug)]
+struct Revocation {
+    flag: Arc<AtomicBool>,
+    changed: tokio::sync::Notify,
+}
+
+impl Revocation {
+    fn new(revoked: bool) -> Self {
+        Self {
+            flag: Arc::new(AtomicBool::new(revoked)),
+            changed: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn set(&self, revoked: bool) {
+        if !self.flag.swap(revoked, Ordering::AcqRel) && revoked {
+            self.changed.notify_waiters();
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct AccessGrant {
-    revoked: Arc<AtomicBool>,
+    revoked: Arc<Revocation>,
 }
 
 impl AccessGrant {
     pub(crate) fn is_revoked(&self) -> bool {
-        self.revoked.load(Ordering::Acquire)
+        self.revoked.flag.load(Ordering::Acquire)
     }
 
     pub(crate) fn cancellation_flag(&self) -> Arc<AtomicBool> {
-        self.revoked.clone()
+        self.revoked.flag.clone()
+    }
+
+    pub(crate) async fn revoked(&self) {
+        let notified = self.revoked.changed.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if !self.is_revoked() {
+            notified.await;
+        }
     }
 }
 
@@ -276,7 +306,7 @@ impl AccessStore {
         let runtime = records
             .iter()
             .map(|record| AccessRuntime {
-                revoked: Arc::new(AtomicBool::new(record.revoked)),
+                revoked: Arc::new(Revocation::new(record.revoked)),
                 last_used_at: None,
             })
             .collect();
@@ -385,7 +415,7 @@ impl AccessStore {
             return Err(err);
         }
         records.runtime.push(AccessRuntime {
-            revoked: Arc::new(AtomicBool::new(false)),
+            revoked: Arc::new(Revocation::new(false)),
             last_used_at: None,
         });
         Ok(key)
@@ -480,7 +510,7 @@ impl AccessStore {
             return Err(err);
         }
         state.records = updated;
-        state.runtime[index].revoked.store(true, Ordering::Release);
+        state.runtime[index].revoked.set(true);
         Ok(())
     }
 }
@@ -488,15 +518,15 @@ impl AccessStore {
 impl AccessState {
     fn sync_runtime(&mut self) {
         for runtime in self.runtime.iter().skip(self.records.len()) {
-            runtime.revoked.store(true, Ordering::Release);
+            runtime.revoked.set(true);
         }
         self.runtime.truncate(self.records.len());
         for (index, record) in self.records.iter().enumerate() {
             if let Some(runtime) = self.runtime.get(index) {
-                runtime.revoked.store(record.revoked, Ordering::Release);
+                runtime.revoked.set(record.revoked);
             } else {
                 self.runtime.push(AccessRuntime {
-                    revoked: Arc::new(AtomicBool::new(record.revoked)),
+                    revoked: Arc::new(Revocation::new(record.revoked)),
                     last_used_at: None,
                 });
             }

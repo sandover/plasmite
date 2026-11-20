@@ -17,6 +17,7 @@ mod interface_wire;
 mod mcp_stdio;
 mod pool_info_json;
 mod pool_paths;
+mod pool_wait;
 mod secure_serve;
 mod serve;
 mod serve_registry;

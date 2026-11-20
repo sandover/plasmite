@@ -1,12 +1,12 @@
 //! MCP Events push delivery for retained pool messages.
 use super::*;
-use plasmite::api::{Read, ReadPoll, Since};
+use crate::pool_wait::PoolChange;
+use plasmite::api::{HostedRead, Read, ReadStatus, Since};
 use plasmite::mcp::{JsonRpcId, parse_modern_request};
 use std::sync::LazyLock;
 
 const EVENT: &str = "pool.message";
 const SUBSCRIPTION_ID: &str = "io.modelcontextprotocol/subscriptionId";
-const STREAM_CHECK: Duration = Duration::from_millis(100);
 
 type Authorization = (AccessGrant, (Arc<OauthService>, String));
 
@@ -111,18 +111,41 @@ pub(super) async fn open(
     let timeout = Duration::from_millis(state.max_tail_timeout_ms);
     let (send, receive) = mpsc::channel(16);
     let (opened, opening) = tokio::sync::oneshot::channel();
+    let worker = StreamWorker {
+        id,
+        send,
+        authorization,
+        timeout,
+        waiters: state.pool_waiters.clone(),
+    };
     let client = state.client.clone();
-    tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
         let _permit = permit;
         let _activity = activity;
-        let worker = StreamWorker {
-            id,
-            send,
-            shutdown,
-            authorization,
-            timeout,
+        let mut opened = Some(opened);
+        let mut revoked = std::pin::pin!(wait_for_revocation(
+            worker.authorization.as_ref().map(|(grant, _)| grant),
+        ));
+        let result = tokio::select! {
+            biased;
+            _ = &mut revoked => Err(McpJsonRpcError::new(-32024, "MCP access was revoked")),
+            _ = worker.send.closed() => return,
+            _ = wait_for_shutdown(shutdown) => return,
+            result = worker.follow(client, pool_ref, request, cursor, &mut opened) => result,
         };
-        worker.run(client, pool_ref, request, cursor, opened);
+        if let Some(opened) = opened {
+            let _ = opened.send(result);
+            return;
+        }
+        if let Err(error) = result {
+            let _ = worker
+                .send
+                .try_send(worker.notification("terminated", json!({"error": error})));
+        }
+        let _ = worker
+            .send
+            .try_send(StreamWorker::frame(json!({"jsonrpc":"2.0","id":worker.id,
+            "result":{"resultType":"complete","_meta":{(SUBSCRIPTION_ID):worker.id}}})));
     });
     match tokio::time::timeout(timeout, opening).await {
         Ok(Ok(Ok(()))) => {
@@ -151,34 +174,67 @@ fn parse_cursor(value: &str) -> Result<(String, u64), McpJsonRpcError> {
 struct StreamWorker {
     id: JsonRpcId,
     send: mpsc::Sender<Bytes>,
-    shutdown: watch::Receiver<bool>,
     authorization: Option<Authorization>,
     timeout: Duration,
+    waiters: PoolWaiters,
+}
+
+struct EventReader {
+    reader: HostedRead,
+    changes: PoolChange,
+    identity: String,
+    truncated: bool,
+}
+
+fn open_reader(
+    pool: Pool,
+    waiters: &PoolWaiters,
+    cursor: Option<(String, u64)>,
+    max_age_ms: Option<u64>,
+    tags: &[String],
+) -> Result<EventReader, Error> {
+    let pool = Arc::new(pool);
+    let changes = waiters.subscribe(&pool)?;
+    let identity = pool.incarnation()?;
+    let read = |start| make_read(start, tags);
+    let (start, mut truncated) = match cursor {
+        None => (None, false),
+        Some((previous, seq)) => {
+            let floor = max_age_ms.map(|age| Since::Ago(Duration::from_millis(age)));
+            if previous != identity {
+                (Some(floor.unwrap_or(Since::Oldest)), true)
+            } else if let Some(floor) = floor {
+                let floor =
+                    HostedRead::start_position(&pool, Read::since(floor))?.unwrap_or(u64::MAX);
+                (Some(Since::Seq(seq.max(floor))), floor > seq)
+            } else {
+                (Some(Since::Seq(seq)), false)
+            }
+        }
+    };
+    let reader = match HostedRead::new(pool.clone(), read(start)) {
+        Err(err) if err.kind() == ErrorKind::RetentionGap => {
+            truncated = true;
+            HostedRead::new(pool, read(Some(Since::Oldest)))?
+        }
+        result => result?,
+    };
+    Ok(EventReader {
+        reader,
+        changes,
+        identity,
+        truncated,
+    })
+}
+
+fn make_read(start: Option<Since>, tags: &[String]) -> Read {
+    start
+        .map_or_else(Read::new, Read::since)
+        .tags(tags.iter().cloned())
 }
 
 impl StreamWorker {
-    fn run(
-        self,
-        client: LocalClient,
-        pool_ref: PoolRef,
-        request: StreamRequest,
-        cursor: Option<(String, u64)>,
-        opened: tokio::sync::oneshot::Sender<Result<(), McpJsonRpcError>>,
-    ) {
-        let mut opened = Some(opened);
-        let result = self.follow(client, pool_ref, request, cursor, &mut opened);
-        if let Some(opened) = opened {
-            let _ = opened.send(result);
-            return;
-        }
-        if let Err(error) = result {
-            self.notification("terminated", json!({"error": error}));
-        }
-        self.frame(json!({"jsonrpc":"2.0","id":self.id,
-            "result":{"resultType":"complete","_meta":{(SUBSCRIPTION_ID):self.id}}}));
-    }
-
-    fn follow(
+    async fn follow(
         &self,
         client: LocalClient,
         pool_ref: PoolRef,
@@ -186,51 +242,28 @@ impl StreamWorker {
         cursor: Option<(String, u64)>,
         opened: &mut Option<tokio::sync::oneshot::Sender<Result<(), McpJsonRpcError>>>,
     ) -> Result<(), McpJsonRpcError> {
-        if !self.access_valid()? {
+        if !self.access_valid() {
             return Err(McpJsonRpcError::new(
                 -32024,
                 "MCP credentials are no longer valid",
             ));
         }
-        let pool = client.open_pool(&pool_ref, false).map_err(pool_error)?;
-        let identity = pool.incarnation().map_err(pool_error)?;
-        let tags = request.arguments.tags;
-        let read = |start| {
-            match start {
-                Some(since) => Read::since(since),
-                None => Read::new(),
-            }
-            .tags(tags.iter().cloned())
-        };
-        let (start, mut truncated) = match cursor {
-            None => (None, false),
-            Some((previous, seq)) => {
-                let floor = request
-                    .max_age_ms
-                    .map(|age| Since::Ago(Duration::from_millis(age)));
-                if previous != identity {
-                    (Some(floor.unwrap_or(Since::Oldest)), true)
-                } else if let Some(floor) = floor {
-                    let floor = pool
-                        .follow_lite3(Read::since(floor))
-                        .map_err(pool_error)?
-                        .position()
-                        .0
-                        .unwrap_or(u64::MAX);
-                    (Some(Since::Seq(seq.max(floor))), floor > seq)
-                } else {
-                    (Some(Since::Seq(seq)), false)
-                }
-            }
-        };
-        let mut reader = match pool.follow_lite3(read(start)) {
-            Err(err) if err.kind() == ErrorKind::RetentionGap => {
-                truncated = true;
-                pool.follow_lite3(read(Some(Since::Oldest)))
-                    .map_err(pool_error)?
-            }
-            result => result.map_err(pool_error)?,
-        };
+        let tags = Arc::new(request.arguments.tags);
+        let open_tags = tags.clone();
+        let waiters = self.waiters.clone();
+        let EventReader {
+            mut reader,
+            mut changes,
+            identity,
+            truncated,
+        } = self
+            .waiters
+            .read(move || {
+                let pool = client.open_pool(&pool_ref, false)?;
+                open_reader(pool, &waiters, cursor, request.max_age_ms, &open_tags)
+            })
+            .await
+            .map_err(pool_error)?;
         if opened
             .take()
             .expect("opening signal available")
@@ -242,30 +275,37 @@ impl StreamWorker {
         let heartbeat_ms = request.heartbeat_ms.unwrap_or(30_000).clamp(1000, 30_000);
         let heartbeat = Duration::from_millis(heartbeat_ms);
         let cursor_at = |seq: Option<u64>| format!("{identity}/{}", seq.unwrap_or(u64::MAX));
-        let active = |reader: &plasmite::api::Lite3Follow<'_>, truncated| {
+        let active = |position, truncated| {
             self.notification("active", json!({
-                "cursor": cursor_at(reader.position().0), "truncated": truncated, "heartbeatMs": heartbeat_ms
-            }))
+            "cursor": cursor_at(position), "truncated": truncated, "heartbeatMs": heartbeat_ms
+        }))
         };
-        if !active(&reader, truncated) {
+        if !self.deliver(active(reader.position(), truncated)).await {
             return Ok(());
         }
 
-        let mut last_sent = Instant::now();
-        while !self.send.is_closed() && !*self.shutdown.borrow() {
-            if self
-                .authorization
-                .as_ref()
-                .is_some_and(|(grant, _)| grant.is_revoked())
-            {
-                return Err(McpJsonRpcError::new(-32024, "MCP access was revoked"));
-            }
-            let wait = heartbeat
-                .saturating_sub(last_sent.elapsed())
-                .min(STREAM_CHECK);
-            match reader.poll(wait) {
-                Ok(ReadPoll::Message(frame)) => {
-                    if !self.access_valid()? {
+        let mut deadline = tokio::time::Instant::now() + heartbeat;
+        loop {
+            changes.acknowledge();
+            let read_tags = tags.clone();
+            let (returned, result, remaining) = self
+                .waiters
+                .read(move || {
+                    let mut remaining = 32;
+                    let result = match reader.turn(&mut remaining) {
+                        Err(err) if err.kind() == ErrorKind::RetentionGap => reader
+                            .restart(make_read(Some(Since::Oldest), &read_tags))
+                            .map(|()| None),
+                        result => result.map(Some),
+                    };
+                    Ok((reader, result, remaining))
+                })
+                .await
+                .map_err(pool_error)?;
+            reader = returned;
+            match result.map_err(pool_error)? {
+                Some(ReadStatus::Message(frame)) => {
+                    if !self.access_valid() {
                         return Ok(());
                     }
                     let timestamp =
@@ -273,76 +313,68 @@ impl StreamWorker {
                             .expect("stored timestamps fit OffsetDateTime")
                             .format(&time::format_description::well_known::Rfc3339)
                             .expect("stored timestamps fit RFC 3339");
-                    if !self.notification(
+                    if !self.deliver(self.notification(
                         "event",
                         json!({
                             "eventId": format!("{identity}/{}", frame.seq),
                             "name": EVENT,
                             "timestamp": timestamp,
                             "data": {"pool": request.arguments.pool, "seq": frame.seq.to_string()},
-                            "cursor": cursor_at(reader.position().0)
+                            "cursor": cursor_at(reader.position())
                         }),
-                    ) {
+                    )).await {
                         return Ok(());
                     }
-                    last_sent = Instant::now();
+                    deadline = tokio::time::Instant::now() + heartbeat;
                 }
-                Ok(ReadPoll::Waiting) if last_sent.elapsed() >= heartbeat => {
-                    if !self.access_valid()? {
-                        return Ok(());
+                Some(ReadStatus::Waiting) if remaining == 0 => {}
+                Some(ReadStatus::Waiting) => {
+                    tokio::select! {
+                        _ = changes.changed() => {}
+                        _ = tokio::time::sleep_until(deadline) => {
+                            if !self.access_valid() || !self.deliver(self.notification(
+                                "heartbeat", json!({"cursor": cursor_at(reader.position())}),
+                            )).await {
+                                return Ok(());
+                            }
+                            deadline = tokio::time::Instant::now() + heartbeat;
+                        }
                     }
-                    pool.check_current_path().map_err(pool_error)?;
-                    if !self.notification(
-                        "heartbeat",
-                        json!({"cursor": cursor_at(reader.position().0)}),
-                    ) {
-                        return Ok(());
-                    }
-                    last_sent = Instant::now();
                 }
-                Ok(ReadPoll::Waiting) => {}
-                Ok(ReadPoll::Complete | ReadPoll::Cancelled) => break,
-                Err(err) if err.kind() == ErrorKind::RetentionGap => {
-                    if !self.access_valid()? {
+                Some(ReadStatus::Complete | ReadStatus::Cancelled) => return Ok(()),
+                None => {
+                    if !self.access_valid() || !self.deliver(active(reader.position(), true)).await
+                    {
                         return Ok(());
                     }
-                    reader = pool
-                        .follow_lite3(read(Some(Since::Oldest)))
-                        .map_err(pool_error)?;
-                    if !active(&reader, true) {
-                        return Ok(());
-                    }
-                    last_sent = Instant::now();
+                    deadline = tokio::time::Instant::now() + heartbeat;
                 }
-                Err(err) => return Err(pool_error(err)),
             }
         }
-        Ok(())
     }
 
-    fn access_valid(&self) -> Result<bool, McpJsonRpcError> {
-        let Some((grant, (oauth, bearer))) = &self.authorization else {
-            return Ok(true);
-        };
-        if grant.is_revoked() {
-            return Err(McpJsonRpcError::new(-32024, "MCP access was revoked"));
-        }
-        // A credential can expire or rotate while the key still permits access.
-        // Close the stream so the client can reconnect with fresh credentials.
-        Ok(oauth.grant(bearer).is_some())
+    fn access_valid(&self) -> bool {
+        self.authorization
+            .as_ref()
+            .is_none_or(|(grant, (oauth, bearer))| {
+                !grant.is_revoked() && oauth.grant(bearer).is_some()
+            })
     }
 
-    fn notification(&self, method: &str, mut params: Value) -> bool {
+    fn notification(&self, method: &str, mut params: Value) -> Bytes {
         params["_meta"] = json!({(SUBSCRIPTION_ID):self.id});
-        self.frame(json!({"jsonrpc":"2.0","method":format!("notifications/events/{method}"),"params":params}))
+        Self::frame(
+            json!({"jsonrpc":"2.0","method":format!("notifications/events/{method}"),"params":params}),
+        )
     }
 
-    fn frame(&self, value: Value) -> bool {
-        let bytes = Bytes::from(format!("data: {value}\n\n"));
+    fn frame(value: Value) -> Bytes {
+        Bytes::from(format!("data: {value}\n\n"))
+    }
+
+    async fn deliver(&self, bytes: Bytes) -> bool {
         matches!(
-            tokio::runtime::Handle::current().block_on(async {
-                tokio::time::timeout(self.timeout, self.send.send(bytes)).await
-            }),
+            tokio::time::timeout(self.timeout, self.send.send(bytes)).await,
             Ok(Ok(()))
         )
     }

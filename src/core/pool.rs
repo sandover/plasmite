@@ -658,7 +658,8 @@ impl Pool {
     }
 
     #[cfg(not(any(target_os = "linux", windows)))]
-    pub(crate) fn path(&self) -> &Path {
+    #[doc(hidden)]
+    pub fn path(&self) -> &Path {
         &self.path
     }
 

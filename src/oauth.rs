@@ -1035,6 +1035,7 @@ mod tests {
             false,
             Default::default(),
             shutdown.clone(),
+            Default::default(),
         )
         .await
         .unwrap();

@@ -1,0 +1,180 @@
+//! Share the platform write wait across the live readers of one pool file.
+
+use plasmite::api::notify::{NotifyWait, open_for_pool};
+use plasmite::api::{Error, ErrorKind, Pool};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::{Semaphore, watch};
+
+type Sources = Arc<Mutex<HashMap<String, watch::Sender<()>>>>;
+
+#[derive(Clone)]
+pub(crate) struct PoolWaiters {
+    sources: Sources,
+    reads: Arc<Semaphore>,
+}
+
+impl Default for PoolWaiters {
+    fn default() -> Self {
+        let workers =
+            std::thread::available_parallelism().map_or(2, |available| available.get().clamp(2, 8));
+        Self {
+            sources: Sources::default(),
+            reads: Arc::new(Semaphore::new(workers)),
+        }
+    }
+}
+
+pub(crate) struct PoolChange(watch::Receiver<()>);
+
+impl PoolChange {
+    /// Call before reading. A write during the read remains visible to changed().
+    pub(crate) fn acknowledge(&mut self) {
+        self.0.borrow_and_update();
+    }
+
+    pub(crate) async fn changed(&mut self) {
+        let _ = self.0.changed().await;
+    }
+}
+
+impl PoolWaiters {
+    pub(crate) fn subscribe(&self, pool: &Pool) -> Result<PoolChange, Error> {
+        let identity = pool.incarnation()?;
+        let mut sources = self.sources.lock().expect("pool wait sources");
+        if let Some(source) = sources.get(&identity) {
+            return Ok(PoolChange(source.subscribe()));
+        }
+
+        let observer = Pool::open(pool.path())?;
+        if observer.incarnation()? != identity {
+            return Err(Error::new(ErrorKind::NotFound).with_message("pool was replaced"));
+        }
+        // Take the first snapshot before opening the wait handle so a write
+        // between these operations still shows up at the next recovery check.
+        let newest = observer.bounds()?.newest_seq;
+        let notify = open_for_pool(&observer);
+        let (source, receiver) = watch::channel(());
+        let worker_source = source.clone();
+        let registry = self.sources.clone();
+        let worker_identity = identity.clone();
+        std::thread::Builder::new()
+            .name("plasmite-pool-wait".into())
+            .spawn(move || {
+                let mut newest = newest;
+                let mut notify = notify;
+                loop {
+                    {
+                        let mut sources = registry.lock().expect("pool wait sources");
+                        if worker_source.receiver_count() == 0 {
+                            sources.remove(&worker_identity);
+                            return;
+                        }
+                    }
+                    match notify
+                        .as_mut()
+                        .map(|handle| handle.wait(Duration::from_secs(1)))
+                    {
+                        Some(NotifyWait::Signaled | NotifyWait::TimedOut) => {}
+                        Some(NotifyWait::Unavailable) | None => {
+                            notify = None;
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                    }
+                    let next = observer
+                        .check_current_path()
+                        .and_then(|()| observer.bounds());
+                    let bounds = match next {
+                        Ok(bounds) => bounds,
+                        Err(error) if error.kind() == ErrorKind::NotFound => {
+                            registry
+                                .lock()
+                                .expect("pool wait sources")
+                                .remove(&worker_identity);
+                            return;
+                        }
+                        Err(_) => {
+                            worker_source.send_replace(());
+                            std::thread::sleep(Duration::from_millis(50));
+                            continue;
+                        }
+                    };
+                    if bounds.newest_seq != newest {
+                        newest = bounds.newest_seq;
+                        worker_source.send_replace(());
+                    }
+                }
+            })
+            .map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("could not start a pool waiter")
+                    .with_source(err)
+            })?;
+        sources.insert(identity, source);
+        Ok(PoolChange(receiver))
+    }
+
+    // Live turns wait for a worker without taking a short-request permit.
+    pub(crate) async fn read<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, Error> + Send + 'static,
+    ) -> Result<T, Error>
+    where
+        T: Send + 'static,
+    {
+        let permit = self
+            .reads
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("pool read permits");
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation()
+        })
+        .await
+        .map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("pool read task failed")
+                .with_source(err)
+        })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plasmite::api::{Feed, LocalClient, PoolOptions, PoolRef};
+
+    #[tokio::test]
+    async fn shares_a_notification_and_retires_after_the_last_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let name = PoolRef::name("watched");
+        let mut pool = client.create_pool(&name, PoolOptions::new(65536)).unwrap();
+        let waiters = PoolWaiters::default();
+        let mut first = waiters.subscribe(&pool).unwrap();
+        let mut second = waiters.subscribe(&pool).unwrap();
+        assert_eq!(waiters.sources.lock().unwrap().len(), 1);
+        first.acknowledge();
+        second.acknowledge();
+        pool.feed_json(b"{}", Feed::new()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            first.changed().await;
+            second.changed().await;
+        })
+        .await
+        .unwrap();
+        drop(first);
+        assert_eq!(waiters.sources.lock().unwrap().len(), 1);
+        drop(second);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !waiters.sources.lock().unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+}

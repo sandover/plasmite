@@ -29,7 +29,7 @@ pub use message::{
     ViewFollow,
 };
 #[doc(hidden)]
-pub use message::{ReadStatus, message_json_from_frame};
+pub use message::{HostedRead, ReadStatus, message_json_from_frame};
 pub(crate) use message::{
     TailOutcome, TailState, format_ts, frame_matches_tags, message_from_udp_payload,
     select_frame_json, select_lite3_frame, select_view,

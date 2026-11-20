@@ -57,6 +57,7 @@ mod browser_session;
 use crate::interface_error_kind;
 use crate::interface_wire::{MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
+use crate::pool_wait::PoolWaiters;
 use browser_session::{BrowserSessions, COOKIE_NAME, LIFETIME};
 #[path = "http_v2.rs"]
 mod http_v2;
@@ -184,6 +185,7 @@ struct AppState {
     tail_semaphore: Arc<Semaphore>,
     mcp_semaphore: Arc<Semaphore>,
     storage_executor: StorageExecutor,
+    pool_waiters: PoolWaiters,
     ui_pool_watch: Mutex<Option<watch::Sender<Value>>>,
     activity: ActivityRegistry,
 }
@@ -211,6 +213,7 @@ pub(crate) async fn serve_secure_pair(
             .with_message("remote sharing requires a TLS certificate and key"));
     }
     let activity = ActivityRegistry::default();
+    let pool_waiters = PoolWaiters::default();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let local_server = prepare_server_with_access(
         &local,
@@ -218,6 +221,7 @@ pub(crate) async fn serve_secure_pair(
         true,
         activity.clone(),
         shutdown_rx.clone(),
+        pool_waiters.clone(),
     )
     .await?;
     let remote_server = prepare_server_with_access(
@@ -226,6 +230,7 @@ pub(crate) async fn serve_secure_pair(
         false,
         activity,
         shutdown_rx.clone(),
+        pool_waiters.clone(),
     )
     .await?;
     let local_listener = tokio::net::TcpListener::bind(local.bind)
@@ -430,6 +435,7 @@ async fn prepare_server_with_access(
     local_admin: bool,
     activity: ActivityRegistry,
     shutdown: watch::Receiver<bool>,
+    pool_waiters: PoolWaiters,
 ) -> Result<PreparedServer, Error> {
     validate_config(config)?;
 
@@ -468,6 +474,7 @@ async fn prepare_server_with_access(
         // Reuse the existing server concurrency budget instead of adding another
         // public tuning flag. Storage operations are shorter lived than tails.
         storage_executor: StorageExecutor::new(config.max_concurrent_tails),
+        pool_waiters,
         ui_pool_watch: Mutex::new(None),
         activity,
     });
@@ -986,6 +993,13 @@ async fn shutdown_signal() {
         return;
     }
     let _ = tokio::signal::ctrl_c().await;
+}
+
+async fn wait_for_revocation(grant: Option<&AccessGrant>) {
+    match grant {
+        Some(grant) => grant.revoked().await,
+        None => std::future::pending().await,
+    }
 }
 
 pub(crate) async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
@@ -2406,9 +2420,9 @@ mod pool_name_tests {
 mod tests {
     use super::{
         AccessStore, AppState, BrowserSessions, Error, ErrorKind, LocalClient, McpHandler,
-        ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest, error_response, healthz,
-        list_pools, mcp_post, same_origin, ui_pool_snapshot, validate_config,
-        validate_mcp_origin_header, validate_mcp_request_headers,
+        PoolWaiters, ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest,
+        error_response, healthz, list_pools, mcp_post, same_origin, ui_pool_snapshot,
+        validate_config, validate_mcp_origin_header, validate_mcp_request_headers,
     };
     use axum::Json;
     use axum::extract::State;
@@ -2436,6 +2450,7 @@ mod tests {
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
+            pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
             activity: Default::default(),
         });
@@ -2636,6 +2651,7 @@ mod tests {
             true,
             activity.clone(),
             tokio::sync::watch::channel(false).1,
+            PoolWaiters::default(),
         )
         .await
         .unwrap()
@@ -2690,6 +2706,7 @@ mod tests {
             false,
             activity,
             tokio::sync::watch::channel(false).1,
+            PoolWaiters::default(),
         )
         .await
         .unwrap()
@@ -3027,6 +3044,7 @@ mod tests {
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
+            pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
             activity: Default::default(),
         });
@@ -3103,6 +3121,7 @@ mod tests {
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
+            pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
             activity: Default::default(),
         });
@@ -3138,6 +3157,7 @@ mod tests {
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
+            pool_waiters: PoolWaiters::default(),
             ui_pool_watch: Mutex::new(None),
             activity: Default::default(),
         };
