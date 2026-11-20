@@ -1068,6 +1068,71 @@ fn mcp_events_filters_and_replays_from_a_pool_cursor() -> TestResult<()> {
     Ok(())
 }
 
+#[cfg(debug_assertions)]
+#[test]
+fn dropping_a_pending_mcp_follow_frees_its_slot() -> TestResult<()> {
+    use std::io::Write;
+
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::start_with_read_limits(
+        temp.path(),
+        "http",
+        &[("PLASMITE_TEST_LIVE_READ_LIMIT", "1")],
+    );
+    Pool::create(
+        temp.path().join("pending.plasmite"),
+        PoolOptions::new(65536),
+    )?;
+    let address = server.local_url.strip_prefix("http://").unwrap();
+    let follow = |timeout_ms| {
+        json!({
+            "jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name":"plasmite_follow","arguments":{"pool":"pending","timeout_ms":timeout_ms}
+            }
+        })
+    };
+    let request = mcp_payload(&follow(60_000)).to_string();
+    let mut socket = std::net::TcpStream::connect(address)?;
+    write!(
+        socket,
+        "POST /mcp HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\nMcp-Name: plasmite_follow\r\nContent-Length: {}\r\n\r\n{request}",
+        request.len()
+    )?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let probe = || -> TestResult<Value> {
+        Ok(mcp_request(&server.local_url, &follow(0))
+            .timeout(Duration::from_secs(1))
+            .send_json(mcp_payload(&follow(0)))?
+            .into_json::<Value>()?["result"]["structuredContent"]
+            .clone())
+    };
+    loop {
+        if probe()?["error_kind"] == "Busy" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "long MCP call never took the live slot"
+        );
+        sleep(Duration::from_millis(10));
+    }
+    drop(socket);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let result = probe()?;
+        if result["error_kind"] != "Busy" {
+            assert_eq!(result["messages"], json!([]));
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "disconnected call held its live slot"
+        );
+        sleep(Duration::from_millis(10));
+    }
+    Ok(())
+}
+
 #[test]
 fn remote_mcp_http_negotiates_both_versions_and_rejects_get() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;

@@ -297,6 +297,7 @@ fn retention_overrun_fails_finite_follow_and_reports_live_gap() -> TestResult {
     }
     Ok(())
 }
+#[cfg(debug_assertions)]
 #[test]
 fn input_only_server_refuses_reads_and_verified_capacity_is_bounded() -> TestResult {
     let input = Server::start(false, 1)?;
@@ -454,6 +455,7 @@ fn completed_follow_rejects_pool_replacement_before_answering_renewal() -> TestR
     Ok(())
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn completed_subscription_expiry_releases_capacity() -> TestResult {
     let server = Server::start(true, 1)?;
@@ -471,6 +473,7 @@ fn completed_subscription_expiry_releases_capacity() -> TestResult {
     Ok(())
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn close_during_history_selection_releases_the_subscriber_slot() -> TestResult {
     let server = Server::start(true, 1)?;
