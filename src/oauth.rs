@@ -1140,6 +1140,129 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn revoking_a_stalled_event_stream_frees_its_slot_without_a_write() {
+        use super::super::{
+            AppState, BrowserSessions, LocalClient, PoolRef, StorageExecutor, mcp_events,
+        };
+        use plasmite::api::{Feed, PoolOptions};
+        use std::time::Duration;
+        use tokio::sync::{Semaphore, watch};
+
+        let (directory, mut oauth) = service();
+        with_fixture_identity(&mut oauth, Default::default());
+        let first_key = oauth.access.issue("first reader").unwrap();
+        let second_key = oauth.access.issue("second reader").unwrap();
+        let first_token = exchange_fixture(&oauth, &first_key).await;
+        let second_token = exchange_fixture(&oauth, &second_key).await;
+        let principal = |token: &serde_json::Value| {
+            let bearer = token["access_token"].as_str().unwrap();
+            Some((
+                oauth.grant(bearer).unwrap(),
+                (oauth.clone(), bearer.to_owned()),
+            ))
+        };
+        let client = LocalClient::new().with_pool_dir(directory.path());
+        let mut pool = client
+            .create_pool(&PoolRef::name("events"), PoolOptions::new(64 * 1024))
+            .unwrap();
+        let slots = Arc::new(Semaphore::new(1));
+        let state = Arc::new(AppState {
+            client,
+            secure_access: Some(oauth.access.clone()),
+            oauth: Some(oauth.clone()),
+            browser_sessions: BrowserSessions::new(None).unwrap(),
+            local_admin: false,
+            max_tail_timeout_ms: 30_000,
+            tail_semaphore: slots.clone(),
+            fetch_semaphore: Arc::new(Semaphore::new(1)),
+            mcp_semaphore: Arc::new(Semaphore::new(1)),
+            storage_executor: StorageExecutor::new(1),
+            pool_waiters: Default::default(),
+            ui_pool_watch: Default::default(),
+            activity: Default::default(),
+        });
+        let (_stop, shutdown) = watch::channel(false);
+        let request = |id| {
+            json!({
+                "jsonrpc": "2.0", "id": id, "method": "events/stream",
+                "params": {
+                    "name": "pool.message", "arguments": {"pool": "events"},
+                    "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                              "io.modelcontextprotocol/clientCapabilities": {}},
+                },
+            })
+        };
+        let mut first = mcp_events::start_stream(
+            state.clone(),
+            shutdown.clone(),
+            principal(&first_token),
+            None,
+            request(1),
+        )
+        .await
+        .unwrap();
+        for sample in 0..=first.max_capacity() {
+            pool.feed(&json!({"sample": sample}), Feed::new()).unwrap();
+        }
+        // Keep all first-client output in the application queue. Events have
+        // filled their slots when only the two terminal slots remain.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while first.len() < first.max_capacity() - 2 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("fill the stalled stream's event queue");
+        let denied = mcp_events::start_stream(
+            state.clone(),
+            shutdown.clone(),
+            principal(&second_token),
+            None,
+            request(2),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(denied.code, -32025);
+
+        let (key_id, _) = oauth.access.authorize_key(&first_key).unwrap();
+        oauth.access.revoke(&key_id).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while slots.available_permits() == 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("revocation must free the slot while the first receiver is still stalled");
+        let mut second =
+            mcp_events::start_stream(state, shutdown, principal(&second_token), None, request(3))
+                .await
+                .unwrap();
+        let sse = |bytes: axum::body::Bytes| -> serde_json::Value {
+            serde_json::from_slice(bytes.strip_prefix(b"data: ").unwrap()).unwrap()
+        };
+        let active = tokio::time::timeout(Duration::from_secs(3), second.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(sse(active)["method"], "notifications/events/active");
+
+        let mut frames = Vec::new();
+        while let Some(bytes) = first.recv().await {
+            frames.push(sse(bytes));
+        }
+        let end = frames.pop().unwrap();
+        assert_eq!(end["id"], 1);
+        assert_eq!(end["result"]["resultType"], "complete");
+        let terminated = frames.pop().unwrap();
+        assert_eq!(terminated["method"], "notifications/events/terminated");
+        assert_eq!(terminated["params"]["error"]["code"], -32024);
+        assert_eq!(
+            terminated["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"],
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn metadata_client_uses_browser_authorization_and_independent_key_grants() {
         let directory = tempfile::tempdir().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

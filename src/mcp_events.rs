@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 
 const EVENT: &str = "pool.message";
 const SUBSCRIPTION_ID: &str = "io.modelcontextprotocol/subscriptionId";
+const ENDING_SLOTS: usize = 2;
 
 type Authorization = (AccessGrant, (Arc<OauthService>, String));
 
@@ -60,51 +61,52 @@ pub(super) async fn open(
     activity: Option<Extension<RequestActivity>>,
     payload: Value,
 ) -> Response {
-    let error_response = |err: McpJsonRpcError| {
-        let status = if matches!(err.code, -32600 | -32602) {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::OK
-        };
-        mcp_protocol_error(&payload, status, err)
-    };
-    let (id, params) = match parse_modern_request(payload.clone()) {
-        Ok(request) => request,
-        Err(err) => return error_response(err),
-    };
-    let request: StreamRequest = match serde_json::from_value(Value::Object(params)) {
-        Ok(request) => request,
-        Err(_) => {
-            return error_response(McpJsonRpcError::invalid_params(
-                "invalid event stream parameters",
-            ));
+    match start_stream(state, shutdown, authorization, activity, payload.clone()).await {
+        Ok(receive) => {
+            let body = ReceiverStream::new(receive).map(Ok::<_, std::convert::Infallible>);
+            let mut response = Response::new(Body::from_stream(body));
+            apply_sse_headers(&mut response);
+            response
+                .headers_mut()
+                .insert("x-accel-buffering", HeaderValue::from_static("no"));
+            response
         }
-    };
+        Err(err) => {
+            let status = if matches!(err.code, -32600 | -32602) {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::OK
+            };
+            mcp_protocol_error(&payload, status, err)
+        }
+    }
+}
+
+pub(super) async fn start_stream(
+    state: Arc<AppState>,
+    shutdown: watch::Receiver<bool>,
+    authorization: Option<Authorization>,
+    activity: Option<Extension<RequestActivity>>,
+    payload: Value,
+) -> Result<mpsc::Receiver<Bytes>, McpJsonRpcError> {
+    let (id, params) = parse_modern_request(payload)?;
+    let request: StreamRequest = serde_json::from_value(Value::Object(params))
+        .map_err(|_| McpJsonRpcError::invalid_params("invalid event stream parameters"))?;
     if request.name != EVENT {
-        return error_response(McpJsonRpcError {
+        return Err(McpJsonRpcError {
             code: -32023,
             message: "Unknown event".into(),
             data: Some(json!({"kind": "event"})),
         });
     }
-    let cursor = match request.cursor.as_deref().map(parse_cursor).transpose() {
-        Ok(cursor) => cursor,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&request.arguments.pool) {
-        Ok(pool) => pool,
-        Err(err) => return error_response(McpJsonRpcError::invalid_params(err.to_string())),
-    };
-    let permit = match acquire_tail_permit(&state) {
-        Ok(permit) => permit,
-        Err(_) => {
-            return error_response(McpJsonRpcError {
-                code: -32025,
-                message: "Too many live reads".into(),
-                data: Some(json!({"limit":"streams"})),
-            });
-        }
-    };
+    let cursor = request.cursor.as_deref().map(parse_cursor).transpose()?;
+    let pool_ref = pool_ref_from_request(&request.arguments.pool)
+        .map_err(|err| McpJsonRpcError::invalid_params(err.to_string()))?;
+    let permit = acquire_tail_permit(&state).map_err(|_| McpJsonRpcError {
+        code: -32025,
+        message: "Too many live reads".into(),
+        data: Some(json!({"limit":"streams"})),
+    })?;
     if let Some(Extension(activity)) = &activity {
         activity.pool(request.arguments.pool.clone(), "events/stream".to_string());
     }
@@ -123,14 +125,19 @@ pub(super) async fn open(
         let _permit = permit;
         let _activity = activity;
         let mut opened = Some(opened);
-        let mut revoked = std::pin::pin!(wait_for_revocation(
-            worker.authorization.as_ref().map(|(grant, _)| grant),
-        ));
         let result = tokio::select! {
             biased;
-            _ = &mut revoked => Err(McpJsonRpcError::new(-32024, "MCP access was revoked")),
+            _ = wait_for_revocation(worker.authorization.as_ref().map(|(grant, _)| grant)) => {
+                Err(McpJsonRpcError::new(-32024, "MCP access was revoked"))
+            }
             _ = worker.send.closed() => return,
-            _ = wait_for_shutdown(shutdown) => return,
+            _ = wait_for_shutdown(shutdown) => {
+                if opened.is_some() {
+                    Err(McpJsonRpcError::internal_error("server is shutting down"))
+                } else {
+                    Ok(())
+                }
+            }
             result = worker.follow(client, pool_ref, request, cursor, &mut opened) => result,
         };
         if let Some(opened) = opened {
@@ -148,17 +155,8 @@ pub(super) async fn open(
             "result":{"resultType":"complete","_meta":{(SUBSCRIPTION_ID):worker.id}}})));
     });
     match tokio::time::timeout(timeout, opening).await {
-        Ok(Ok(Ok(()))) => {
-            let body = ReceiverStream::new(receive).map(Ok::<_, std::convert::Infallible>);
-            let mut response = Response::new(Body::from_stream(body));
-            apply_sse_headers(&mut response);
-            response
-                .headers_mut()
-                .insert("x-accel-buffering", HeaderValue::from_static("no"));
-            response
-        }
-        Ok(Ok(Err(err))) => error_response(err),
-        _ => error_response(McpJsonRpcError::internal_error("event stream did not open")),
+        Ok(Ok(result)) => result.map(|()| receive),
+        _ => Err(McpJsonRpcError::internal_error("event stream did not open")),
     }
 }
 
@@ -372,10 +370,18 @@ impl StreamWorker {
     }
 
     async fn deliver(&self, bytes: Bytes) -> bool {
-        matches!(
-            tokio::time::timeout(self.timeout, self.send.send(bytes)).await,
-            Ok(Ok(()))
-        )
+        // Leave room for both the termination notice and the final result,
+        // even when the connection stops pulling events.
+        if self.send.capacity() > ENDING_SLOTS {
+            return self.send.try_send(bytes).is_ok();
+        }
+        let Ok(Ok(mut slots)) =
+            tokio::time::timeout(self.timeout, self.send.reserve_many(ENDING_SLOTS + 1)).await
+        else {
+            return false;
+        };
+        slots.next().expect("message slot was reserved").send(bytes);
+        true
     }
 }
 
