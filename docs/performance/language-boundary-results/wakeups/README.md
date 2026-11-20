@@ -4,6 +4,46 @@ Local followers can sleep until the operating system wakes them. These
 measurements show the delivered-message latency, idle work, and writer
 throughput of the notification paths on each tested host.
 
+## Live stream with one and four readers
+
+The local benchmark runs one publisher and starts each reader in its own
+process. Readers follow new messages through the C API and start waiting
+before the first publish. The publisher sends 1,500 messages at 250 messages/s
+in each run. Each message carries a 1 KiB payload plus a sequence and a timestamp.
+Each reader checks the pool sequence, the application sequence, and the payload.
+
+Latency starts just before the publisher encodes the input and ends when the
+last reader receives the complete JSON message from the C API. The benchmark
+uses the same monotonic clock across processes. It measures idle process CPU
+separately over eight seconds on the empty pool before each run, after startup.
+
+Five runs per reader count on an Apple M5 Pro Mac (macOS 27.2.1, release build
+from `11b9c06d769a23d8b5bd723c9fa11b3501c693b2`) gave these results:
+
+| Independent readers | Median p95 to reach all readers | Deliveries across five runs |
+| ---: | ---: | ---: |
+| 1 | 0.128 ms | 7,500 / 7,500 |
+| 4 | 0.192 ms | 30,000 / 30,000 |
+
+Each p95 run result came from 1,500 messages. The one-reader p95 ranged from
+0.116 to 0.155 ms, and the four-reader p95 ranged from 0.166 to 0.213 ms.
+In all ten runs, every reader received the final message within 0.34 ms.
+One four-reader sample took 4.62 ms to reach all readers, longer than the
+4 ms publish interval. Idle CPU ranged from 0.054% to 0.098% of one core per
+reader across 25 samples, with a median of 0.078%.
+
+Build the release library and pass its path to the existing harness:
+
+```sh
+cargo build --release --lib
+python3 docs/performance/language-boundary-results/wakeups/native-follow.py \
+  --live target/release/libplasmite.dylib --output /tmp/plasmite-live.json
+```
+
+The output records per-message latency for every reader and identifies the
+release library by SHA-256. The measured library hash was
+`ccd7701ec4568a5f201dece23286231e53a6424f51331fb51737f41951f3f60d`.
+
 ## Matched native follower benchmark
 
 Run [native-follow.py](native-follow.py) with the paths to two release

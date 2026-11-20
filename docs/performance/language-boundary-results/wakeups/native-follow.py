@@ -5,6 +5,7 @@ Each reader runs in its own process. Use a local filesystem for the pools.
 """
 import argparse
 import ctypes as c
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,8 @@ import time
 FOREVER = (1 << 64) - 1
 POINTER = c.c_void_p
 OUT = c.POINTER(POINTER)
+LIVE_PAYLOAD = b"x" * 1024
+LIVE_INTERVAL_NS = 4_000_000
 
 
 class Buffer(c.Structure):
@@ -116,7 +119,7 @@ def emit(value):
     print(json.dumps(value), flush=True)
 
 
-def reader(library, directory, count, paced):
+def reader(library, directory, count, workload):
     native = Native(library)
     client, pool = native.pool(directory, b"events", False)
     stream, error = POINTER(), POINTER()
@@ -147,9 +150,11 @@ def reader(library, directory, count, paced):
         msg = json.loads(c.string_at(buf.data, buf.size))
         free(c.byref(buf))
         assert msg["seq"] == expected
-        if paced:
+        if workload in ("paced", "live"):
             assert msg["data"]["n"] == expected
             samples.append(arrived - msg["data"]["sent"])
+        if workload == "live":
+            assert msg["data"]["payload"] == LIVE_PAYLOAD.decode()
     completed = time.perf_counter_ns()
     emit("delivered")
     assert wait(stream, FOREVER, c.byref(buf), c.byref(error)) == 3
@@ -179,10 +184,10 @@ def run(library, directory, readers, workload, count, phase, quiet, reader_libra
     encoded = native.encoded_fixture(directory) if workload == "encoded" else None
     publish = native.publisher(pool, encoded)
     followers = []
-    paced = workload == "paced"
+    paced = workload in ("paced", "live")
     try:
         for _ in range(readers):
-            argv = [sys.executable, __file__, "--reader", reader_library or library, directory, str(count), str(int(paced))]
+            argv = [sys.executable, __file__, "--reader", reader_library or library, directory, str(count), workload]
             followers.append(subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True))
         # A watchdog only bounds an interrupted or broken benchmark. It never
         # wakes a timed reader in the healthy run.
@@ -210,7 +215,16 @@ def run(library, directory, readers, workload, count, phase, quiet, reader_libra
         start = time.perf_counter_ns()
         for seq in range(1, count + 1):
             body = b'{"n":1,"sensor":"room"}'
-            if paced:
+            if workload == "live":
+                due = start + (seq - 1) * LIVE_INTERVAL_NS
+                remaining = due - time.perf_counter_ns()
+                while remaining > 0:
+                    time.sleep(remaining / 1e9)
+                    remaining = due - time.perf_counter_ns()
+                body = b'{"n":%d,"sent":%d,"payload":"%s"}' % (
+                    seq, time.perf_counter_ns(), LIVE_PAYLOAD
+                )
+            elif paced:
                 time.sleep((73 + (seq * 31 + phase * 17) % 39) / 1000)
                 body = json.dumps({"n": seq, "sent": time.perf_counter_ns()}).encode()
             assert publish(body) == seq
@@ -234,6 +248,37 @@ def run(library, directory, readers, workload, count, phase, quiet, reader_libra
                 p.kill()
             p.wait()
         native.close_pool(client, pool)
+
+
+def live():
+    parser = argparse.ArgumentParser(description="Measure one and four live local readers")
+    parser.add_argument("library", type=Path)
+    parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--count", type=int, default=1500)
+    parser.add_argument("--quiet", type=float, default=8)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(sys.argv[2:])
+    library = args.library.resolve()
+    rows = []
+    for repeat in range(args.repeats):
+        for readers in ((1, 4) if repeat % 2 == 0 else (4, 1)):
+            with tempfile.TemporaryDirectory() as directory:
+                argv = [sys.executable, __file__, "--worker", str(library), directory,
+                        str(readers), "live", str(args.count), str(repeat), str(args.quiet)]
+                row = json.loads(subprocess.check_output(argv, text=True, timeout=70))
+            deliveries = list(zip(*(r["delivery_ns"] for r in row["readers_data"]), strict=True))
+            assert len(deliveries) == args.count
+            latencies = sorted(map(max, deliveries))
+            row.update(repeat=repeat + 1, deliveries=len(deliveries) * readers,
+                       all_readers_p95_ms=latencies[(95 * len(latencies) - 1) // 100] / 1e6,
+                       last_message_ms=max(deliveries[-1]) / 1e6)
+            rows.append(row)
+            emit({key: row[key] for key in ("repeat", "readers", "deliveries", "all_readers_p95_ms",
+                                            "last_message_ms", "idle")})
+    args.output.write_text(json.dumps(dict(
+        library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),
+        interval_ns=LIVE_INTERVAL_NS, payload_bytes=len(LIVE_PAYLOAD), runs=rows
+    ), indent=2) + "\n")
 
 
 def main():
@@ -292,9 +337,11 @@ def main():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["--reader"]:
-        _, _, lib, directory, count, paced = sys.argv
-        reader(lib, directory, int(count), bool(int(paced)))
+    if sys.argv[1:2] == ["--live"]:
+        live()
+    elif sys.argv[1:2] == ["--reader"]:
+        _, _, lib, directory, count, workload = sys.argv
+        reader(lib, directory, int(count), workload)
     elif sys.argv[1:2] == ["--worker"]:
         _, _, lib, directory, readers, workload, count, phase, quiet, *other_lib = sys.argv
         emit(run(lib, directory, int(readers), workload, int(count), int(phase),
