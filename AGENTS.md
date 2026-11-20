@@ -53,6 +53,8 @@ docs/
 │
 │   Dated platform checks
 ├── validation/README.md                       — Read when finding dated platform checks and their support limits
+├── validation/mcp-wake-up.md                   — Read when evaluating resource notifications, sequence catch-up or agent wake-up evidence
+├── validation/mcp-wake-up/                     — Run the disposable subscription fixture for the evidence above
 ├── validation/windows-boot-validation.md           — Read when assessing Windows service and macOS LaunchDaemon checks and their limits
 ├── validation/debian-vm-validation/               — Read when inspecting collector code and raw VM observations
 ├── validation/debian-vm-validation.md              — Read when checking Linux service startup, reboot recovery, failed writes, and sensor guidance
