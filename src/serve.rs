@@ -998,6 +998,11 @@ async fn serve_tls(
                     continue;
                 }
 
+                // Send small stream frames without waiting to coalesce TCP writes.
+                if let Err(error) = stream.set_nodelay(true) {
+                    tracing::debug!(%error, "could not disable Nagle on a TLS socket");
+                }
+
                 let service = match make_service.call(peer_addr).await {
                     Ok(service) => service,
                     Err(_) => continue,
