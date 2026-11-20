@@ -67,7 +67,16 @@ resident memory from `ps` and counted open descriptors with `lsof`.
 | 2,048 | 2,048 | 82.0 MiB | 2,060 | 0 of 16 |
 
 Each idle connection cost one server descriptor and about 38 KiB of resident
-memory at 1,000 connections. A separate check opened 64 Events streams and
-successfully made a `tools/list` request over one shared HTTP/2 connection.
+memory at 1,000 connections.
+
+The release build at `687025b` also passed the OpenCode automation check.
+A separate test opened 1,000 Events streams across ten pools on 1,000
+HTTP/1.1 connections. With those streams open, all sixteen `tools/list`
+requests on fresh connections succeeded. The same test over ten shared
+HTTP/2 connections passed both the fresh requests and a `tools/list` call
+on a connection with 100 streams. A server that inherited a soft limit of
+256 descriptors and a higher hard limit also held 2,000 idle connections
+and served all sixteen fresh health requests.
+
 The idle socket figures measure the listener. The mixed-load benchmark
 measures the added cost of active subscriptions and message delivery.
