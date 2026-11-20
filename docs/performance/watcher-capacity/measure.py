@@ -16,17 +16,15 @@ import os
 from pathlib import Path
 import platform
 import re
-import signal
 import socket
 import ssl
-import subprocess
-import tempfile
 import time
 import uuid
 
 import httpx
 import psutil
 
+from fixture import temporary_server
 from http2_transport import Http2Transport
 
 VERSION = "2026-07-28"
@@ -43,59 +41,32 @@ class Endpoint:
     mcp_token: str | None = None
 
 
+def https_endpoint(url, pid, certificate, key, token):
+    match = re.fullmatch(r"pk1\.[0-9a-f]{64}\.([0-9a-f]{64})", key)
+    if not match:
+        raise ValueError("--http-key-file must contain the full access key from plasmite access invite")
+    context = ssl.create_default_context(cafile=certificate)
+    h2_context = ssl.create_default_context(cafile=certificate)
+    h2_context.set_alpn_protocols(["h2"])
+    return Endpoint(url, pid, context, match[1], h2_context, token)
+
+
 @contextmanager
 def endpoint(args):
     if args.url:
-        context = ssl.create_default_context(cafile=args.ca_file)
-        h2_context = ssl.create_default_context(cafile=args.ca_file)
-        h2_context.set_alpn_protocols(["h2"])
-        key = args.http_key_file.read_text().strip()
-        match = re.fullmatch(r"pk1\.[0-9a-f]{64}\.([0-9a-f]{64})", key)
-        if not match:
-            raise ValueError("--http-key-file must contain the full access key from plasmite access invite")
-        yield Endpoint(
-            args.url.rstrip("/"),
-            args.pid,
-            context,
-            match[1],
-            h2_context,
-            args.mcp_token_file.read_text().strip(),
+        yield https_endpoint(
+            args.url.rstrip("/"), args.pid, args.ca_file,
+            args.http_key_file.read_text().strip(), args.mcp_token_file.read_text().strip(),
         )
         return
 
-    with tempfile.TemporaryDirectory(prefix="plasmite-watchers-") as directory:
-        root = Path(directory)
-        ready = root / "ready"
-        pools = root / "pools"
-        pools.mkdir()
-        access = root / "access"
-        access.mkdir()
-        env = {**os.environ, "PLASMITE_SERVE_READY_FILE": str(ready), "PLASMITE_ACCESS_HOME": str(access)}
-        command = [
-            str(args.binary.resolve()), "--dir", str(pools), "serve",
-            "--bind", "127.0.0.1:0", "--remote-bind", "127.0.0.1:0",
-            "--shared-address", "https://localhost:9743", *args.server_arg,
-        ]
-        with (root / "server.log").open("wb") as log, subprocess.Popen(
-            command, env=env, stdout=log, stderr=log
-        ) as server:
-            try:
-                address = pools / ".plasmite-serve" / "local.json"
-                deadline = time.monotonic() + 15
-                while not (ready.exists() and address.exists()):
-                    if server.poll() is not None or time.monotonic() >= deadline:
-                        raise RuntimeError((root / "server.log").read_text(errors="replace"))
-                    time.sleep(.02)
-                url = "http://" + json.loads(address.read_text())
-                yield Endpoint(url, server.pid)
-            finally:
-                if server.poll() is None:
-                    server.send_signal(signal.SIGINT if os.name != "nt" else signal.SIGTERM)
-                    try:
-                        server.wait(10)
-                    except subprocess.TimeoutExpired:
-                        server.kill()
-                        server.wait()
+    with temporary_server(args.binary, args.https, args.server_arg) as (
+        url, pid, certificate, key, token
+    ):
+        if certificate:
+            yield https_endpoint(url, pid, certificate, key, token)
+        else:
+            yield Endpoint(url, pid)
 
 
 def client(server, http2=False, stall=False):
@@ -484,6 +455,9 @@ async def measure(server, args, rate):
                     admitted[mode] += 1
                 else:
                     rejected[f"{mode}: {result[:200]}"] += 1
+            admission = process_sample(process)
+            if args.idle_settle_seconds:
+                await asyncio.sleep(args.idle_settle_seconds)
             idle = await idle_sample(process, args.idle_seconds)
             extra_agent_call = await check_agent_connection(server, control_session, h2, control)
             stalled = None
@@ -510,6 +484,7 @@ async def measure(server, args, rate):
                 "admitted_or_scheduled": dict(admitted),
                 "rejected": dict(rejected),
                 "before_readers": baseline,
+                "admission": admission,
                 "idle_with_readers": idle,
                 "with_stalled_follower": stalled,
                 "extra_agent_call": extra_agent_call,
@@ -530,6 +505,7 @@ def parse_args():
     origin = parser.add_mutually_exclusive_group(required=True)
     origin.add_argument("--binary", type=Path, help="start a disposable server and use its local listener")
     origin.add_argument("--url", help="HTTPS origin of a dedicated, disposable benchmark server")
+    parser.add_argument("--https", action="store_true", help="use HTTPS on the disposable binary fixture")
     parser.add_argument("--pid", type=int, help="PID of the server at --url")
     parser.add_argument("--server-arg", action="append", default=[], help="extra argument for --binary")
     parser.add_argument("--ca-file", type=Path)
@@ -543,6 +519,8 @@ def parse_args():
     parser.add_argument("--rates", type=int, nargs="+", default=[20])
     parser.add_argument("--seconds", type=float, default=5)
     parser.add_argument("--idle-seconds", type=float, default=5)
+    parser.add_argument("--idle-settle-seconds", type=float, default=0,
+                        help="wait after admission before timing idle CPU")
     parser.add_argument("--drain-seconds", type=float, default=2)
     parser.add_argument("--controls", type=int, default=10)
     parser.add_argument("--stall", action="store_true", help="leave an extra HTTP reader unread")
@@ -556,9 +534,9 @@ def parse_args():
         (args.pid, args.ca_file, args.http_key_file, args.mcp_token_file)
     )):
         parser.error("--url requires HTTPS, --pid, --ca-file, --http-key-file and --mcp-token-file")
-    if args.url and args.server_arg:
-        parser.error("--server-arg requires --binary")
-    if args.binary and args.connections == "shared-h2":
+    if args.url and (args.https or args.server_arg):
+        parser.error("--https and --server-arg require --binary")
+    if args.binary and not args.https and args.connections == "shared-h2":
         parser.error("use the HTTPS listener to test HTTP/2")
     if min(args.events, args.http_follows, args.mcp_follows) < 0 or not (
         args.events or args.http_follows or args.mcp_follows
@@ -567,6 +545,8 @@ def parse_args():
     if min(args.pools, args.controls, args.seconds, args.idle_seconds, args.pool_mib,
            args.drain_seconds, args.payload_bytes, args.repeats, *args.rates) <= 0:
         parser.error("all workload sizes, durations and rates must be positive")
+    if args.idle_settle_seconds < 0:
+        parser.error("--idle-settle-seconds cannot be negative")
     return args
 
 
@@ -584,12 +564,13 @@ def main():
         "platform": platform.platform(),
         "machine": platform.machine(),
         "python": platform.python_version(),
-        "listener": "https" if args.url else "local",
+        "listener": "https" if args.url or args.https else "local",
         "workload": {
             "payload_text_bytes": args.payload_bytes,
             "pool_capacity_mib": args.pool_mib,
             "target_duration_seconds": args.seconds,
             "idle_sample_seconds": args.idle_seconds,
+            "idle_settle_seconds": args.idle_settle_seconds,
             "drain_seconds": args.drain_seconds,
             "controls": args.controls,
             "server_arguments": args.server_arg,

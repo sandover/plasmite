@@ -55,25 +55,24 @@ info calls take.
 
 ## Measure HTTPS and mixed load
 
-Use a disposable server bound to loopback, with a certificate that the benchmark
-can trust. Start the actual release executable and record its process ID. Create
-a full-access key for this fixture. Save the key and an MCP access token obtained
-through the ordinary browser authorization flow in separate files readable only
-by your account. The benchmark uses the key for HTTP pool operations and the
-OAuth token for MCP. It creates pools in the server directory, so stop and
-discard the fixture after the run. Restart it from a fresh directory between
-before-and-after comparisons.
+The benchmark can launch its own HTTPS listener on loopback. It generates a
+certificate and a disposable access key, then creates a synthetic MCP grant in
+its temporary directory. Plasmite checks both credentials on its normal
+HTTPS routes. This measures the connection and read paths, including
+authentication on each request. The benchmark deletes the temporary server
+directory after the trial.
 
 ```sh
 uv run docs/performance/watcher-capacity/measure.py \
-  --url https://localhost:9743 --pid "$server_pid" \
-  --ca-file "$certificate" --http-key-file "$access_key_file" \
-  --mcp-token-file "$mcp_token_file" --revision "$revision" \
+  --binary "$candidate" --https --revision "$revision" \
   --connections shared-h2 --events 1000 --http-follows 16 --mcp-follows 16 \
   --pools 10 --stall --rates 20 50 100 200 --seconds 15 --controls 30 \
-  --idle-seconds 35 \
+  --idle-settle-seconds 12 --idle-seconds 35 \
   --output "$scratch/shared-http2.json"
 ```
+
+You can also point the benchmark at a dedicated test listener with `--url`.
+Use `--help` to see the certificate, credential file, and process ID options.
 
 Repeat with `--connections separate-h1` to give each watcher its own HTTP/1.1
 connection. In the HTTP/2 run, groups of up to 50 watchers reuse a connection,
@@ -94,6 +93,9 @@ With `--stall`, a separate HTTP follower stops reading. The producer writes
 The benchmark records server memory before opening readers, after they go idle,
 and after filling the stalled follower's queue. It times short requests again
 while still sending to the other readers. This test estimates server memory
-under the workload, including the pages the stall writes touch. Use the same
+under the workload, including the pages the stall writes touch.
+`--idle-settle-seconds` gives unused blocking workers time to exit before the
+idle sample. A 35-second sample also includes the normal 30-second stream
+heartbeat. Use the same
 payload sizes and rates for each build. Alternate before-and-after runs and
 compare the spread before drawing conclusions.
