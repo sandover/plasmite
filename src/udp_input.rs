@@ -1,5 +1,6 @@
 //! Route UDP appends and subscriptions over the shared pool directory.
 
+use crate::pool_wait::{PoolChange, PoolWaiters};
 use crate::udp_wire as wire;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use plasmite::api::{Cursor, CursorResult, FrameRef, Pool, PoolPathGuard};
@@ -100,17 +101,56 @@ fn append(client: &LocalClient, mut packet: Vec<u8>) -> Result<(), Error> {
 type Key = (SocketAddr, wire::Id);
 struct Subscription {
     selection: wire::Selection,
-    cancelled: AtomicBool,
-    expiry: Mutex<Instant>,
-    renewal_requested: AtomicBool,
+    lease: watch::Sender<Lease>,
 }
+
+#[derive(Clone, Copy)]
+struct Lease {
+    expiry: Option<Instant>,
+    progress_requests: u64,
+}
+
+impl Lease {
+    fn active(self) -> bool {
+        self.expiry.is_some_and(|expiry| Instant::now() < expiry)
+    }
+}
+
 impl Subscription {
+    fn new(selection: wire::Selection) -> Self {
+        let (lease, _) = watch::channel(Lease {
+            expiry: Some(Self::new_expiry()),
+            progress_requests: 0,
+        });
+        Self { selection, lease }
+    }
+
+    fn new_expiry() -> Instant {
+        Instant::now() + Duration::from_millis(wire::LEASE_MS)
+    }
+
+    fn expiry(&self) -> Option<Instant> {
+        self.lease.borrow().expiry
+    }
+
     fn active(&self) -> bool {
-        !self.cancelled.load(Ordering::Acquire)
-            && self
-                .expiry
-                .lock()
-                .is_ok_and(|expiry| Instant::now() < *expiry)
+        self.lease.borrow().active()
+    }
+
+    fn cancel(&self) {
+        self.lease.send_modify(|lease| lease.expiry = None);
+    }
+
+    fn request_progress(&self) {
+        // A repeat of the original subscription requests progress without renewing.
+        self.lease.send_modify(|lease| lease.progress_requests += 1);
+    }
+
+    fn renew(&self) {
+        self.lease.send_modify(|lease| {
+            lease.expiry = Some(Self::new_expiry());
+            lease.progress_requests += 1;
+        });
     }
 }
 
@@ -280,13 +320,15 @@ fn select_start(
         }
     }
 }
-fn follow_worker(
+async fn follow_worker(
     socket: Arc<std::net::UdpSocket>,
     client: LocalClient,
     key: Key,
     sub: Arc<Subscription>,
+    waiters: PoolWaiters,
+    lease: watch::Receiver<Lease>,
 ) -> (Key, Option<Completed>) {
-    let completion = match follow_pool(&socket, &client, key, &sub) {
+    let completion = match follow_pool(socket.clone(), client, key, &sub, &waiters, lease).await {
         Ok(completion) => completion,
         Err(err) => {
             if sub.active() {
@@ -297,6 +339,7 @@ fn follow_worker(
     };
     (key, completion)
 }
+
 fn completed_worker(
     socket: Arc<std::net::UdpSocket>,
     key: Key,
@@ -316,121 +359,205 @@ fn completed_worker(
     (key, completion)
 }
 
-fn follow_pool(
-    socket: &std::net::UdpSocket,
-    client: &LocalClient,
+async fn follow_pool(
+    socket: Arc<std::net::UdpSocket>,
+    client: LocalClient,
     key: Key,
     sub: &Arc<Subscription>,
+    waiters: &PoolWaiters,
+    lease: watch::Receiver<Lease>,
 ) -> Result<Option<Completed>, Error> {
-    let pool = client.open_pool(&PoolRef::name(&sub.selection.pool), false)?;
-    let (start_seq, upper, cursor, pending) = select_start(&pool, &sub.selection.start, sub)?;
-    let progress = wire::Progress {
-        start_seq,
-        next_seq: start_seq,
-        end_seq: (!sub.selection.live).then_some(upper),
-        lease_ms: wire::LEASE_MS,
-        terminal: false,
-    };
-    follow_selected(socket, key, sub, pool, cursor, pending, progress)
+    let opening_sub = sub.clone();
+    let registry = waiters.clone();
+    let (follow, change) = waiters
+        .read(move || {
+            let pool = client.open_pool(&PoolRef::name(&opening_sub.selection.pool), false)?;
+            let (start_seq, upper, cursor, pending) =
+                select_start(&pool, &opening_sub.selection.start, &opening_sub)?;
+            let change = opening_sub
+                .selection
+                .live
+                .then(|| registry.subscribe(&pool))
+                .transpose()?;
+            let progress = wire::Progress {
+                start_seq,
+                next_seq: start_seq,
+                end_seq: (!opening_sub.selection.live).then_some(upper),
+                lease_ms: wire::LEASE_MS,
+                terminal: false,
+            };
+            Ok((
+                Follow {
+                    pool,
+                    cursor,
+                    pending,
+                    progress,
+                },
+                change,
+            ))
+        })
+        .await?;
+    follow_selected(socket, key, sub, follow, change, waiters, lease).await
 }
 
-fn follow_selected(
-    socket: &std::net::UdpSocket,
+struct Follow {
+    pool: Pool,
+    cursor: Cursor,
+    pending: Option<FrameRef>,
+    progress: wire::Progress,
+}
+
+enum Turn {
+    Ready(Follow),
+    Waiting(Follow),
+    Finished(Completed),
+    Closed,
+}
+
+impl Follow {
+    fn turn(
+        mut self,
+        socket: &std::net::UdpSocket,
+        key: Key,
+        sub: Arc<Subscription>,
+        progress_requested: bool,
+    ) -> Result<Turn, Error> {
+        if !sub.active() {
+            return Ok(Turn::Closed);
+        }
+        self.pool.check_current_path()?;
+        if progress_requested {
+            reply(socket, key, wire::PROGRESS, &self.progress);
+        }
+        // Limit examined records, including older records skipped during selection.
+        for _ in 0..32 {
+            if !sub.active() {
+                return Ok(Turn::Closed);
+            }
+            if self
+                .progress
+                .end_seq
+                .is_some_and(|end| self.progress.next_seq > end)
+            {
+                self.progress.terminal = true;
+                let progress = self.progress.clone();
+                return self.finish(socket, key, sub, Ok(progress));
+            }
+            let next = match self.pending.take() {
+                Some(frame) => CursorResult::Message(frame),
+                None => self.cursor.next(&self.pool)?,
+            };
+            let next_retained = match next {
+                CursorResult::Message(frame) if frame.seq < self.progress.next_seq => continue,
+                CursorResult::Message(frame) if frame.seq > self.progress.next_seq => {
+                    Some(frame.seq)
+                }
+                CursorResult::Message(frame) => {
+                    self.pool.check_current_path()?;
+                    send_frame(socket, key, &frame)?;
+                    self.progress.next_seq = frame.seq.saturating_add(1);
+                    None
+                }
+                CursorResult::FellBehind => self.pool.bounds()?.oldest_seq,
+                CursorResult::WouldBlock => return Ok(Turn::Waiting(self)),
+            };
+            if let Some(oldest) = next_retained.filter(|seq| *seq > self.progress.next_seq) {
+                let gap = Error::retention_gap(self.progress.next_seq, oldest);
+                return self.finish(socket, key, sub, Err(gap));
+            }
+        }
+        Ok(Turn::Ready(self))
+    }
+
+    fn finish(
+        self,
+        socket: &std::net::UdpSocket,
+        key: Key,
+        sub: Arc<Subscription>,
+        ending: Result<wire::Progress, Error>,
+    ) -> Result<Turn, Error> {
+        let completed = Completed {
+            sub,
+            pool: self.pool.into_path_guard(),
+            ending,
+        };
+        completed.reply(socket, key)?;
+        Ok(Turn::Finished(completed))
+    }
+}
+
+fn send_frame(socket: &std::net::UdpSocket, key: Key, frame: &FrameRef) -> Result<(), Error> {
+    let reason = match wire::data(key.1, frame.seq, frame.time, &frame.payload) {
+        Some(packet) => match socket.send_to(&packet, key.0) {
+            Ok(_) => return Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => wire::Reason::Pressure,
+            Err(err) => {
+                return Err(Error::new(ErrorKind::Io)
+                    .with_message("UDP data send failed")
+                    .with_source(err));
+            }
+        },
+        None => wire::Reason::Oversized,
+    };
+    reply(
+        socket,
+        key,
+        wire::SKIP,
+        &wire::Skip {
+            first: frame.seq,
+            last: frame.seq,
+            reason,
+        },
+    );
+    Ok(())
+}
+
+async fn follow_selected(
+    socket: Arc<std::net::UdpSocket>,
     key: Key,
     sub: &Arc<Subscription>,
-    pool: Pool,
-    mut cursor: Cursor,
-    mut pending: Option<FrameRef>,
-    mut progress: wire::Progress,
+    mut follow: Follow,
+    mut change: Option<PoolChange>,
+    waiters: &PoolWaiters,
+    mut lease: watch::Receiver<Lease>,
 ) -> Result<Option<Completed>, Error> {
-    let mut notify = plasmite::api::notify::open_for_pool(&pool);
-    pool.check_current_path()?;
-    reply(socket, key, wire::PROGRESS, &progress);
-    let mut batch = 0;
-    let ending = loop {
-        if !sub.active() {
+    let mut last_progress_request = None;
+    loop {
+        let lease_state = *lease.borrow_and_update();
+        let Some(expiry) = lease_state.expiry.filter(|expiry| Instant::now() < *expiry) else {
             return Ok(None);
-        }
-        pool.check_current_path()?;
-        if sub.renewal_requested.swap(false, Ordering::AcqRel) {
-            reply(socket, key, wire::PROGRESS, &progress);
-        }
-        if progress.end_seq.is_some_and(|end| progress.next_seq > end) {
-            progress.terminal = true;
-            break Ok(progress);
-        }
-        let next = match pending.take() {
-            Some(frame) => CursorResult::Message(frame),
-            None => cursor.next(&pool)?,
         };
-        match next {
-            CursorResult::Message(frame) => {
-                if frame.seq < progress.next_seq {
-                    continue;
-                }
-                if frame.seq > progress.next_seq {
-                    break Err(Error::retention_gap(progress.next_seq, frame.seq));
-                }
-                let reason = match wire::data(key.1, frame.seq, frame.time, &frame.payload) {
-                    Some(packet) => match socket.send_to(&packet, key.0) {
-                        Ok(_) => None,
-                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                            Some(wire::Reason::Pressure)
-                        }
-                        Err(err) => {
-                            return Err(Error::new(ErrorKind::Io)
-                                .with_message("UDP data send failed")
-                                .with_source(err));
-                        }
-                    },
-                    None => Some(wire::Reason::Oversized),
-                };
-                if let Some(reason) = reason {
-                    reply(
-                        socket,
-                        key,
-                        wire::SKIP,
-                        &wire::Skip {
-                            first: frame.seq,
-                            last: frame.seq,
-                            reason,
-                        },
-                    );
-                }
-                progress.next_seq = frame.seq.saturating_add(1);
-                batch += 1;
-                if batch == 32 {
-                    std::thread::yield_now();
-                    batch = 0;
-                }
-            }
-            CursorResult::FellBehind => {
-                if let Some(oldest) = pool.bounds()?.oldest_seq
-                    && oldest > progress.next_seq
-                {
-                    break Err(Error::retention_gap(progress.next_seq, oldest));
-                }
-            }
-            CursorResult::WouldBlock => {
-                if let Some(notify) = notify.as_mut() {
-                    if notify.wait(Duration::from_millis(50))
-                        == plasmite::api::notify::NotifyWait::Unavailable
-                    {
-                        std::thread::sleep(Duration::from_millis(50));
-                    }
-                } else {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-            }
+        let progress_requested = last_progress_request != Some(lease_state.progress_requests);
+        last_progress_request = Some(lease_state.progress_requests);
+        if let Some(change) = &mut change {
+            change.acknowledge();
         }
-    };
-    let completed = Completed {
-        sub: sub.clone(),
-        pool: pool.into_path_guard(),
-        ending,
-    };
-    completed.reply(socket, key)?;
-    Ok(Some(completed))
+        let task_socket = socket.clone();
+        let task_sub = sub.clone();
+        match waiters
+            .read(move || follow.turn(&task_socket, key, task_sub, progress_requested))
+            .await?
+        {
+            Turn::Ready(reader) => {
+                follow = reader;
+                tokio::task::yield_now().await;
+            }
+            Turn::Waiting(reader) => {
+                follow = reader;
+                let Some(change) = &mut change else {
+                    // A finite read has no later writes to wait for.
+                    return Err(Error::new(ErrorKind::Io).with_message("UDP fetch ended early"));
+                };
+                tokio::select! {
+                    _ = lease.changed() => {},
+                    _ = tokio::time::sleep_until(expiry.into()) => {},
+                    _ = change.changed() => {},
+                }
+            }
+            Turn::Finished(completed) => return Ok(Some(completed)),
+            Turn::Closed => return Ok(None),
+        }
+    }
 }
 
 pub(crate) async fn run(
@@ -439,6 +566,7 @@ pub(crate) async fn run(
     shutdown: watch::Receiver<bool>,
     follow_enabled: bool,
     capacity: usize,
+    waiters: PoolWaiters,
 ) -> Result<(), Error> {
     let std_socket = socket
         .into_std()
@@ -489,7 +617,7 @@ pub(crate) async fn run(
     let result = loop {
         let next_expiry = completed
             .values()
-            .map(|done| *done.sub.expiry.lock().expect("UDP lease"))
+            .filter_map(|done| done.sub.expiry())
             .min()
             .unwrap_or_else(Instant::now);
         let packet = tokio::select! { biased;
@@ -539,7 +667,7 @@ pub(crate) async fn run(
         if op == wire::CLOSE && body.is_empty() {
             completed.remove(&key);
             if let Some(sub) = subscriptions.get(&key) {
-                sub.cancelled.store(true, Ordering::Release);
+                sub.cancel();
             }
             continue;
         }
@@ -551,12 +679,9 @@ pub(crate) async fn run(
         };
         let Some(selection) = request.selection else {
             if let Some(sub) = subscriptions.get(&key).filter(|sub| sub.active()) {
-                *sub.expiry.lock().expect("UDP lease") =
-                    Instant::now() + Duration::from_millis(wire::LEASE_MS);
-                sub.renewal_requested.store(true, Ordering::Release);
+                sub.renew();
             } else if let Some(done) = completed.remove(&key).filter(|done| done.sub.active()) {
-                *done.sub.expiry.lock().expect("UDP lease") =
-                    Instant::now() + Duration::from_millis(wire::LEASE_MS);
+                done.sub.renew();
                 subscriptions.insert(key, done.sub.clone());
                 let socket = outgoing.clone();
                 workers.spawn_blocking(move || completed_worker(socket, key, done));
@@ -594,7 +719,7 @@ pub(crate) async fn run(
         }
         if let Some(sub) = subscriptions.get(&key) {
             if sub.selection == selection && sub.active() {
-                sub.renewal_requested.store(true, Ordering::Release);
+                sub.request_progress();
             } else {
                 failure(
                     &outgoing,
@@ -629,19 +754,20 @@ pub(crate) async fn run(
             );
             continue;
         }
-        let sub = Arc::new(Subscription {
-            selection,
-            cancelled: AtomicBool::new(false),
-            expiry: Mutex::new(Instant::now() + Duration::from_millis(wire::LEASE_MS)),
-            renewal_requested: AtomicBool::new(false),
-        });
+        let sub = Arc::new(Subscription::new(selection));
+        let lease = sub.lease.subscribe();
         subscriptions.insert(key, sub.clone());
-        let socket = outgoing.clone();
-        let client = client.clone();
-        workers.spawn_blocking(move || follow_worker(socket, client, key, sub));
+        workers.spawn(follow_worker(
+            outgoing.clone(),
+            client.clone(),
+            key,
+            sub,
+            waiters.clone(),
+            lease,
+        ));
     };
     for sub in subscriptions.values() {
-        sub.cancelled.store(true, Ordering::Release);
+        sub.cancel();
     }
     writer_stop.store(true, Ordering::Release);
     drop(append_tx);
@@ -660,8 +786,8 @@ pub(crate) async fn run(
 mod tests {
     use super::*;
 
-    #[test]
-    fn stale_cursor_sends_a_replayable_terminal_gap() {
+    #[tokio::test]
+    async fn stale_cursor_sends_a_replayable_terminal_gap() {
         let directory = tempfile::tempdir().unwrap();
         let client = LocalClient::new().with_pool_dir(directory.path());
         let name = PoolRef::name("events");
@@ -670,16 +796,11 @@ mod tests {
             .unwrap();
         pool.feed(&serde_json::json!({"seed": true}), Feed::new())
             .unwrap();
-        let sub = Arc::new(Subscription {
-            selection: wire::Selection {
-                pool: "events".into(),
-                start: wire::Start::New,
-                live: true,
-            },
-            cancelled: AtomicBool::new(false),
-            expiry: Mutex::new(Instant::now() + Duration::from_secs(5)),
-            renewal_requested: AtomicBool::new(false),
-        });
+        let sub = Arc::new(Subscription::new(wire::Selection {
+            pool: "events".into(),
+            start: wire::Start::New,
+            live: true,
+        }));
         let (start, _, cursor, pending) = select_start(&pool, &wire::Start::New, &sub).unwrap();
         let padding = serde_json::json!({"padding": "x".repeat(1536)});
         let oldest = (0..64)
@@ -704,9 +825,26 @@ mod tests {
             lease_ms: wire::LEASE_MS,
             terminal: false,
         };
-        let completed = follow_selected(&sender, key, &sub, pool, cursor, pending, progress)
-            .unwrap()
-            .expect("cache the terminal error for renewal");
+        let waiters = PoolWaiters::default();
+        let change = waiters.subscribe(&pool).unwrap();
+        let sender = Arc::new(sender);
+        let completed = follow_selected(
+            sender.clone(),
+            key,
+            &sub,
+            Follow {
+                pool,
+                cursor,
+                pending,
+                progress,
+            },
+            Some(change),
+            &waiters,
+            sub.lease.subscribe(),
+        )
+        .await
+        .unwrap()
+        .expect("cache the terminal error for renewal");
         let mut packet = [0; 1024];
         let count = receiver.recv(&mut packet).unwrap();
         assert_eq!(wire::parse(&packet[..count]).unwrap().0, wire::PROGRESS);
@@ -721,8 +859,8 @@ mod tests {
         assert_eq!(error.next_seq, Some(oldest));
     }
 
-    #[test]
-    fn finite_follow_releases_worker_and_mapping_before_lease_ends() {
+    #[tokio::test]
+    async fn finite_follow_releases_worker_and_mapping_before_lease_ends() {
         let directory = tempfile::tempdir().unwrap();
         let client = LocalClient::new().with_pool_dir(directory.path());
         client
@@ -734,28 +872,80 @@ mod tests {
         let sender = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").unwrap());
         let receiver = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let key = (receiver.local_addr().unwrap(), [1; 16]);
-        let sub = Arc::new(Subscription {
-            selection: wire::Selection {
-                pool: "events".into(),
-                start: wire::Start::Last(1),
-                live: false,
-            },
-            cancelled: AtomicBool::new(false),
-            expiry: Mutex::new(Instant::now() + Duration::from_millis(wire::LEASE_MS)),
-            renewal_requested: AtomicBool::new(false),
-        });
-        let worker_sub = sub.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let worker = std::thread::spawn(move || {
-            tx.send(follow_worker(sender, client, key, worker_sub))
-                .unwrap();
-        });
-        let result = rx.recv_timeout(Duration::from_secs(2));
-        sub.cancelled.store(true, Ordering::Release);
-        worker.join().unwrap();
-        let (_, completion) = result.expect("finite worker must return before lease expiry");
+        let sub = Arc::new(Subscription::new(wire::Selection {
+            pool: "events".into(),
+            start: wire::Start::Last(1),
+            live: false,
+        }));
+        let lease = sub.lease.subscribe();
+        let (_, completion) = tokio::time::timeout(
+            Duration::from_secs(2),
+            follow_worker(sender, client, key, sub, PoolWaiters::default(), lease),
+        )
+        .await
+        .expect("finite worker must return before lease expiry");
         let completion = completion.expect("completion record");
         assert!(completion.ending.unwrap().terminal);
         completion.pool.check_current_path().unwrap();
+    }
+    #[test]
+    fn idle_udp_followers_share_waiting_and_keep_storage_workers_available() {
+        // One blocking thread runs the synchronous client; the other must
+        // remain available to open readers, append, and serve every follower.
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(2)
+            .build()
+            .unwrap()
+            .block_on(async {
+                let directory = tempfile::tempdir().unwrap();
+                let client = LocalClient::new().with_pool_dir(directory.path());
+                let pool = PoolRef::name("events");
+                client
+                    .create_pool(&pool, plasmite::api::PoolOptions::new(1024 * 1024))
+                    .unwrap();
+                let socket = bind("127.0.0.1:0".parse().unwrap()).await.unwrap();
+                let address = socket.local_addr().unwrap();
+                let (shutdown, receiver) = watch::channel(false);
+                let server = tokio::spawn(run(
+                    socket,
+                    client,
+                    receiver,
+                    true,
+                    64,
+                    PoolWaiters::default(),
+                ));
+                let result = tokio::task::spawn_blocking(move || {
+                    let udp = plasmite::api::UdpClient::new(format!("udp://{address}"))
+                        .unwrap()
+                        .open_pool(&pool)
+                        .unwrap();
+                    let read = || plasmite::api::Read::new().tags(["sample"]);
+                    let mut followers: Vec<_> =
+                        (0..48).map(|_| udp.follow(read()).unwrap()).collect();
+                    udp.feed(
+                        &serde_json::json!({"sample": 42}),
+                        Feed::new().tags(["sample"]),
+                    )
+                    .unwrap();
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    for follower in &mut followers {
+                        loop {
+                            assert!(Instant::now() < deadline, "UDP delivery timed out");
+                            if let Some(plasmite::api::UdpEvent::Frame(frame)) = follower
+                                .next_event_timeout(Duration::from_millis(50))
+                                .unwrap()
+                            {
+                                assert_eq!(frame.seq, 1);
+                                break;
+                            }
+                        }
+                    }
+                })
+                .await;
+                shutdown.send_replace(true);
+                server.await.unwrap().unwrap();
+                result.unwrap();
+            });
     }
 }
