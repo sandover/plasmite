@@ -1215,3 +1215,25 @@
 {"version":1,"task_id":"3PQ7DF","kind":"created","at":"2026-11-20T23:01:14.477101Z"}
 {"version":1,"task_id":"LMI5QV","kind":"created","at":"2026-11-20T23:01:14.520843Z"}
 {"version":1,"task_id":"WFOLLY","kind":"created","at":"2026-11-20T23:01:14.564769Z"}
+{"version":1,"task_id":"WFOLLY","kind":"done","at":"2026-11-20T23:10:31.188869Z","text":"On the macOS release build, 1,000 event streams on separate HTTP/1.1 connections and on shared HTTP/2 connections each left room for ordinary MCP calls. Recorded client traces and socket costs in docs/validation/mcp-wake-up.md."}
+{"version":1,"task_id":"YBWWNO","kind":"done","at":"2026-11-20T23:10:31.259249Z","text":"Recorded the 234cc5b release baseline. Verified shared notifications, recovery polling, writes between reading and waiting, bounded tag scans, pool replacement, and waiter cleanup on macOS."}
+{"version":1,"task_id":"3PQ7DF","kind":"done","at":"2026-11-20T23:10:31.345567Z","text":"Events replay and retention tests pass. OpenCode 2.3.2 woke over HTTPS and fetched only the matching message. Revoking a stream with a full queue freed its slot before the next write."}
+{"version":1,"task_id":"KH2B6R","kind":"done","at":"2026-11-20T23:10:31.410693Z","text":"Verified JSON and Lite3 reads, fetch continuation, and successful fetch and feed beside a stalled large follow. The browser pool view displayed a new message."}
+{"version":1,"task_id":"LMI5QV","kind":"done","at":"2026-11-20T23:10:31.494404Z","text":"A test with one blocking worker delivered a datagram to 48 idle followers. UDP integration tests passed for renewal, expiry, replacement and arrival order."}
+{"version":1,"task_id":"XJUNGH","kind":"done","at":"2026-11-20T23:10:31.583082Z","text":"Verified that hosted MCP follows waiting for a tagged message leave the short-request slot available. Existing MCP tool and protocol tests pass."}
+{"version":1,"task_id":"YOOHZK","kind":"result","at":"2026-11-20T23:10:37.084444Z","text":"Tested old saved settings and regenerated service commands. A native reinstall needs an administrator."}
+{"version":1,"task_id":"CDXHSH","kind":"created","at":"2026-11-20T23:11:36.250696Z"}
+{"version":1,"task_id":"WVGFMX","kind":"created","at":"2026-11-20T23:11:36.250722Z"}
+{"version":1,"task_id":"OF2HT7","kind":"created","at":"2026-11-20T23:11:36.250725Z"}
+{"version":1,"task_id":"2EWZ55","kind":"created","at":"2026-11-20T23:11:36.250728Z"}
+{"version":1,"task_id":"OHXPST","kind":"created","at":"2026-11-20T23:11:36.25073Z"}
+{"version":1,"task_id":"SZT2UX","kind":"created","at":"2026-11-20T23:11:36.250731Z"}
+{"version":1,"task_id":"GUM2S3","kind":"created","at":"2026-11-20T23:11:36.250733Z"}
+{"version":1,"task_id":"HNLJEO","kind":"created","at":"2026-11-20T23:11:36.300302Z"}
+{"version":1,"task_id":"4KQOVN","kind":"created","at":"2026-11-20T23:11:36.300327Z"}
+{"version":1,"task_id":"2AB6D6","kind":"created","at":"2026-11-20T23:11:36.30034Z"}
+{"version":1,"task_id":"5W7UHD","kind":"created","at":"2026-11-20T23:11:36.347446Z"}
+{"version":1,"task_id":"UGRP3Z","kind":"created","at":"2026-11-20T23:11:36.347474Z"}
+{"version":1,"task_id":"TEZNC7","kind":"created","at":"2026-11-20T23:11:36.347478Z"}
+{"version":1,"task_id":"7N4U6N","kind":"created","at":"2026-11-20T23:11:36.391298Z"}
+{"version":1,"task_id":"FXJ3GC","kind":"created","at":"2026-11-20T23:11:36.391319Z"}
