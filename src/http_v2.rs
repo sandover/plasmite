@@ -4,7 +4,7 @@ use super::*;
 use crate::interface_wire::{
     LITE3_CONTROL_RECORD, LITE3_MESSAGE_ID_LEN, LITE3_MESSAGE_RECORD, encode_lite3_record_header,
 };
-use plasmite::api::{Read, ReadStatus, Since};
+use plasmite::api::{HostedRead, Read, ReadStatus, Since};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(super) fn routes(shutdown: watch::Receiver<bool>) -> Router<Arc<AppState>> {
@@ -139,30 +139,54 @@ async fn read<const LIVE: bool>(
         .get(header::ACCEPT)
         .and_then(|value| value.to_str().ok())
         == Some("application/x-plasmite-lite3-stream");
-    let permit = acquire_tail_permit(&state)?;
+    let permit = if LIVE {
+        acquire_tail_permit(&state)?
+    } else {
+        state
+            .fetch_semaphore
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                Error::new(ErrorKind::Busy)
+                    .with_message("the server is at its limit of finite fetches")
+                    .with_hint("Retry after an in-flight fetch completes.")
+            })?
+    };
     let client = state.client.clone();
     let timeout = Duration::from_millis(state.max_tail_timeout_ms);
-    let (send, receive) = mpsc::channel(16);
+    // Live reads keep one message ready for the connection and one slot for
+    // the terminal record. A large message cannot multiply across a queue.
+    let (send, receive) = mpsc::channel(if LIVE { 2 } else { 16 });
     let (opened, opening) = tokio::sync::oneshot::channel();
-    let revoked = grant.as_ref().map(AccessGrant::cancellation_flag);
     let worker = ReadWorker {
         send,
         timeout,
         shutdown,
-        revoked,
+        revoked: grant.as_ref().map(AccessGrant::cancellation_flag),
         binary,
     };
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        worker.run::<LIVE>(
-            client,
-            pool_ref,
-            options,
-            query.until,
-            query.incarnation,
-            opened,
-        );
-    });
+    if LIVE {
+        let waiters = state.pool_waiters.clone();
+        let grant = grant.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            worker
+                .run_follow(client, pool_ref, options, waiters, grant, opened)
+                .await;
+        });
+    } else {
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            worker.run_fetch(
+                client,
+                pool_ref,
+                options,
+                query.until,
+                query.incarnation,
+                opened,
+            );
+        });
+    }
     let incarnation = tokio::time::timeout(timeout, opening)
         .await
         .map_err(|_| Error::new(ErrorKind::Busy).with_message("stream opening took too long"))?
@@ -209,7 +233,125 @@ struct ReadWorker {
 }
 
 impl ReadWorker {
-    fn run<const LIVE: bool>(
+    async fn run_follow(
+        self,
+        client: LocalClient,
+        pool_ref: PoolRef,
+        options: Read,
+        waiters: PoolWaiters,
+        grant: Option<AccessGrant>,
+        opened: tokio::sync::oneshot::Sender<Result<String, Error>>,
+    ) {
+        let mut opened = Some(opened);
+        let result = tokio::select! {
+            biased;
+            _ = wait_for_revocation(grant.as_ref()) => {
+                Err(Error::new(ErrorKind::Permission).with_message("access key revoked"))
+            }
+            _ = self.send.closed() => return,
+            _ = wait_for_shutdown(self.shutdown.clone()) => {
+                Err(Error::new(ErrorKind::Io).with_message("server is shutting down"))
+            }
+            result = self.follow(client, pool_ref, options, &waiters, &mut opened) => result,
+        };
+        if let Err(error) = result {
+            if let Some(opened) = opened {
+                let _ = opened.send(Err(error));
+            } else {
+                self.error(&error);
+            }
+        }
+    }
+
+    async fn follow(
+        &self,
+        client: LocalClient,
+        pool_ref: PoolRef,
+        options: Read,
+        waiters: &PoolWaiters,
+        opened: &mut Option<tokio::sync::oneshot::Sender<Result<String, Error>>>,
+    ) -> Result<(), Error> {
+        let registry = waiters.clone();
+        let (incarnation, initial) = waiters
+            .read(move || {
+                let pool = Arc::new(client.open_pool(&pool_ref, false)?);
+                let incarnation = pool.incarnation()?;
+                let initial = match HostedRead::new(pool.clone(), options) {
+                    Ok(reader) => {
+                        let changes = registry.subscribe(&pool)?;
+                        Ok((reader, changes))
+                    }
+                    Err(error) if error.kind() == ErrorKind::RetentionGap => Err(error),
+                    Err(error) => return Err(error),
+                };
+                Ok((incarnation, initial))
+            })
+            .await?;
+        if opened
+            .take()
+            .expect("opening signal available")
+            .send(Ok(incarnation))
+            .is_err()
+        {
+            return Ok(());
+        }
+        let (mut reader, mut changes) = initial?;
+        let binary = self.binary;
+        loop {
+            // Wait for the next message slot without holding a storage worker.
+            // Reserve two slots so an error still fits after the message.
+            if self.send.capacity() <= 1 {
+                match tokio::time::timeout(self.timeout, self.send.reserve_many(2)).await {
+                    Ok(Ok(available)) => drop(available),
+                    Ok(Err(_)) => return Ok(()),
+                    Err(_) => {
+                        return Err(Error::new(ErrorKind::Io).with_message("follow output stalled"));
+                    }
+                }
+            }
+            changes.acknowledge();
+            let (returned, record, remaining) = waiters
+                .read(move || {
+                    let mut remaining = 32;
+                    let record = if binary {
+                        match reader.turn(&mut remaining)? {
+                            ReadStatus::Message(frame) => {
+                                ReadStatus::Message(encode_binary_frame(frame))
+                            }
+                            ReadStatus::Waiting => ReadStatus::Waiting,
+                            ReadStatus::Complete => ReadStatus::Complete,
+                            ReadStatus::Cancelled => ReadStatus::Cancelled,
+                        }
+                    } else {
+                        reader.turn_json(&mut remaining)?
+                    };
+                    Ok((reader, record, remaining))
+                })
+                .await?;
+            reader = returned;
+            match record {
+                ReadStatus::Message(bytes) => {
+                    if self.revoked() {
+                        return Err(
+                            Error::new(ErrorKind::Permission).with_message("access key revoked")
+                        );
+                    }
+                    if self.send.try_send(self.record(bytes)).is_err() {
+                        return Ok(());
+                    }
+                }
+                ReadStatus::Waiting if remaining == 0 => tokio::task::yield_now().await,
+                ReadStatus::Waiting => changes.changed().await,
+                ReadStatus::Complete => {
+                    self.control(json!({"type":"complete"}));
+                    return Ok(());
+                }
+                ReadStatus::Cancelled => return Ok(()),
+            }
+        }
+    }
+
+    fn run_fetch(
         self,
         client: LocalClient,
         pool_ref: PoolRef,
@@ -238,9 +380,7 @@ impl ReadWorker {
                     .with_message("pool was replaced during the read")));
             return;
         }
-        let stream = if LIVE {
-            pool.follow_lite3(options)
-        } else if let Some(until) = until {
+        let stream = if let Some(until) = until {
             pool.continue_fetch_lite3(options, until)
         } else {
             pool.fetch_lite3(options)
@@ -259,7 +399,7 @@ impl ReadWorker {
             }
         };
         let started = Instant::now();
-        if !LIVE && started.checked_add(self.timeout).is_none() {
+        if started.checked_add(self.timeout).is_none() {
             let _ = opened.send(Err(
                 Error::new(ErrorKind::Usage).with_message("stream limit is out of range")
             ));
@@ -270,7 +410,6 @@ impl ReadWorker {
         }
 
         const CHECK_INTERVAL: Duration = Duration::from_millis(50);
-        let mut stalled_since = None;
         loop {
             if self.send.is_closed() {
                 return;
@@ -285,37 +424,19 @@ impl ReadWorker {
             }
             // Keep one channel slot for a terminal record. Advance the read only
             // when there is room to hand off the next matching frame.
-            let full = self.send.capacity() <= 1;
-            if !full {
-                stalled_since = None;
-            }
-            let wait = if !LIVE {
-                self.timeout.saturating_sub(started.elapsed())
-            } else if full {
-                let since = stalled_since.get_or_insert_with(Instant::now);
-                self.timeout.saturating_sub(since.elapsed())
-            } else {
-                CHECK_INTERVAL
-            };
+            let wait = self.timeout.saturating_sub(started.elapsed());
             if wait.is_zero() {
-                if LIVE {
-                    self.error(&Error::new(ErrorKind::Io).with_message("follow output stalled"));
-                } else {
-                    self.cutoff(reader.position());
-                }
+                self.cutoff(reader.position());
                 return;
             }
             let wait = wait.min(CHECK_INTERVAL);
-            if full {
-                // Wake as soon as the response makes progress. Cap each wait
-                // so the worker also checks revocation and server shutdown.
+            if self.send.capacity() <= 1 {
+                // Check for revocation and shutdown while the client is stalled.
                 let room = tokio::runtime::Handle::current().block_on(async {
                     tokio::time::timeout(wait, self.send.reserve_many(2)).await
                 });
-                match room {
-                    Ok(Ok(_)) => stalled_since = None,
-                    Ok(Err(_)) => return,
-                    Err(_) => {}
+                if matches!(room, Ok(Err(_))) {
+                    return;
                 }
                 continue;
             }
@@ -325,11 +446,8 @@ impl ReadWorker {
                 reader.poll_json(wait)
             };
             match record {
-                Ok(ReadStatus::Message(mut bytes)) => {
-                    if !self.binary {
-                        bytes.push(b'\n');
-                    }
-                    if !self.revoked() && self.send.try_send(bytes.into()).is_err() {
+                Ok(ReadStatus::Message(bytes)) => {
+                    if !self.revoked() && self.send.try_send(self.record(bytes)).is_err() {
                         return;
                     }
                 }
@@ -345,6 +463,13 @@ impl ReadWorker {
                 }
             }
         }
+    }
+
+    fn record(&self, mut bytes: Vec<u8>) -> Bytes {
+        if !self.binary {
+            bytes.push(b'\n');
+        }
+        bytes.into()
     }
 
     fn revoked(&self) -> bool {
@@ -399,6 +524,42 @@ fn encode_control(binary: bool, record: Value) -> Bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::Request;
+    use tower_service::Service;
+
+    async fn follow_worker(
+        client: LocalClient,
+        pool_ref: PoolRef,
+        options: Read,
+        timeout: Duration,
+        grant: Option<AccessGrant>,
+        shutdown: watch::Receiver<bool>,
+        permit: OwnedSemaphorePermit,
+    ) -> (mpsc::Receiver<Bytes>, tokio::task::JoinHandle<()>) {
+        let (send, receive) = mpsc::channel(2);
+        let (opened, opening) = tokio::sync::oneshot::channel();
+        let done = tokio::spawn(async move {
+            let _permit = permit;
+            ReadWorker {
+                send,
+                timeout,
+                shutdown,
+                revoked: grant.as_ref().map(AccessGrant::cancellation_flag),
+                binary: false,
+            }
+            .run_follow(
+                client,
+                pool_ref,
+                options,
+                PoolWaiters::default(),
+                grant,
+                opened,
+            )
+            .await;
+        });
+        opening.await.unwrap().unwrap();
+        (receive, done)
+    }
 
     #[tokio::test]
     async fn quiet_read_releases_its_slot_when_response_closes() {
@@ -409,23 +570,19 @@ mod tests {
             .create_pool(&reference, PoolOptions::new(65536))
             .unwrap();
         let permits = Arc::new(Semaphore::new(1));
-        let permit = permits.clone().try_acquire_owned().unwrap();
-        let (send, receive) = mpsc::channel(2);
-        let (opened, opening) = tokio::sync::oneshot::channel();
-        let done = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            ReadWorker {
-                send,
-                timeout: Duration::from_secs(5),
-                shutdown: watch::channel(false).1,
-                revoked: None,
-                binary: false,
-            }
-            .run::<true>(client, reference, Read::new(), None, None, opened);
-        });
-        opening.await.unwrap().unwrap();
+        let (_stop, shutdown) = watch::channel(false);
+        let (receive, done) = follow_worker(
+            client,
+            reference,
+            Read::new(),
+            Duration::from_secs(5),
+            None,
+            shutdown,
+            permits.clone().try_acquire_owned().unwrap(),
+        )
+        .await;
         drop(receive);
-        tokio::time::timeout(Duration::from_millis(500), done)
+        tokio::time::timeout(Duration::from_secs(2), done)
             .await
             .unwrap()
             .unwrap();
@@ -440,22 +597,28 @@ mod tests {
         client
             .create_pool(&reference, PoolOptions::new(65536))
             .unwrap();
-        let (send, mut receive) = mpsc::channel(2);
-        let (opened, opening) = tokio::sync::oneshot::channel();
-        let revoked = Arc::new(AtomicBool::new(false));
-        let worker = ReadWorker {
-            send,
-            timeout: Duration::from_secs(5),
-            shutdown: watch::channel(false).1,
-            revoked: Some(revoked.clone()),
-            binary: false,
-        };
-        let done = tokio::task::spawn_blocking(move || {
-            worker.run::<true>(client, reference, Read::new(), None, None, opened);
-        });
-        opening.await.unwrap().unwrap();
-        revoked.store(true, Ordering::Release);
-        let bytes = tokio::time::timeout(Duration::from_millis(500), receive.recv())
+        let access = AccessStore::open(dir.path(), None, None, None).unwrap();
+        let key = access.issue("reader").unwrap();
+        let grant = access
+            .authorize_secret(key.rsplit('.').next().unwrap())
+            .unwrap();
+        let id = serde_json::to_value(access.list().unwrap()).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (_stop, shutdown) = watch::channel(false);
+        let (mut receive, done) = follow_worker(
+            client,
+            reference,
+            Read::new(),
+            Duration::from_secs(5),
+            Some(grant),
+            shutdown,
+            Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),
+        )
+        .await;
+        access.revoke(&id).unwrap();
+        let bytes = tokio::time::timeout(Duration::from_secs(2), receive.recv())
             .await
             .unwrap()
             .unwrap();
@@ -473,20 +636,17 @@ mod tests {
         client
             .create_pool(&reference, PoolOptions::new(65536))
             .unwrap();
-        let (send, mut receive) = mpsc::channel(2);
-        let (opened, opening) = tokio::sync::oneshot::channel();
         let (stop, shutdown) = watch::channel(false);
-        let done = tokio::task::spawn_blocking(move || {
-            ReadWorker {
-                send,
-                timeout: Duration::from_secs(5),
-                shutdown,
-                revoked: None,
-                binary: false,
-            }
-            .run::<true>(client, reference, Read::new(), None, None, opened);
-        });
-        opening.await.unwrap().unwrap();
+        let (mut receive, done) = follow_worker(
+            client,
+            reference,
+            Read::new(),
+            Duration::from_secs(5),
+            None,
+            shutdown,
+            Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),
+        )
+        .await;
         stop.send_replace(true);
         tokio::time::timeout(Duration::from_secs(2), done)
             .await
@@ -510,28 +670,17 @@ mod tests {
             pool.feed(&json!({"n": n}), Default::default()).unwrap();
         }
         let permits = Arc::new(Semaphore::new(1));
-        let permit = permits.clone().try_acquire_owned().unwrap();
-        let (send, mut receive) = mpsc::channel(2);
-        let (opened, opening) = tokio::sync::oneshot::channel();
-        let done = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            ReadWorker {
-                send,
-                timeout: Duration::from_millis(100),
-                shutdown: watch::channel(false).1,
-                revoked: None,
-                binary: false,
-            }
-            .run::<true>(
-                client,
-                pool_ref,
-                Read::since(Since::Oldest),
-                None,
-                None,
-                opened,
-            );
-        });
-        opening.await.unwrap().unwrap();
+        let (_stop, shutdown) = watch::channel(false);
+        let (mut receive, done) = follow_worker(
+            client,
+            pool_ref,
+            Read::since(Since::Oldest),
+            Duration::from_millis(100),
+            None,
+            shutdown,
+            permits.clone().try_acquire_owned().unwrap(),
+        )
+        .await;
         tokio::time::timeout(Duration::from_secs(2), done)
             .await
             .unwrap()
@@ -544,6 +693,91 @@ mod tests {
         assert_eq!(error["error"]["kind"], "Io");
         assert_eq!(error["error"]["message"], "follow output stalled");
         assert!(receive.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_and_feed_keep_their_slots_when_a_large_follow_stalls() {
+        let dir = tempfile::tempdir().unwrap();
+        let reference = PoolRef::name("stalled");
+        let mut pool = LocalClient::new()
+            .with_pool_dir(dir.path())
+            .create_pool(&reference, PoolOptions::new(2 * 1024 * 1024))
+            .unwrap();
+        for n in 1..=3 {
+            pool.feed(
+                &json!({"n": n, "text": "x".repeat(256 * 1024)}),
+                Default::default(),
+            )
+            .unwrap();
+        }
+        let config = ServeConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            pool_dir: dir.path().to_owned(),
+            tls_cert: None,
+            tls_key: None,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 5_000,
+            max_concurrent_tails: 1,
+        };
+        let (_stop, shutdown) = watch::channel(false);
+        let mut app = prepare_server_with_access(
+            &config,
+            None,
+            true,
+            ActivityRegistry::default(),
+            shutdown,
+            PoolWaiters::default(),
+        )
+        .await
+        .unwrap()
+        .app;
+        let get = |uri| {
+            Request::builder()
+                .uri(uri)
+                .header("host", "localhost")
+                .body(Body::empty())
+                .unwrap()
+        };
+        let follow = app
+            .call(get("/v2/pools/stalled/follow?since=oldest"))
+            .await
+            .unwrap();
+        assert_eq!(follow.status(), StatusCode::OK);
+        let second = app.call(get("/v2/pools/stalled/follow")).await.unwrap();
+        assert_eq!(second.status(), StatusCode::LOCKED);
+        let started = Instant::now();
+        let fetch = app
+            .call(get("/v2/pools/stalled/fetch?last=1"))
+            .await
+            .unwrap();
+        assert_eq!(fetch.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(fetch.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let mut lines = bytes.split(|byte| *byte == b'\n');
+        let fetched: Value = serde_json::from_slice(lines.next().unwrap()).unwrap();
+        assert_eq!(fetched["seq"], 3);
+        assert_eq!(lines.next().unwrap(), br#"{"type":"complete"}"#);
+        let fetch_elapsed = started.elapsed();
+        let started = Instant::now();
+        let feed = app
+            .call(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v2/pools/stalled/feed")
+                    .header("host", "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"data":{"ok":true}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(feed.status(), StatusCode::OK);
+        eprintln!(
+            "HTTP with a stalled follow: fetch {fetch_elapsed:?}, feed {:?}",
+            started.elapsed()
+        );
+        drop(follow);
     }
 
     #[tokio::test]
@@ -568,7 +802,7 @@ mod tests {
                 revoked: None,
                 binary: false,
             };
-            worker.run::<false>(client, pool_ref, Read::new(), None, None, opened);
+            worker.run_fetch(client, pool_ref, Read::new(), None, None, opened);
         });
         opening.await.unwrap().unwrap();
         done.await.unwrap();
