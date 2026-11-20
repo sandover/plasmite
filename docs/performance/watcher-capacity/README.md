@@ -43,6 +43,39 @@ core and returned HTTP 423 for every finite fetch attempted while the streams
 were open. Its [single-stream baseline](results/baseline-debian-arm64-event-1.json)
 is available for comparison.
 
+## Raise the write rate
+
+The [Debian ARM64 shared HTTP/2 trial](results/debian-arm64-h2-ramp.json)
+increased the rate with the same 1,032 readers and stalled follower. Each step
+ran for eight seconds. All scheduled writes committed and all matching
+readers received their messages at every rate.
+
+| Writes per second | Tagged receipts | p95 to last receipt |
+| ---: | ---: | ---: |
+| 20 | 8,256/8,256 | 48.27 ms |
+| 50 | 20,640/20,640 | 51.17 ms |
+| 100 | 41,280/41,280 | 49.44 ms |
+
+Short requests all succeeded. Several p95 comparisons exceeded twice their
+idle times. In the two faster trials, finite fetch p95 reached about 42–46 ms
+under load, so this run leaves the short-request latency target open.
+
+## One reader on macOS
+
+[Three alternating pairs](results/macos-single-pairs.json) sent two seconds
+of local loopback traffic at 20 writes per second. Every trial delivered all
+20 tagged messages.
+
+| Reader | Baseline p95 range | Candidate p95 range |
+| --- | ---: | ---: |
+| One MCP Events stream | 2.30–3.24 ms | 3.24–3.67 ms |
+| One HTTP follower | 2.24–3.14 ms | 3.53–3.70 ms |
+
+These samples leave the single-reader latency target open. The Debian and
+Windows virtual machines were also working on the host. The candidate
+schedules a short read after the common waiter signals. In the baseline,
+the same blocking thread waits and reads.
+
 ## Release baseline on macOS
 
 The Apple M5 Pro ran macOS 27.2 (arm64). Each row shows one local loopback
