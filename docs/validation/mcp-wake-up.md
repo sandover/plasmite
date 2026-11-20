@@ -31,3 +31,43 @@ The earlier experiments checked core resource notifications. The [MCP Events ext
 Codex CLI 0.171.0-alpha.13 rejected the app-server event-stream request for a custom server because that path only supports hosted apps. ChatGPT Work documents webhooks from the earlier Events draft. Its guide uses `capabilities.events`, while the beta extension uses `capabilities.extensions`. Check Work against the beta wire format before claiming compatibility. [Codex implementation](https://github.com/openai/codex/blob/rust-v0.171.0-alpha.13/codex-rs/app-server/src/request_processors/mcp_event_stream.rs) · [ChatGPT Work webhook guide](https://developers.openai.com/plugins/build/mcp-events)
 
 Claude Code 2.1.329 connected to a disposable Plasmite HTTP server with its default protocol settings and fetched a known message. The request trace showed modern MCP discovery and tool calls. Claude advertised no client extensions and sent no Events requests during the check. [Claude Code 2.1.329 release](https://github.com/anthropics/claude-code/releases/tag/v2.1.329)
+
+
+## HTTPS connections
+
+On November 20, 2026, a disposable Plasmite HTTPS server on macOS ARM64 recorded
+which HTTP version clients used for ordinary MCP requests. Each client trusted
+the fixture's certificate and used a fixture bearer.
+
+| Client | Ordinary MCP requests | Events |
+| --- | --- | --- |
+| OpenCode 2.3.2 | HTTP/1.1 | An automation held one connection for its stream and opened a second to fetch the matching message. |
+| Claude Code 2.1.329 | HTTP/1.1 | The client sent no Events requests in the wake-up check. |
+| Codex CLI 0.171.0-alpha.13 | HTTP/2 | The app-server rejected an Events stream for this custom server. |
+
+A scripted local model created the OpenCode automation and fetched the matching
+message at sequence 2. The append at sequence 1 used a different tag and left
+the automation idle. The server logged HTTP/1.1 throughout. It held one socket
+while the automation waited and two after the fetch, with the stream still open.
+
+To isolate the listener's connection cost, a test client made a `GET /healthz`
+request on each of a set of separate HTTP/1.1 connections, then left the
+connections open. At each count it attempted another 16 health requests on
+fresh connections. Both builds used the source at `234cc5b`, with only the
+connection cap changed for the second build. The server used release builds on
+macOS 27.2.1 with a process limit of 4,096 file descriptors. The test read
+resident memory from `ps` and counted open descriptors with `lsof`.
+
+| Listener cap | Open connections | Server memory | Server descriptors | Fresh requests served |
+| ---: | ---: | ---: | ---: | ---: |
+| 128, baseline at commit `234cc5b` | 128 | 13.7 MiB | 140 | 0 of 16 |
+| 2,048 | 0 | 7.2 MiB | 12 | 16 of 16 |
+| 2,048 | 1,000 | 44.8 MiB | 1,012 | 16 of 16 |
+| 2,048 | 2,000 | 80.2 MiB | 2,012 | 16 of 16 |
+| 2,048 | 2,048 | 82.0 MiB | 2,060 | 0 of 16 |
+
+Each idle connection cost one server descriptor and about 38 KiB of resident
+memory at 1,000 connections. A separate check opened 64 Events streams and
+successfully made a `tools/list` request over one shared HTTP/2 connection.
+The idle socket figures measure the listener. The mixed-load benchmark
+measures the added cost of active subscriptions and message delivery.
