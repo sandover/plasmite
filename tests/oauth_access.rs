@@ -54,6 +54,7 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         .call()?
         .into_json()?;
     assert_eq!(metadata["issuer"], issuer);
+    assert_eq!(metadata["client_id_metadata_document_supported"], true);
     assert_eq!(
         metadata["code_challenge_methods_supported"],
         json!(["S256"])
@@ -151,7 +152,11 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         .nth(1)
         .and_then(|rest| rest.split('"').next())
         .ok_or("missing approval request")?;
-    let approval_form = form(&[("request", request_id), ("access_key", server.access_key())]);
+    let approval_form = form(&[
+        ("request", request_id),
+        ("access_key", server.access_key()),
+        ("decision", "approve"),
+    ]);
     assert!(matches!(
         agent
             .post(&format!("{issuer}/oauth/approve"))
@@ -655,7 +660,11 @@ fn approve_code(
         .set("Origin", issuer)
         .set("Cookie", &cookie)
         .set("Content-Type", "application/x-www-form-urlencoded")
-        .send_string(&form(&[("request", request), ("access_key", access_key)]))
+        .send_string(&form(&[
+            ("request", request),
+            ("access_key", access_key),
+            ("decision", "approve"),
+        ]))
         .map_err(|error| format!("approve_code: {error:?}"))?;
     let callback = Url::parse(approved.header("location").ok_or("missing callback")?)?;
     assert_eq!(

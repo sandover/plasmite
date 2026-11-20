@@ -3,6 +3,9 @@
 //! The access key remains the authority. OAuth records hold only its stable key ID,
 //! so a key revocation stops every token and an in-flight MCP operation.
 
+#[path = "oauth/cimd.rs"]
+mod cimd;
+
 use axum::extract::{ConnectInfo, Form, FromRequest, RawQuery, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -40,6 +43,7 @@ pub(crate) struct OauthService {
     state: Mutex<OAuthState>,
     pending: Mutex<HashMap<String, Pending>>,
     request_windows: Mutex<HashMap<IpAddr, (u64, u16)>>,
+    metadata: cimd::Resolver,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -69,6 +73,8 @@ struct Code {
     resource: String,
     key_id: String,
     expires_at: u64,
+    #[serde(default = "dcr_refresh_default")]
+    permits_refresh: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -78,6 +84,8 @@ struct Grant {
     resource: String,
     key_id: String,
     refresh_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cimd_redirect: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -97,6 +105,7 @@ struct Pending {
     state: Option<String>,
     csrf: String,
     expires_at: u64,
+    permits_refresh: bool,
 }
 
 #[derive(Deserialize)]
@@ -122,6 +131,9 @@ struct TokenRequest {
     code_verifier: Option<String>,
     refresh_token: Option<String>,
     resource: Option<String>,
+    client_secret: Option<String>,
+    client_assertion: Option<String>,
+    client_assertion_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +164,7 @@ impl OauthService {
             state: Mutex::new(state),
             pending: Mutex::new(HashMap::new()),
             request_windows: Mutex::new(HashMap::new()),
+            metadata: cimd::Resolver::default(),
         })))
     }
 
@@ -282,6 +295,7 @@ async fn server_metadata(State(oauth): State<Arc<OauthService>>) -> Response {
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "authorization_response_iss_parameter_supported": true,
+        "client_id_metadata_document_supported": true,
         "token_endpoint_auth_methods_supported": ["none"]
     }))
     .into_response()
@@ -407,22 +421,34 @@ async fn authorize_page(
     {
         return oauth_error(StatusCode::BAD_REQUEST, "invalid_request");
     }
-    let client = match oauth.state.lock() {
-        Ok(state) => state
-            .clients
-            .iter()
-            .find(|client| {
-                client.id == *client_id && client.expires_at.is_none_or(|expiry| expiry > now())
-            })
-            .cloned(),
-        Err(_) => return server_error(),
+    let (client_name, client_host, permits_refresh) = if is_cimd(client_id) {
+        if [oauth.issuer.as_str(), oauth.resource.as_str()].contains(&client_id) {
+            return oauth_error(StatusCode::BAD_REQUEST, "invalid_client");
+        }
+        match oauth.metadata.lookup(client_id).await {
+            Ok(client) if client.allows_redirect(redirect_uri) => (
+                client.name().to_owned(),
+                cimd::Document::id_host(client_id),
+                client.permits_refresh(),
+            ),
+            Ok(_) => return oauth_error(StatusCode::BAD_REQUEST, "invalid_request"),
+            Err(error) => return metadata_error(&oauth, client_id, error),
+        }
+    } else {
+        let state = match oauth.state.lock() {
+            Ok(state) => state,
+            Err(_) => return server_error(),
+        };
+        let Some(client) = state.clients.iter().find(|client| {
+            client.id == *client_id && client.expires_at.is_none_or(|expiry| expiry > now())
+        }) else {
+            return oauth_error(StatusCode::BAD_REQUEST, "invalid_client");
+        };
+        if !client.redirect_uris.iter().any(|uri| uri == redirect_uri) {
+            return oauth_error(StatusCode::BAD_REQUEST, "invalid_request");
+        }
+        (client.name.clone(), None, true)
     };
-    let Some(client) = client else {
-        return oauth_error(StatusCode::BAD_REQUEST, "invalid_client");
-    };
-    if !client.redirect_uris.iter().any(|uri| uri == redirect_uri) {
-        return oauth_error(StatusCode::BAD_REQUEST, "invalid_request");
-    }
     let request_id = match random_hex() {
         Ok(value) => value,
         Err(response) => return response,
@@ -433,14 +459,15 @@ async fn authorize_page(
     };
     let pending = Pending {
         source: peer.ip(),
-        client_id: client.id,
-        client_name: client.name,
+        client_id: client_id.to_owned(),
+        client_name,
         redirect_uri: redirect_uri.to_owned(),
         challenge: challenge.to_owned(),
         resource: oauth.resource.clone(),
         state: request.state.map(|state| state.into_owned()),
         csrf: csrf.clone(),
         expires_at: now() + CODE_LIFETIME,
+        permits_refresh,
     };
     let mut state = match oauth.pending.lock() {
         Ok(state) => state,
@@ -455,7 +482,10 @@ async fn authorize_page(
             >= MAX_PENDING_PER_SOURCE
         || state
             .values()
-            .filter(|entry| entry.client_id == pending.client_id)
+            .filter(|entry| {
+                entry.client_id == pending.client_id
+                    && (!is_cimd(&pending.client_id) || entry.source == pending.source)
+            })
             .count()
             >= MAX_PENDING_PER_CLIENT
     {
@@ -464,9 +494,17 @@ async fn authorize_page(
     let name = html(&pending.client_name);
     let resource = html(&pending.resource);
     let callback = html(&pending.redirect_uri);
+    let client_origin = client_host
+        .map(|host| {
+            format!(
+                "<p>The client metadata comes from <strong>{}</strong>.</p>",
+                html(&host)
+            )
+        })
+        .unwrap_or_default();
     state.insert(request_id.clone(), pending);
     let page = format!(
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Authorize MCP access</title><h1>Authorize MCP access</h1><p><strong>{name}</strong> requests access to the pools at {resource}.</p><p>The client name is supplied by the client and does not prove its identity. The response will go to {callback}.</p><form method=\"post\" action=\"/oauth/approve\"><input type=\"hidden\" name=\"request\" value=\"{request_id}\"><label>Access key <input type=\"password\" name=\"access_key\" autocomplete=\"off\" required></label><button type=\"submit\" name=\"decision\" value=\"approve\">Authorize</button><button type=\"submit\" name=\"decision\" value=\"deny\" formnovalidate>Cancel</button></form>"
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Authorize MCP access</title><h1>Authorize MCP access</h1><p><strong>{name}</strong> requests access to the pools at {resource}.</p>{client_origin}<p>The client name is supplied by the client and does not prove its identity. The response will go to {callback}.</p><form method=\"post\" action=\"/oauth/approve\"><input type=\"hidden\" name=\"request\" value=\"{request_id}\"><label>Access key <input type=\"password\" name=\"access_key\" autocomplete=\"off\" required></label><button type=\"submit\" name=\"decision\" value=\"approve\">Authorize</button><button type=\"submit\" name=\"decision\" value=\"deny\" formnovalidate>Cancel</button></form>"
     );
     let cookie = format!(
         "plasmite_oauth={csrf}; Secure; HttpOnly; SameSite=Lax; Path=/oauth/approve; Max-Age={CODE_LIFETIME}"
@@ -483,6 +521,10 @@ async fn authorize_page(
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
     response
 }
 
@@ -517,7 +559,7 @@ async fn approve(
         }
         return Redirect::to(target.as_str()).into_response();
     }
-    if !matches!(form.decision.as_deref(), None | Some("approve")) {
+    if form.decision.as_deref() != Some("approve") {
         return oauth_error(StatusCode::BAD_REQUEST, "invalid_request");
     }
     let Some((key_id, _grant)) = form
@@ -539,6 +581,7 @@ async fn approve(
         resource: pending.resource,
         key_id,
         expires_at: now() + CODE_LIFETIME,
+        permits_refresh: pending.permits_refresh,
     };
     if let Err(response) = oauth.change(|state| {
         if state.codes.len() >= MAX_CLIENTS {
@@ -547,15 +590,17 @@ async fn approve(
                 "temporarily_unavailable",
             ));
         }
-        let Some(client) = state
-            .clients
-            .iter_mut()
-            .find(|client| client.id == record.client_id)
-        else {
-            return Err(oauth_error(StatusCode::BAD_REQUEST, "invalid_client"));
-        };
-        client.expires_at = None;
-        client.key_id = Some(record.key_id.clone());
+        if !is_cimd(&record.client_id) {
+            let Some(client) = state
+                .clients
+                .iter_mut()
+                .find(|client| client.id == record.client_id)
+            else {
+                return Err(oauth_error(StatusCode::BAD_REQUEST, "invalid_client"));
+            };
+            client.expires_at = None;
+            client.key_id = Some(record.key_id.clone());
+        }
         state.codes.push(record);
         Ok(())
     }) {
@@ -582,14 +627,22 @@ async fn approve(
 
 async fn token(
     State(oauth): State<Arc<OauthService>>,
+    headers: HeaderMap,
     Form(request): Form<TokenRequest>,
 ) -> Response {
+    if headers.contains_key(header::AUTHORIZATION)
+        || request.client_secret.is_some()
+        || request.client_assertion.is_some()
+        || request.client_assertion_type.is_some()
+    {
+        return oauth_error(StatusCode::BAD_REQUEST, "invalid_client");
+    }
     if request.resource.as_deref() != Some(&oauth.resource) {
         return oauth_error(StatusCode::BAD_REQUEST, "invalid_target");
     }
     match request.grant_type.as_str() {
         "authorization_code" => exchange_code(&oauth, request),
-        "refresh_token" => refresh(&oauth, request),
+        "refresh_token" => refresh(&oauth, request).await,
         _ => oauth_error(StatusCode::BAD_REQUEST, "unsupported_grant_type"),
     }
 }
@@ -631,11 +684,18 @@ fn exchange_code(oauth: &OauthService, request: TokenRequest) -> Response {
             || !verify_s256(&verifier, &code.challenge)
             || oauth.access.authorize_id(&code.key_id).is_none()
         {
-            return Ok(false);
+            return Ok(None);
         }
-        state
-            .grants
-            .retain(|grant| grant.client_id != code.client_id);
+        let cimd = is_cimd(&code.client_id);
+        state.grants.retain(|grant| {
+            grant.client_id != code.client_id || (cimd && grant.key_id != code.key_id)
+        });
+        if state.grants.len() >= MAX_CLIENTS {
+            return Err(oauth_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "temporarily_unavailable",
+            ));
+        }
         state
             .access_tokens
             .retain(|token| state.grants.iter().any(|grant| grant.id == token.grant_id));
@@ -644,23 +704,30 @@ fn exchange_code(oauth: &OauthService, request: TokenRequest) -> Response {
             client_id: code.client_id,
             resource: code.resource,
             key_id: code.key_id,
-            refresh_hash: digest(&refresh_token),
+            refresh_hash: if code.permits_refresh {
+                digest(&refresh_token)
+            } else {
+                String::new()
+            },
+            cimd_redirect: cimd.then_some(code.redirect_uri),
         });
         state.access_tokens.push(AccessToken {
             hash: digest(&access_token),
             grant_id,
             expires_at: now() + ACCESS_LIFETIME,
         });
-        Ok(true)
+        Ok(Some(code.permits_refresh))
     });
     match result {
-        Ok(true) => token_response(access_token, refresh_token),
-        Ok(false) => oauth_error(StatusCode::BAD_REQUEST, "invalid_grant"),
+        Ok(Some(permits_refresh)) => {
+            token_response(access_token, permits_refresh.then_some(refresh_token))
+        }
+        Ok(None) => oauth_error(StatusCode::BAD_REQUEST, "invalid_grant"),
         Err(response) => response,
     }
 }
 
-fn refresh(oauth: &OauthService, request: TokenRequest) -> Response {
+async fn refresh(oauth: &OauthService, request: TokenRequest) -> Response {
     let Some(refresh_token) = request.refresh_token else {
         return oauth_error(StatusCode::BAD_REQUEST, "invalid_request");
     };
@@ -677,11 +744,35 @@ fn refresh(oauth: &OauthService, request: TokenRequest) -> Response {
         .strip_prefix("rt1.")
         .and_then(|rest| rest.split_once('.'))
         .map(|(id, _)| id);
+    if is_cimd(&request.client_id) {
+        let redirect = match oauth.state.lock() {
+            Ok(state) => state
+                .grants
+                .iter()
+                .find(|grant| {
+                    Some(grant.id.as_str()) == family_id
+                        && grant.client_id == request.client_id
+                        && grant.resource == oauth.resource
+                        && grant.refresh_hash == hash
+                        && oauth.access.authorize_id(&grant.key_id).is_some()
+                })
+                .and_then(|grant| grant.cimd_redirect.clone()),
+            Err(_) => return server_error(),
+        };
+        if let Some(redirect) = redirect {
+            match oauth.metadata.lookup(&request.client_id).await {
+                Ok(client) if client.permits_refresh() && client.allows_redirect(&redirect) => {}
+                Ok(_) => return oauth_error(StatusCode::BAD_REQUEST, "invalid_grant"),
+                Err(error) => return metadata_error(oauth, &request.client_id, error),
+            }
+        }
+    }
     let result = oauth.change(|state| {
         let Some(position) = state.grants.iter().position(|grant| {
             Some(grant.id.as_str()) == family_id
                 && grant.client_id == request.client_id
                 && grant.resource == oauth.resource
+                && !grant.refresh_hash.is_empty()
         }) else {
             return Err(oauth_error(StatusCode::BAD_REQUEST, "invalid_grant"));
         };
@@ -707,7 +798,7 @@ fn refresh(oauth: &OauthService, request: TokenRequest) -> Response {
         Ok(Some(next_refresh))
     });
     match result {
-        Ok(Some(next_refresh)) => token_response(access_token, next_refresh),
+        Ok(Some(next_refresh)) => token_response(access_token, Some(next_refresh)),
         Ok(None) => oauth_error(StatusCode::BAD_REQUEST, "invalid_grant"),
         Err(response) => response,
     }
@@ -749,14 +840,16 @@ async fn revoke(
     }
 }
 
-fn token_response(access_token: String, refresh_token: String) -> Response {
-    let mut response = Json(json!({
+fn token_response(access_token: String, refresh_token: Option<String>) -> Response {
+    let mut payload = json!({
         "access_token": access_token,
         "token_type": "Bearer",
         "expires_in": ACCESS_LIFETIME,
-        "refresh_token": refresh_token,
-    }))
-    .into_response();
+    });
+    if let Some(refresh_token) = refresh_token {
+        payload["refresh_token"] = json!(refresh_token);
+    }
+    let mut response = Json(payload).into_response();
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -768,6 +861,36 @@ fn token_response(access_token: String, refresh_token: String) -> Response {
 
 fn oauth_error(status: StatusCode, code: &str) -> Response {
     (status, Json(json!({ "error": code }))).into_response()
+}
+
+fn is_cimd(client_id: &str) -> bool {
+    client_id.starts_with("https://")
+}
+
+fn dcr_refresh_default() -> bool {
+    true
+}
+
+fn metadata_error(oauth: &OauthService, client_id: &str, error: cimd::MetadataError) -> Response {
+    match error {
+        cimd::MetadataError::Unavailable => {
+            oauth_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable")
+        }
+        cimd::MetadataError::Invalid => oauth_error(StatusCode::BAD_REQUEST, "invalid_client"),
+        cimd::MetadataError::IdentityMismatch => {
+            if let Err(response) = oauth.change(|state| {
+                state.codes.retain(|code| code.client_id != client_id);
+                state.grants.retain(|grant| grant.client_id != client_id);
+                state
+                    .access_tokens
+                    .retain(|token| state.grants.iter().any(|grant| grant.id == token.grant_id));
+                Ok(())
+            }) {
+                return response;
+            }
+            oauth_error(StatusCode::BAD_REQUEST, "invalid_client")
+        }
+    }
 }
 
 fn server_error() -> Response {
@@ -846,6 +969,222 @@ mod tests {
     use tower_service::Service;
 
     const VALID_REGISTRATION: &str = r#"{"client_name":"Security regression","redirect_uris":["https://client.example/callback"]}"#;
+    const CLIENT_DOCUMENT: &str = "https://client.example/oauth/client.json";
+    const CALLBACK: &str = "http://localhost:45123/callback";
+    const VERIFIER: &str = "a0123456789abcdefghijklmnopqrstuvwxyzABCDEF";
+
+    fn encoded(pairs: &[(&str, &str)]) -> String {
+        url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(pairs.iter().copied())
+            .finish()
+    }
+
+    async fn response_json(response: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    async fn oauth_request(
+        oauth: &Arc<OauthService>,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: String,
+    ) -> Response {
+        let mut request = Request::builder().method(method).uri(path);
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let mut request = request.body(Body::from(body)).unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "192.0.2.42:1234".parse::<SocketAddr>().unwrap(),
+        ));
+        Service::call(&mut oauth.clone().router(), request)
+            .await
+            .unwrap()
+    }
+
+    async fn authorize_fixture(
+        oauth: &Arc<OauthService>,
+        redirect: &str,
+        resource: &str,
+    ) -> Response {
+        let challenge = oauth_as::pkce::code_challenge_s256(VERIFIER);
+        let query = encoded(&[
+            ("response_type", "code"),
+            ("client_id", CLIENT_DOCUMENT),
+            ("redirect_uri", redirect),
+            ("code_challenge", &challenge),
+            ("code_challenge_method", "S256"),
+            ("resource", resource),
+            ("state", "fixture-state"),
+        ]);
+        oauth_request(
+            oauth,
+            "GET",
+            &format!("/oauth/authorize?{query}"),
+            &[],
+            String::new(),
+        )
+        .await
+    }
+
+    async fn approve_fixture(oauth: &Arc<OauthService>, access_key: &str) -> String {
+        let page = authorize_fixture(oauth, CALLBACK, &oauth.resource).await;
+        assert_eq!(page.status(), StatusCode::OK);
+        let cookie = page.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let page = axum::body::to_bytes(page.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let page = std::str::from_utf8(&page).unwrap();
+        assert!(page.contains("Fixture &lt;client&gt;"));
+        assert!(page.contains("client.example"));
+        assert!(page.contains(CALLBACK));
+        assert!(page.contains(&oauth.resource));
+        let id = page
+            .split("name=\"request\" value=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let approval = oauth_request(
+            oauth,
+            "POST",
+            "/oauth/approve",
+            &[
+                ("origin", &oauth.issuer),
+                ("cookie", &cookie),
+                ("content-type", "application/x-www-form-urlencoded"),
+            ],
+            encoded(&[
+                ("request", id),
+                ("access_key", access_key),
+                ("decision", "approve"),
+            ]),
+        )
+        .await;
+        assert_eq!(approval.status(), StatusCode::SEE_OTHER);
+        let target = Url::parse(approval.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+        let values: HashMap<_, _> = target.query_pairs().into_owned().collect();
+        assert_eq!(values["iss"], oauth.issuer);
+        assert_eq!(values["state"], "fixture-state");
+        assert_eq!(
+            target.origin().ascii_serialization(),
+            "http://localhost:45123"
+        );
+        values["code"].clone()
+    }
+
+    async fn token_fixture(oauth: &Arc<OauthService>, data: &[(&str, &str)]) -> Response {
+        oauth_request(
+            oauth,
+            "POST",
+            "/oauth/token",
+            &[("content-type", "application/x-www-form-urlencoded")],
+            encoded(data),
+        )
+        .await
+    }
+
+    async fn exchange_fixture(oauth: &Arc<OauthService>, key: &str) -> serde_json::Value {
+        let code = approve_fixture(oauth, key).await;
+        let reply = token_fixture(
+            oauth,
+            &[
+                ("grant_type", "authorization_code"),
+                ("client_id", CLIENT_DOCUMENT),
+                ("code", &code),
+                ("code_verifier", VERIFIER),
+                ("redirect_uri", CALLBACK),
+                ("resource", &oauth.resource),
+            ],
+        )
+        .await;
+        assert_eq!(reply.status(), StatusCode::OK);
+        response_json(reply).await
+    }
+
+    async fn assert_pool_call_over_trusted_https(
+        oauth: &Arc<OauthService>,
+        listener: tokio::net::TcpListener,
+        directory: &std::path::Path,
+        bearer: &str,
+    ) {
+        use super::super::{ServeConfig, prepare_server_with_access, serve_tls};
+        use rustls::pki_types::{CertificateDer, pem::PemObject};
+        use tokio::sync::watch;
+
+        let config = ServeConfig {
+            bind: listener.local_addr().unwrap(),
+            pool_dir: directory.to_owned(),
+            tls_cert: Some(oauth.access.cert_path()),
+            tls_key: Some(oauth.access.key_path()),
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 2,
+        };
+        let (stop, mut shutdown) = watch::channel(false);
+        let server = prepare_server_with_access(
+            &config,
+            Some(oauth.access.clone()),
+            false,
+            Default::default(),
+            shutdown.clone(),
+        )
+        .await
+        .unwrap();
+        let serve = tokio::spawn(serve_tls(
+            listener,
+            server.app,
+            server.tls_config.unwrap(),
+            async move {
+                let _ = shutdown.changed().await;
+            },
+        ));
+        let cert = CertificateDer::pem_file_iter(config.tls_cert.unwrap())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let resource = oauth.resource.clone();
+        let bearer = bearer.to_owned();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(cert).unwrap();
+            let tls = rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            let agent = ureq::AgentBuilder::new()
+                .try_proxy_from_env(false)
+                .tls_config(Arc::new(tls))
+                .timeout(std::time::Duration::from_secs(3))
+                .build();
+            let response = agent
+                .post(&resource)
+                .set("Authorization", &format!("Bearer {bearer}"))
+                .set("MCP-Protocol-Version", "2025-11-25")
+                .set("Accept", "application/json, text/event-stream")
+                .send_json(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                    "params":{"name":"plasmite_pool_list","arguments":{}}}))
+                .unwrap();
+            response.into_json::<serde_json::Value>().unwrap()
+        })
+        .await;
+        stop.send(true).unwrap();
+        serve.await.unwrap().unwrap();
+        let result = result.unwrap();
+        assert!(result["result"].is_object(), "{result}");
+        assert_ne!(result["result"]["isError"], true, "{result}");
+    }
 
     fn registration_request(peer: SocketAddr, body: &str) -> Request {
         let mut request = Request::builder()
@@ -866,6 +1205,110 @@ mod tests {
         );
         let service = OauthService::open(access).unwrap().unwrap();
         (directory, service)
+    }
+
+    #[tokio::test]
+    async fn metadata_client_uses_browser_authorization_and_independent_key_grants() {
+        let directory = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let issuer = format!("https://{}", listener.local_addr().unwrap());
+        let access =
+            Arc::new(AccessStore::open(directory.path(), Some(&issuer), None, None).unwrap());
+        let mut oauth = OauthService::open(access).unwrap().unwrap();
+        let wrong_identity = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let identity = wrong_identity.clone();
+        Arc::get_mut(&mut oauth).unwrap().metadata = cimd::Resolver::with_fixture(move |id| {
+            json!({
+                "client_id": if identity.load(std::sync::atomic::Ordering::Relaxed) { "https://other.example/document.json" } else { id },
+                "client_name": "Fixture <client>",
+                "redirect_uris": ["http://localhost/callback"],
+                "token_endpoint_auth_method": "none",
+                "grant_types": ["authorization_code", "refresh_token"]
+            }).to_string().into_bytes()
+        });
+        let discovery = oauth_request(
+            &oauth,
+            "GET",
+            "/.well-known/oauth-authorization-server",
+            &[],
+            String::new(),
+        )
+        .await;
+        let metadata = response_json(discovery).await;
+        assert_eq!(metadata["issuer"], oauth.issuer);
+        assert_eq!(metadata["client_id_metadata_document_supported"], true);
+        assert!(
+            metadata["registration_endpoint"]
+                .as_str()
+                .unwrap()
+                .ends_with("/oauth/register")
+        );
+
+        let bad_redirect =
+            authorize_fixture(&oauth, "http://localhost:45123/other", &oauth.resource).await;
+        assert_eq!(bad_redirect.status(), StatusCode::BAD_REQUEST);
+        assert!(!bad_redirect.headers().contains_key(header::LOCATION));
+        assert_eq!(
+            authorize_fixture(&oauth, CALLBACK, &oauth.issuer)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let key_a = oauth.access.issue("fixture A").unwrap();
+        let key_b = oauth.access.issue("fixture B").unwrap();
+        let first = exchange_fixture(&oauth, &key_a).await;
+        let second = exchange_fixture(&oauth, &key_b).await;
+        let first_bearer = first["access_token"].as_str().unwrap();
+        let second_bearer = second["access_token"].as_str().unwrap();
+        assert!(oauth.grant(first_bearer).is_some());
+        assert!(oauth.grant(second_bearer).is_some());
+        assert_pool_call_over_trusted_https(&oauth, listener, directory.path(), first_bearer).await;
+        assert!(
+            oauth.state.lock().unwrap().clients.is_empty(),
+            "CIMD does not perform DCR"
+        );
+
+        let refresh_token = first["refresh_token"].as_str().unwrap();
+        let refresh_data = [
+            ("grant_type", "refresh_token"),
+            ("client_id", CLIENT_DOCUMENT),
+            ("refresh_token", refresh_token),
+            ("resource", &oauth.resource),
+        ];
+        let mut wrong_target = refresh_data;
+        wrong_target[3].1 = "https://issuer.example/different";
+        let wrong = token_fixture(&oauth, &wrong_target).await;
+        assert_eq!(response_json(wrong).await["error"], "invalid_target");
+        let refreshed = token_fixture(&oauth, &refresh_data).await;
+        assert_eq!(refreshed.status(), StatusCode::OK);
+        let refreshed = response_json(refreshed).await;
+        let refreshed_bearer = refreshed["access_token"].as_str().unwrap();
+        assert_ne!(refreshed["refresh_token"], first["refresh_token"]);
+        assert!(oauth.grant(first_bearer).is_none());
+        assert!(oauth.grant(refreshed_bearer).is_some());
+
+        let (key_id, _) = oauth.access.authorize_key(&key_a).unwrap();
+        oauth.access.revoke(&key_id).unwrap();
+        assert!(oauth.grant(refreshed_bearer).is_none());
+        assert!(oauth.grant(second_bearer).is_some());
+
+        wrong_identity.store(true, std::sync::atomic::Ordering::Relaxed);
+        let second_refresh = token_fixture(
+            &oauth,
+            &[
+                ("grant_type", "refresh_token"),
+                ("client_id", CLIENT_DOCUMENT),
+                ("refresh_token", second["refresh_token"].as_str().unwrap()),
+                ("resource", &oauth.resource),
+            ],
+        )
+        .await;
+        assert_eq!(
+            response_json(second_refresh).await["error"],
+            "invalid_client"
+        );
+        assert!(oauth.grant(second_bearer).is_none());
     }
 
     async fn register_client(oauth: &Arc<OauthService>, peer: SocketAddr) -> String {
