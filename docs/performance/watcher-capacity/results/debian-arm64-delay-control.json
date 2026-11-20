@@ -1,0 +1,112 @@
+{
+  "revision": "1ed2128 (candidate)",
+  "platform": "Linux-6.12.115+deb13.1-arm64-aarch64-with-glibc2.41",
+  "machine": "aarch64",
+  "python": "3.13.5",
+  "listener": "https",
+  "workload": {
+    "payload_text_bytes": 1024,
+    "pool_capacity_mib": 32,
+    "target_duration_seconds": 5.0,
+    "idle_sample_seconds": 1.0,
+    "idle_settle_seconds": 0,
+    "drain_seconds": 2,
+    "controls": 20,
+    "server_arguments": []
+  },
+  "trials": [
+    {
+      "target_writes_per_second": 50,
+      "connections": "shared-h2",
+      "stream_versions": {
+        "HTTP/2": 1016
+      },
+      "pools": 10,
+      "requested_readers": {
+        "event": 1000,
+        "http": 16,
+        "mcp": 16
+      },
+      "admitted_or_scheduled": {
+        "event": 1000,
+        "http": 16,
+        "mcp": 16
+      },
+      "rejected": {},
+      "before_readers": {
+        "cpu_seconds": 0.02,
+        "threads": 6,
+        "rss_bytes": 11304960,
+        "descriptors_or_handles": 13,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "admission": {
+        "cpu_seconds": 0.19,
+        "threads": 28,
+        "rss_bytes": 20172800,
+        "descriptors_or_handles": 43
+      },
+      "idle_with_readers": {
+        "cpu_seconds": 0.19,
+        "threads": 28,
+        "rss_bytes": 20312064,
+        "descriptors_or_handles": 43,
+        "cpu_percent_of_one_core": 0.0
+      },
+      "with_stalled_follower": {
+        "cpu_seconds": 0.37,
+        "threads": 29,
+        "rss_bytes": 50294784,
+        "descriptors_or_handles": 46
+      },
+      "extra_agent_call": "ok",
+      "after_load": {
+        "cpu_seconds": 1.56,
+        "threads": 62,
+        "rss_bytes": 51761152,
+        "descriptors_or_handles": 46
+      },
+      "idle_controls": {
+        "p95_ms": {
+          "feed": 3.826,
+          "fetch": 2.691,
+          "mcp_info": 2.053
+        },
+        "successful": {
+          "feed": 20,
+          "fetch": 20,
+          "mcp_info": 20
+        },
+        "errors": {}
+      },
+      "loaded_controls": {
+        "p95_ms": {
+          "feed": 1.579,
+          "fetch": 2.572,
+          "mcp_info": 1.383
+        },
+        "successful": {
+          "feed": 20,
+          "fetch": 20,
+          "mcp_info": 20
+        },
+        "errors": {}
+      },
+      "published": {
+        "attempted": 250,
+        "committed": 250,
+        "elapsed_seconds": 4.983949992005364,
+        "achieved_writes_per_second": 50.161016944595964,
+        "errors": {}
+      },
+      "delivery": {
+        "messages_matched": 130,
+        "expected_deliveries": 13416,
+        "received_deliveries": 13416,
+        "incomplete_messages": 0,
+        "last_receipt_p95_ms": 50.895,
+        "errors": {}
+      }
+    }
+  ]
+}

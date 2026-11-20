@@ -14,7 +14,8 @@ follower that stopped reading while the other readers received their messages.
 Idle memory and thread samples come from before the extra follower stalls.
 The macOS runs used release build `687025b`. The Debian 13 ARM64 virtual machine
 had four virtual CPUs and ran release build `1ed2128`, which includes the
-non-Apple build fix. Both ran on the Apple M5 Pro.
+non-Apple build fix. The Windows 11 ARM virtual machine ran the x64 release
+executable from `1ed2128` under emulation. All trials ran on the Apple M5 Pro.
 
 | Host and connection shape | Server idle threads | Idle CPU | Idle resident memory | p95 to last receipt |
 | --- | ---: | ---: | ---: | ---: |
@@ -22,12 +23,18 @@ non-Apple build fix. Both ran on the Apple M5 Pro.
 | [macOS, separate HTTP/1.1, two repeats](results/macos-h1-mixed-settled.json) | 49–57 | 0.16–0.20% | 55.50–55.91 MiB | 13.46–15.52 ms |
 | [Debian ARM64 VM, shared HTTP/2](results/debian-arm64-h2-mixed.json) | 29 | 0.20% | 19.75 MiB | 47.35 ms |
 | [Debian ARM64 VM, separate HTTP/1.1](results/debian-arm64-h1-mixed.json) | 35 | 0.20% | 43.12 MiB | 16.60 ms |
+| [Windows x64 emulated, shared HTTP/2](results/windows-x64-emulated-h2.json) | 27 | 0.00% | 44.52 MiB | 34.78 ms |
+| [Windows x64 emulated, separate HTTP/1.1](results/windows-x64-emulated-h1.json) | 31 | 0.00% | 71.10 MiB | 35.21 ms |
 
 The five-second trials delivered 5,160 tagged notifications or messages each.
 The macOS HTTP/1.1 repeats lasted ten seconds and delivered 10,320 each.
 All ordinary calls succeeded with the streams open. With the stalled reader,
 feed, finite fetch, and MCP info p95 stayed below twice their idle times in
-the table. In [the first short macOS HTTP/1.1 trial](results/macos-h1-mixed-quick.json),
+the macOS and Debian rows. Finite fetch p95 exceeded twice idle in both
+Windows emulation trials. MCP info p95 also exceeded twice idle on Windows
+shared HTTP/2. Native Linux and Windows x64 capacity checks remain open.
+
+In [the first short macOS HTTP/1.1 trial](results/macos-h1-mixed-quick.json),
 MCP info p95 rose from 8.29 to 31.37 ms. The two repeats used 40 samples per
 request instead of 12 and waited 12 seconds after opening the readers.
 The server still had 49–57 threads after the wait, with ten pool waiters
@@ -67,6 +74,16 @@ two faster trials.
 See the [macOS HTTP/2](results/macos-h2-ramp.json),
 [macOS HTTP/1.1](results/macos-h1-ramp.json), and
 [Debian ARM64 HTTP/2](results/debian-arm64-h2-ramp.json) samples.
+
+### TLS socket delay on Debian
+
+At 50 writes per second for five seconds, [the control build](results/debian-arm64-delay-control.json)
+and [the modified build](results/debian-arm64-delay-nodelay.json) each delivered
+13,416 matching receipts. The modified build enabled `TCP_NODELAY` on accepted
+sockets before the TLS handshake. The p95 to the last receipt fell from
+50.90 ms to 9.20 ms. The short fetch p95 under load was 2.57 ms in the control
+and 3.62 ms with the option. This pair leaves the cause of the intermittent
+short-request delays open.
 
 ## One reader on macOS
 
