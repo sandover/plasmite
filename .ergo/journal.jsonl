@@ -1168,3 +1168,14 @@
 {"version":1,"task_id":"J4QABG","kind":"result","at":"2026-11-19T01:08:23.532346Z","text":"The x86-64 macOS release crash-recovery test also passed under Rosetta."}
 {"version":1,"task_id":"V6WP4D","kind":"result","at":"2026-11-19T01:08:23.572661Z","agent":"codex","text":"7 matched runs per build across 5 bindings and 3 workloads; Node replay remains responsive, with 44% less peak memory.","file":{"path":"CHANGELOG.md","sha256":"162ec9512dc748e8067b7ed49d7ff79378bb41b8b313bbf9a372c6df28d0363b","mtime":"2026-11-19T01:07:05.40813212Z","git_commit":"97442cff981bc84d5c37554dbbde6d92cbf6f9df"}}
 {"version":1,"task_id":"V6WP4D","kind":"done","at":"2026-11-19T01:08:23.616986Z","agent":"codex","text":"Published matched measurements in the draft notes and native performance report"}
+{"version":1,"task_id":"RUJFQ6","kind":"created","at":"2026-11-20T17:36:03.415454Z"}
+{"version":1,"task_id":"ELZ7QS","kind":"created","at":"2026-11-20T17:36:03.41547Z"}
+{"version":1,"task_id":"IVQ245","kind":"created","at":"2026-11-20T17:36:03.415473Z"}
+{"version":1,"task_id":"CTUS4Y","kind":"created","at":"2026-11-20T17:36:03.415475Z"}
+{"version":1,"task_id":"H4H3MD","kind":"created","at":"2026-11-20T17:36:03.415477Z"}
+{"version":1,"task_id":"KJH6JX","kind":"created","at":"2026-11-20T17:36:03.415479Z"}
+{"version":1,"task_id":"ELZ7QS","kind":"open","at":"2026-11-20T17:36:16.228876Z"}
+{"version":1,"task_id":"IVQ245","kind":"open","at":"2026-11-20T17:36:16.269339Z"}
+{"version":1,"task_id":"CTUS4Y","kind":"open","at":"2026-11-20T17:36:16.307576Z"}
+{"version":1,"task_id":"H4H3MD","kind":"open","at":"2026-11-20T17:36:16.344454Z"}
+{"version":1,"task_id":"KJH6JX","kind":"open","at":"2026-11-20T17:36:16.382619Z"}
