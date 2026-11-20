@@ -466,10 +466,6 @@ impl HostedRead {
         Ok(pool.read_state_until(read, true, None, false)?.expected_seq)
     }
 
-    pub fn pool(&self) -> &Pool {
-        &self.pool
-    }
-
     pub fn restart(&mut self, read: Read) -> Result<(), Error> {
         self.state = self.pool.read_state_until(read, true, None, false)?;
         Ok(())
@@ -479,6 +475,10 @@ impl HostedRead {
         self.state.expected_seq
     }
 
+    /// Decrement the record budget as the reader examines frames. If the
+    /// budget reaches zero before a match, run another turn before waiting
+    /// for a write. A waiting result with budget left means the reader
+    /// reached the newest record.
     pub fn turn(&mut self, remaining: &mut usize) -> Result<ReadStatus<FrameRef>, Error> {
         self.turn_selected(remaining, select_lite3_frame)
     }
