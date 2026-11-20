@@ -24,4 +24,10 @@ The server binds only to loopback. Restart it before repeating the fixture. The 
 
 **Claude Code:** no authenticated client was available for either the Haiku Monitor or resource-subscription test. [Claude Code’s MCP docs](https://code.claude.com/docs/en/mcp#mcp-client-runtimes) distinguish list refresh from the separate legacy-only Channels path; neither establishes that a standard resource update starts a turn.
 
-Plasmite will revisit agent wake-up when standard MCP resource notifications can start an idle turn in a target client. For now, agents read pool messages during a turn and use saved sequence numbers to catch up after a restart.
+## MCP Events beta
+
+The earlier experiments checked core resource notifications. The [MCP Events extension](https://modelcontextprotocol.io/extensions/events/overview) adds filtered subscriptions and resumable cursors. OpenCode 2.3.2 started a new turn through its native automation runtime when Plasmite sent a matching `pool.message` event. The turn fetched the message by its sequence number. An append with a nonmatching tag left the agent idle. The test used an isolated local server and a scripted model. See the [OpenCode setup](../agents.md#start-a-turn-from-a-pool-event-in-opencode).
+
+Codex CLI 0.171.0-alpha.13 rejected the app-server event-stream request for a custom server because that path only supports hosted apps. ChatGPT Work documents webhooks from the earlier Events draft. Its guide uses `capabilities.events`, while the beta extension uses `capabilities.extensions`. Check Work against the beta wire format before claiming compatibility. [Codex implementation](https://github.com/openai/codex/blob/rust-v0.171.0-alpha.13/codex-rs/app-server/src/request_processors/mcp_event_stream.rs) · [ChatGPT Work webhook guide](https://developers.openai.com/plugins/build/mcp-events)
+
+Claude Code 2.1.329 connected to a disposable Plasmite HTTP server with its default protocol settings and fetched a known message. The request trace showed modern MCP discovery and tool calls. Claude advertised no client extensions and sent no Events requests during the check. [Claude Code 2.1.329 release](https://github.com/anthropics/claude-code/releases/tag/v2.1.329)

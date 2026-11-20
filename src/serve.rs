@@ -60,6 +60,8 @@ use crate::pool_info_json::pool_info_json;
 use browser_session::{BrowserSessions, COOKIE_NAME, LIFETIME};
 #[path = "http_v2.rs"]
 mod http_v2;
+#[path = "mcp_events.rs"]
+mod mcp_events;
 #[path = "oauth.rs"]
 mod oauth;
 use oauth::OauthService;
@@ -484,7 +486,12 @@ async fn prepare_server_with_access(
                 .post(browser_login)
                 .delete(browser_logout),
         )
-        .route("/mcp", post(mcp_post).get(mcp_get))
+        .route(
+            "/mcp",
+            post(mcp_post)
+                .get(mcp_get)
+                .layer(Extension(shutdown.clone())),
+        )
         .route("/ui", get(ui_index))
         .route("/ui/map", get(ui_map))
         .route("/ui/assets/inconsolata.woff2", get(ui_inconsolata))
@@ -1268,18 +1275,19 @@ async fn mcp_get() -> Response {
 
 async fn mcp_post(
     State(state): State<Arc<AppState>>,
+    Extension(shutdown): Extension<watch::Receiver<bool>>,
     uri: Uri,
     headers: HeaderMap,
     activity: Option<Extension<RequestActivity>>,
     payload: Result<Json<Value>, JsonRejection>,
 ) -> Response {
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
     let grant = if state.local_admin {
         None
     } else if let Some(oauth) = &state.oauth {
-        let bearer = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "));
         match bearer.and_then(|token| oauth.grant(token)) {
             Some(grant) => Some(grant),
             None => return oauth.challenge(),
@@ -1338,6 +1346,11 @@ async fn mcp_post(
             -32600,
             "HTTP MCP only accepts requests",
         );
+    }
+
+    if modern && payload["method"] == "events/stream" {
+        let authorization = grant.zip(state.oauth.clone().zip(bearer.map(str::to_owned)));
+        return mcp_events::open(state, shutdown, authorization, activity, payload).await;
     }
 
     let permit = match state.mcp_semaphore.clone().try_acquire_owned() {
@@ -1464,6 +1477,10 @@ impl ServeMcpHandler {
 }
 
 impl McpHandler for ServeMcpHandler {
+    fn event_catalog(&self) -> Option<&'static Value> {
+        Some(mcp_events::catalog())
+    }
+
     fn list_tools(&mut self) -> Result<Vec<McpTool>, McpJsonRpcError> {
         self.inner.list_tools()
     }
@@ -1526,11 +1543,11 @@ fn mcp_revoked_tool_result() -> ToolCallResult {
 
 fn mcp_wait_busy_tool_result() -> ToolCallResult {
     ToolCallResult::execution_error_with_structured(
-        "busy: too many concurrent tail or MCP wait requests",
+        "busy: the server is at its limit of live reads (follows, MCP follow calls and event streams)",
         Some(json!({
             "error_kind": "Busy",
             "tool": "plasmite_follow",
-            "hint": "Try again later or reduce long-lived read concurrency.",
+            "hint": "Try again later; the server operator can raise --max-tail-concurrency.",
         })),
     )
 }
@@ -1590,7 +1607,10 @@ fn validate_mcp_request_headers(headers: &HeaderMap, payload: &Value) -> Result<
         ));
     }
     let name_field = match method {
-        Some("tools/call" | "prompts/get") => Some("name"),
+        Some(
+            "tools/call" | "prompts/get" | "events/poll" | "events/stream" | "events/subscribe"
+            | "events/unsubscribe",
+        ) => Some("name"),
         Some("resources/read") => Some("uri"),
         _ => None,
     };
@@ -2258,8 +2278,8 @@ fn acquire_tail_permit(state: &Arc<AppState>) -> Result<OwnedSemaphorePermit, Er
 
 fn tail_busy_error() -> Error {
     Error::new(ErrorKind::Busy)
-        .with_message("too many concurrent tail requests")
-        .with_hint("Try again later or reduce tail concurrency.")
+        .with_message("the server is at its limit of live reads (follows, MCP follow calls and event streams)")
+        .with_hint("Try again later; the server operator can raise --max-tail-concurrency.")
 }
 
 fn apply_sse_headers(response: &mut Response) {
@@ -3039,6 +3059,7 @@ mod tests {
             assert_eq!(
                 mcp_post(
                     State(state.clone()),
+                    axum::Extension(tokio::sync::watch::channel(false).1),
                     "/mcp".parse().unwrap(),
                     headers.clone(),
                     None,
@@ -3055,6 +3076,7 @@ mod tests {
         assert_eq!(
             mcp_post(
                 State(state),
+                axum::Extension(tokio::sync::watch::channel(false).1),
                 "/mcp".parse().unwrap(),
                 headers,
                 None,

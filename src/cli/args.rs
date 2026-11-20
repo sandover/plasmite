@@ -741,7 +741,7 @@ pub(crate) struct ServeRunArgs {
     #[arg(
         long,
         value_name = "N",
-        help = "Max concurrent follow streams (must be positive)",
+        help = "Max concurrent live reads: HTTP follows, MCP follow calls and event streams (default 64)",
         help_heading = "Safety"
     )]
     pub(crate) max_tail_concurrency: Option<usize>,

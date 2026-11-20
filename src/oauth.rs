@@ -1097,6 +1097,20 @@ mod tests {
             let result: serde_json::Value = call(Some(&bearer), "resources/read", Some(&name), json!({"uri":uri})).unwrap().into_json().unwrap();
             assert_eq!(result["result"]["contents"][0]["uri"], uri);
 
+            let subscription = json!({
+                "name":"pool.message","arguments":{"pool":"fixture"}
+            });
+            assert!(matches!(call(None, "events/stream", Some("pool.message"), subscription.clone()),
+                Err(ureq::Error::Status(401, _))));
+            let stream = call(Some(&bearer), "events/stream", Some("pool.message"), subscription).unwrap();
+            assert_eq!(stream.header("Content-Type"), Some("text/event-stream"));
+            use std::io::BufRead;
+            let mut stream = std::io::BufReader::new(stream.into_reader());
+            let mut activation = String::new();
+            stream.read_line(&mut activation).unwrap();
+            assert!(activation.contains("notifications/events/active"));
+            drop(stream);
+
             let legacy_read = json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":uri}});
             let legacy_request = || agent.post(&resource)
                 .set("MCP-Protocol-Version", "2025-11-25")

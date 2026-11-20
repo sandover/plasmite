@@ -963,7 +963,7 @@ fn mcp_request(base_url: &str, payload: &Value) -> ureq::Request {
         .set("MCP-Protocol-Version", "2026-07-28")
         .set("Mcp-Method", method);
     let name = match method {
-        "tools/call" => payload["params"]["name"].as_str(),
+        "tools/call" | "events/stream" => payload["params"]["name"].as_str(),
         "resources/read" => payload["params"]["uri"].as_str(),
         _ => None,
     };
@@ -977,6 +977,95 @@ fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, Box<ureq:
     mcp_request(base_url, payload)
         .send_json(mcp_payload(payload))
         .map_err(Box::new)
+}
+
+#[test]
+fn mcp_events_filters_and_replays_from_a_pool_cursor() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp_dir.path())?;
+    let mut pool = Pool::create(
+        temp_dir.path().join("project.plasmite"),
+        PoolOptions::new(65536),
+    )?;
+    pool.feed(&json!({"n": 1}), Feed::new().tags(["handoff"]))?;
+
+    let open = |id, cursor| -> TestResult<_> {
+        let body = json!({
+            "jsonrpc": "2.0", "id": id, "method": "events/stream",
+            "params": {"name": "pool.message", "arguments": {"pool": "project", "tags": ["handoff"]},
+                       "cursor": cursor, "heartbeatMs": 1000}
+        });
+        let response = mcp_request(&server.local_url, &body)
+            .timeout(Duration::from_secs(5))
+            .send_json(mcp_payload(&body))?;
+        assert_eq!(response.header("Content-Type"), Some("text/event-stream"));
+        Ok(BufReader::new(response.into_reader()))
+    };
+    let frame = |body: &mut BufReader<Box<dyn std::io::Read + Send + Sync>>| -> TestResult<Value> {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if body.read_line(&mut line)? == 0 {
+                return Err("SSE stream ended before the next notification".into());
+            }
+            if let Some(data) = line.strip_prefix("data: ") {
+                return Ok(serde_json::from_str(data)?);
+            }
+        }
+    };
+
+    let listed = mcp_post(
+        &server.local_url,
+        &json!({
+            "jsonrpc": "2.0", "id": 8, "method": "events/list"
+        }),
+    )?
+    .into_json::<Value>()?;
+    assert_eq!(listed["result"]["events"][0]["delivery"], json!(["push"]));
+    let mut body = open(9, Value::Null)?;
+    let active = frame(&mut body)?;
+    assert_eq!(active["method"], "notifications/events/active");
+    assert_eq!(active["params"]["truncated"], false);
+    let first_cursor = active["params"]["cursor"].clone();
+    assert_eq!(
+        active["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"],
+        9
+    );
+
+    pool.feed(&json!({"n": 2}), Feed::new().tags(["ignored"]))?;
+    let heartbeat = frame(&mut body)?;
+    assert_eq!(heartbeat["method"], "notifications/events/heartbeat");
+    assert_ne!(heartbeat["params"]["cursor"], active["params"]["cursor"]);
+    pool.feed(&json!({"n": 3}), Feed::new().tags(["handoff"]))?;
+    let event = frame(&mut body)?;
+    assert_eq!(event["method"], "notifications/events/event");
+    assert_eq!(
+        event["params"]["data"],
+        json!({"pool": "project", "seq": "3"})
+    );
+    let cursor = event["params"]["cursor"].clone();
+    drop(body);
+    pool.feed(&json!({"n": 4}), Feed::new().tags(["handoff"]))?;
+
+    let mut body = open(10, cursor)?;
+    assert_eq!(frame(&mut body)?["params"]["truncated"], false);
+    let replayed = frame(&mut body)?;
+    assert_eq!(replayed["params"]["data"]["seq"], "4");
+    drop(body);
+
+    let large = json!({"message": "x".repeat(2048)});
+    for _ in 0..40 {
+        pool.feed(&large, Feed::new().tags(["handoff"]))?;
+    }
+    let oldest = pool.info()?.bounds.oldest_seq.unwrap();
+    assert!(oldest > 4);
+    let mut body = open(11, first_cursor)?;
+    assert_eq!(frame(&mut body)?["params"]["truncated"], true);
+    assert_eq!(
+        frame(&mut body)?["params"]["data"]["seq"],
+        oldest.to_string()
+    );
+    Ok(())
 }
 
 #[test]

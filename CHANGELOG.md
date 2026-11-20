@@ -23,6 +23,10 @@ All notable changes to this project will be documented in this file.
 - **Readers check pool identity** when they open from a local handle or resume an HTTP stream. A different pool with the same name produces `NotFound`.
 - **UDP follows deliver late and duplicate datagrams in arrival order.** A server-confirmed gap names the missing and retained sequences, and positional UDP `fetch` returns only the requested sequence.
 
+#### MCP Events beta
+
+OpenCode 2.3.2 can [start a turn from a new pool message](docs/agents.md#start-a-turn-from-a-pool-event-in-opencode). Plasmite streams events over HTTP, matches tags, and resumes from a saved cursor while the pool retains the messages.
+
 #### Faster publishing and catch-up
 
 In these workloads, all five language interfaces published more small events per second, handled more structured records and caught up faster on retained history. Median messages per second, 1.3.0 → 2.0 development build:

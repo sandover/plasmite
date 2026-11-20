@@ -47,7 +47,45 @@ One agent finishes and says so:
 {"pool": "project", "tags": ["handoff"], "data": {"from": "claude:api", "status": "done", "branch": "fix-login", "summary": "login tests pass"}}
 ```
 
-When you start the receiving agent's next turn, it can call `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 20}`. If it's already in a turn, it can fetch the handoff or make a bounded `plasmite_follow` call. Plasmite provides no automatic agent wake-up or MCP resource subscriptions.
+When you start the receiving agent's next turn, it can call `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 20}`. If it's already in a turn, it can fetch the handoff or make a bounded `plasmite_follow` call.
+
+### Start a turn from a pool event in OpenCode
+
+An agent can sleep until a matching message lands in a pool, then start a turn on its own. This uses the beta [MCP Events extension](https://modelcontextprotocol.io/extensions/events/overview), which only some clients support so far:
+
+| Client | Starts a turn on a pool message? |
+|---|---|
+| OpenCode 2.3.2 | Yes, with the flags below |
+| Claude Code 2.1.329 | Not yet: it reads pools but doesn't subscribe to events |
+| Codex CLI 0.171 | Not yet: it rejects event streams from custom servers |
+
+To try it on one machine:
+
+1. Install OpenCode 2.3.2 or newer from [opencode.ai](https://opencode.ai) or its [releases](https://github.com/anomalyco/opencode/releases).
+2. Run `pls serve` and leave it running, then create the pool with `pls pool create project`.
+3. Add Plasmite to your project's `opencode.json`:
+
+   ```json
+   {"mcp":{"servers":{"plasmite":{"type":"remote","url":"http://127.0.0.1:9700/mcp","oauth":false,"protocol":"2026-07-28"}}}}
+   ```
+
+4. Start OpenCode with events and automations turned on, and leave it running. Events only reach a running OpenCode server; `--standalone` starts a private one for the test:
+
+   ```bash
+   OPENCODE_FLAGS=mcp_events,automations opencode --standalone
+   ```
+
+5. Paste this prompt into OpenCode, then approve the automation it proposes:
+
+   > Create an automation that watches the Plasmite `pool.message` event on pool `project` with tags `["handoff"]`. When it fires, call `plasmite_fetch` with `pool` set to `project`, `since` set to the event's `seq` and `count` set to 1, then summarize the message.
+
+6. From another terminal, send a handoff:
+
+   ```bash
+   pls feed project --tag handoff '{"status":"ready for review"}'
+   ```
+
+OpenCode starts a turn and summarizes the message. A message without the `handoff` tag leaves it idle. The [validation report](validation/mcp-wake-up.md#mcp-events-beta) records the test, which used OpenCode's automation runtime and a scripted model.
 
 ### Catch up after a restart
 

@@ -65,6 +65,8 @@ claude mcp add --transport http plasmite https://alice.local:9743/mcp     # Alic
 
 Alice's agent posts "tests pass on `fix-login`". Bob's agent picks it up on its next turn, even with a fresh context. Alice and Bob watch the whole exchange with `pls follow channel`, and can step in with `pls feed`. Your client's default MCP settings work. See [Plasmite for agents](docs/agents.md).
 
+With OpenCode, a tagged message can even wake an idle agent: Bob's agent sleeps until Alice's handoff lands. ([How](docs/agents.md#start-a-turn-from-a-pool-event-in-opencode); beta, and OpenCode only for now.)
+
 #### Fire-and-forget over UDP
 
 On a trusted network, Alice's server can also take UDP datagrams. A UDP sender fires off a message and moves on, where HTTP waits for the server to confirm the write. That suits sensors and other chatty senders that can live with an occasional lost message.

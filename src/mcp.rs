@@ -487,7 +487,13 @@ pub struct ResourceContent {
     pub blob: Option<String>,
 }
 
+pub const EVENTS_EXTENSION: &str = "io.modelcontextprotocol/events";
+
 pub trait McpHandler {
+    fn event_catalog(&self) -> Option<&'static Value> {
+        None
+    }
+
     fn list_tools(&mut self) -> Result<Vec<McpTool>, JsonRpcError>;
     fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, JsonRpcError>;
     fn list_resources(&mut self) -> Result<Vec<McpResource>, JsonRpcError>;
@@ -600,40 +606,7 @@ impl<H: McpHandler> McpDispatcher<H> {
     }
 
     fn route_modern(&mut self, request: JsonRpcRequest) -> Result<Value, JsonRpcError> {
-        let params = request
-            .params
-            .as_ref()
-            .and_then(Value::as_object)
-            .ok_or_else(|| JsonRpcError::invalid_params("request requires object params"))?;
-        let meta = params
-            .get("_meta")
-            .and_then(Value::as_object)
-            .ok_or_else(|| JsonRpcError::invalid_params("request requires object params._meta"))?;
-        let version = meta
-            .get(VERSION_KEY)
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                JsonRpcError::invalid_params("missing or invalid protocol version in params._meta")
-            })?;
-        if version != MCP_PROTOCOL_VERSION {
-            return Err(JsonRpcError::unsupported_version(version));
-        }
-        if !meta
-            .get(CLIENT_CAPABILITIES_KEY)
-            .is_some_and(Value::is_object)
-        {
-            return Err(JsonRpcError::invalid_params(
-                "missing or invalid clientCapabilities in params._meta",
-            ));
-        }
-        if let Some(info) = meta.get("io.modelcontextprotocol/clientInfo")
-            && (info.get("name").and_then(Value::as_str).is_none()
-                || info.get("version").and_then(Value::as_str).is_none())
-        {
-            return Err(JsonRpcError::invalid_params(
-                "clientInfo needs string name and version",
-            ));
-        }
+        let params = modern_params(request.params.as_ref())?;
         let cacheable = matches!(
             request.method.as_str(),
             "server/discover"
@@ -643,11 +616,39 @@ impl<H: McpHandler> McpDispatcher<H> {
                 | "resources/templates/list"
         );
         let mut result = match request.method.as_str() {
-            "server/discover" => json!({
-                "supportedVersions": SUPPORTED_PROTOCOL_VERSIONS,
-                "capabilities": {"tools": {}, "resources": {}},
-                "instructions": MCP_INSTRUCTIONS,
-            }),
+            "server/discover" => {
+                let mut capabilities = json!({"tools": {}, "resources": {}});
+                if self.handler.event_catalog().is_some() {
+                    capabilities["extensions"] = json!({(EVENTS_EXTENSION): {}});
+                }
+                json!({
+                    "supportedVersions": SUPPORTED_PROTOCOL_VERSIONS,
+                    "capabilities": capabilities,
+                    "instructions": MCP_INSTRUCTIONS,
+                })
+            }
+            "events/list" => match self.handler.event_catalog() {
+                Some(events) => json!({"events": events}),
+                None => {
+                    return Err(JsonRpcError::method_not_found(
+                        "method not found: events/list",
+                    ));
+                }
+            },
+            "events/poll" | "events/subscribe" | "events/unsubscribe"
+                if self.handler.event_catalog().is_some() =>
+            {
+                let mode = if request.method == "events/poll" {
+                    "poll"
+                } else {
+                    "webhook"
+                };
+                return Err(JsonRpcError {
+                    code: -32026,
+                    message: "Unsupported event delivery mode".into(),
+                    data: Some(json!({"feature": "deliveryMode", "value": mode})),
+                });
+            }
             "resources/templates/list" => json!({"resourceTemplates": []}),
             _ => self.route_method(&request.method, params)?,
         };
@@ -686,6 +687,53 @@ impl<H: McpHandler> McpDispatcher<H> {
             ))),
         }
     }
+}
+
+pub fn parse_modern_request(value: Value) -> Result<(JsonRpcId, Map<String, Value>), JsonRpcError> {
+    let request = parse_jsonrpc_request(value)
+        .map_err(|response| response.error.expect("failed request has an error"))?;
+    let id = request
+        .id
+        .filter(|id| *id != JsonRpcId::Null)
+        .ok_or_else(|| JsonRpcError::invalid_request("MCP requests need a non-null id"))?;
+    let params = modern_params(request.params.as_ref())?;
+    Ok((id, params.clone()))
+}
+
+fn modern_params(params: Option<&Value>) -> Result<&Map<String, Value>, JsonRpcError> {
+    let params = params
+        .and_then(Value::as_object)
+        .ok_or_else(|| JsonRpcError::invalid_params("request requires object params"))?;
+    let meta = params
+        .get("_meta")
+        .and_then(Value::as_object)
+        .ok_or_else(|| JsonRpcError::invalid_params("request requires object params._meta"))?;
+    let version = meta
+        .get(VERSION_KEY)
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            JsonRpcError::invalid_params("missing or invalid protocol version in params._meta")
+        })?;
+    if version != MCP_PROTOCOL_VERSION {
+        return Err(JsonRpcError::unsupported_version(version));
+    }
+    if !meta
+        .get(CLIENT_CAPABILITIES_KEY)
+        .is_some_and(Value::is_object)
+    {
+        return Err(JsonRpcError::invalid_params(
+            "missing or invalid clientCapabilities in params._meta",
+        ));
+    }
+    if let Some(info) = meta.get("io.modelcontextprotocol/clientInfo")
+        && (info.get("name").and_then(Value::as_str).is_none()
+            || info.get("version").and_then(Value::as_str).is_none())
+    {
+        return Err(JsonRpcError::invalid_params(
+            "clientInfo needs string name and version",
+        ));
+    }
+    Ok(params)
 }
 
 #[derive(Clone, Debug)]

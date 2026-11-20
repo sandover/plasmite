@@ -193,7 +193,7 @@ Every transport adapts requests into the same core calls. Network code and deliv
 
 ### HTTP
 
-The HTTP adapter runs pool operations on Tokio's blocking pool. Each listener has separate permit pools for short storage operations, active message streams and MCP requests. All three use `--max-tail-concurrency` as their capacity. The `plasmite_follow` MCP tool also takes a stream permit. Admission to each pool happens immediately. When a pool runs out of permits, the operation returns `Busy`. That lets short operations such as feeds proceed while many follows wait for messages.
+The HTTP adapter runs pool operations on Tokio's blocking pool. Each listener has separate permit pools for short storage operations, active message streams and MCP requests. All three use `--max-tail-concurrency` as their capacity. The `plasmite_follow` MCP tool also takes a stream permit. An MCP Events push subscription takes a stream permit for its lifetime, leaving the short MCP request permits available. Admission to each pool happens immediately. When a pool runs out of permits, the operation returns an error. That lets short operations such as feeds proceed while many reads wait for messages.
 
 An admitted operation holds its permit until it exits, even if the client goes away. A `fetch` has a response deadline. A `follow` holds the pool open while it waits; if its output queue stays full past the timeout, the worker reports an error and releases its permit. Closing the response, revoking the key or stopping the server also ends the read.
 

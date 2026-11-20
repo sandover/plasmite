@@ -5,7 +5,7 @@ These reports record checks against particular builds and machines on particular
 Repeat a check before applying its result to a different version or host.
 
 - [MCP client connections](mcp-clients.md): Claude Code and Codex connecting over stdio and HTTPS with default settings (November 2026, `2.0.0-dev`).
-- [MCP resource notifications and agent wake-up](mcp-wake-up.md): local filtering, SDK delivery, reconnect catch-up, and what remains unverified in agent hosts (November 2026, `2.0.0-dev`).
+- [MCP resource notifications and agent wake-up](mcp-wake-up.md): resource notification experiments, native OpenCode wake-up with MCP Events, and the client compatibility findings (November 2026, `2.0.0-dev`).
 - [Windows and Mac services](windows-boot-validation.md): native Windows service startup before sign-in, updates and rollback, and a macOS LaunchDaemon trial (October 2026, `1.1.0-dev`).
 - [Debian VM services](debian-vm-validation.md): startup before login, reboot recovery, connection failures and retained sensor history (November 2026, `1.3.0-dev`).
 - [Linux ARM SDK CI run](arm-sdk-ci.md): the hosted CI run that first built and exercised the ARM64 and ARMv7 archives.
