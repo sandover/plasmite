@@ -57,8 +57,6 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
         tls_key: Some(store.key_path()),
         ..base.clone()
     };
-    #[cfg(unix)]
-    raise_file_limit();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -74,26 +72,6 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
         udp_bind,
         run.udp_follow == Some(true),
     ))
-}
-
-// Leave room for the TLS sockets and pool files even when a service manager
-// starts the process with a small soft limit. Respect the host's hard limit.
-#[cfg(unix)]
-fn raise_file_limit() {
-    let mut limit = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // Both calls use a valid, initialized rlimit value owned by this thread.
-    unsafe {
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) == 0 {
-            let needed = limit.rlim_max.min(4096);
-            if limit.rlim_cur < needed {
-                limit.rlim_cur = needed;
-                let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &limit);
-            }
-        }
-    }
 }
 
 #[derive(Deserialize)]

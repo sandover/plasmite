@@ -166,7 +166,7 @@ The HTTPS listener accepts up to 2,048 connections, including connections that h
 - A read has 30 seconds to open, a finite fetch has 30 seconds per response, and an HTTP follow ends if its output stalls for 30 seconds.
 - The OAuth authorization page allows 30 requests per minute per TCP source address. Each source can hold 32 pending approvals, with up to 8 for the same client. A reverse proxy shares one source address among its clients.
 
-On Unix, the server raises its soft open-file limit toward 4,096 when the hard limit allows it. Check the service account's hard limit if the server runs out of file descriptors before it reaches the connection limit.
+On Unix, the server raises its soft open-file limit toward 4,096 when the hard limit allows it. The HTTPS listener uses at most half the available descriptors so files and other sockets can still open.
 
 Put an Internet-facing server behind a proxy or firewall that also limits connection rates.
 

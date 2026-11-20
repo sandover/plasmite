@@ -925,6 +925,37 @@ async fn serve_plain(
     Ok(())
 }
 
+fn tls_connection_limit() -> usize {
+    #[cfg(unix)]
+    {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // Both calls use an initialized rlimit value owned by this thread.
+        unsafe {
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) == 0 {
+                let requested = limit
+                    .rlim_max
+                    .min((2 * MAX_TLS_CONNECTIONS) as libc::rlim_t);
+                if limit.rlim_cur < requested {
+                    let raised = libc::rlimit {
+                        rlim_cur: requested,
+                        ..limit
+                    };
+                    if libc::setrlimit(libc::RLIMIT_NOFILE, &raised) == 0 {
+                        limit = raised;
+                    }
+                }
+                // Keep descriptors available for files, local requests, and other sockets.
+                let sockets = limit.rlim_cur / 2;
+                return sockets.min(MAX_TLS_CONNECTIONS as libc::rlim_t).max(1) as usize;
+            }
+        }
+    }
+    MAX_TLS_CONNECTIONS
+}
+
 async fn serve_tls(
     listener: tokio::net::TcpListener,
     app: Router,
@@ -943,6 +974,7 @@ async fn serve_tls(
         .keep_alive_interval(Duration::from_secs(15))
         .keep_alive_timeout(Duration::from_secs(10));
     let mut make_service = app.into_make_service_with_connect_info::<SocketAddr>();
+    let connection_limit = tls_connection_limit();
     let mut tasks = JoinSet::new();
 
     tokio::pin!(shutdown);
@@ -961,7 +993,7 @@ async fn serve_tls(
                     }
                 };
 
-                if tasks.len() >= MAX_TLS_CONNECTIONS {
+                if tasks.len() >= connection_limit {
                     drop(stream);
                     continue;
                 }
