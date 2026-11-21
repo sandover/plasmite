@@ -20,7 +20,6 @@ docs/
 ├── performance/README.md                      — Read when choosing a performance report or measuring a change
 ├── performance/watcher-capacity/              — Read when measuring idle watchers, delivery or competing short requests
 ├── performance/udp-transport.md               — Read when assessing UDP versus HTTP delivery, measured latency, or maximum datagram support
-├── performance/udp-transport-bench.rs          — Read with the UDP transport report for the historical benchmark and its matching checkout
 ├── performance/udp-transport-results/          — Read when checking the raw runs and host setup behind the UDP measurements
 ├── performance/transport-comparison.md        — Measured transport throughput; read when comparing native API and MCP paths
 ├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results

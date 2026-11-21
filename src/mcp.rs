@@ -547,10 +547,6 @@ impl<H: McpHandler> McpDispatcher<H> {
         }
     }
 
-    pub fn dispatch_request(&mut self, request: JsonRpcRequest) -> DispatchOutcome {
-        self.dispatch(request, false)
-    }
-
     fn dispatch(&mut self, request: JsonRpcRequest, allow_legacy: bool) -> DispatchOutcome {
         let Some(id) = request.id.clone() else {
             // Notifications never invoke request methods (which may write a pool).

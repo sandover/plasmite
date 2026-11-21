@@ -391,6 +391,7 @@ struct BenchRow {
     ms_per_msg: f64,
     msgs_per_sec: f64,
     notes: String,
+    runtime_path: String,
 }
 
 impl BenchRow {
@@ -403,6 +404,7 @@ impl BenchRow {
             durability: value.get("durability")?.as_str()?.to_string(),
             ms_per_msg: value.get("ms_per_msg")?.as_f64()?,
             msgs_per_sec: value.get("msgs_per_sec")?.as_f64()?,
+            runtime_path: value.get("runtime_path")?.as_str()?.to_string(),
             notes: value
                 .get("notes")
                 .and_then(|v| v.as_str())
@@ -420,24 +422,7 @@ impl BenchRow {
                     "append".to_string()
                 }
             }
-            "get_scan" => {
-                if self.notes.is_empty() {
-                    "get_scan".to_string()
-                } else {
-                    let (mode, position) = parse_get_scan_note(&self.notes);
-                    let position_label = match position {
-                        "near_newest" => "newest",
-                        "near_oldest" => "oldest",
-                        "mid" => "mid",
-                        other => other,
-                    };
-                    match mode {
-                        "indexed" => format!("get_idx:{position_label}"),
-                        "scan_only" => format!("get_scan:{position_label}"),
-                        _ => format!("get_scan:{position_label}"),
-                    }
-                }
-            }
+            "get_scan" if self.runtime_path == "index_lookup" => "get_idx".to_string(),
             "multi_writer" => "multi_writer".to_string(),
             "follow" => {
                 if self.notes.contains("single-process") {
@@ -461,14 +446,6 @@ impl BenchRow {
                     "payload reused".to_string()
                 } else {
                     self.notes.clone()
-                }
-            }
-            "get_scan" => {
-                let (mode, _) = parse_get_scan_note(&self.notes);
-                match mode {
-                    "indexed" => "index-assisted".to_string(),
-                    "scan_only" => "scan-only (index=0)".to_string(),
-                    _ => String::new(),
                 }
             }
             "multi_writer" => "cross-process".to_string(),
@@ -512,16 +489,6 @@ fn format_rate(ms_per_msg: f64, msgs_per_sec: f64) -> (String, String) {
         return ("<0.001".to_string(), "-".to_string());
     }
     (format!("{ms_per_msg:.3}"), format!("{msgs_per_sec:.0}"))
-}
-
-fn parse_get_scan_note(note: &str) -> (&str, &str) {
-    if let Some((mode, position)) = note.split_once(':') {
-        match mode {
-            "indexed" | "scan_only" => return (mode, position),
-            _ => {}
-        }
-    }
-    ("legacy", note)
 }
 
 fn bench_append(
