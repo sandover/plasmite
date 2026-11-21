@@ -1,6 +1,12 @@
 This repository adds Plasmite-specific instructions to the shared global policy
 in `~/.config/AGENTS.md`.
 
+## Ergo task writing
+
+Write Ergo tasks for someone who hasn’t read the planning discussion. Say what
+should happen and how to verify it. Before saving, replace any shorthand that
+only makes sense in the original conversation.
+
 ## Project Docs Map
 ```
 docs/
@@ -42,7 +48,6 @@ docs/
 ├── performance/pipe-comparison-results/         — Read when checking the raw pipe runs and append timing evidence
 │
 │   Docs of record
-├── record/README.md                           — Docs of record index; start here for stable policies and runbooks
 ├── record/vision.md                           — Product scope + principles; read when breaking scope ties
 ├── record/architecture.md                      — Implementation architecture; read when changing internals or layering
 ├── record/testing.md                           — Test strategy + commands; read when adding/fixing tests

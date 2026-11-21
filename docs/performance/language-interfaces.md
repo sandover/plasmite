@@ -1,18 +1,12 @@
 # Language interfaces and performance
 
-Owned views help when an application reads a few fields, retains encoded data
-or forwards a message. They keep Lite3 and its validation result instead of
-rebuilding a whole native object tree at each language boundary. An application
-that needs every field as ordinary language objects still pays for that copy.
-Use `feed_view`, `follow_view` and `fetch_view` where the binding offers them.
-They share options with `feed`, `follow` and `fetch`.
+The `Message` returned by `feed`, `follow` and `fetch` holds an immutable Lite3 snapshot. Reading metadata or forwarding the message can reuse that snapshot. An application that needs ordinary language objects pays for decoding the data once, on demand. The experiments below compare the paths that led to this design. Their lane names describe the operation under measurement.
 
 ## Where the work went
 
 A local read copies a record into an independent immutable snapshot and validates
 it once. Children retain that snapshot. Checked writers establish the same
-invariants while encoding, and unchanged forwarding reuses the bytes and proof
-with a fresh destination identity. Pool storage and transports still copy bytes;
+invariants while encoding, and forwarding reuses the bytes and proof when the destination keeps the same data and tags and needs no sender change. Pool storage and transports still copy bytes;
 “zero-copy JSON” does not describe the complete path.
 
 Each runtime needs its own efficient boundary. Python's native extension uses
@@ -23,10 +17,9 @@ value descriptor per element. Mutable input snapshots preserve values at the
 point the encoder visits them. These changes remove intermediate work without
 changing the stored format or rerunning user hooks.
 
-Explicit batches amortize stream locks, calls and result handling. Python's
-`next_batch` waits for one accepted record, then takes available records within
-count and encoded-byte bounds. It does not wait to fill the batch. Ordinary
-iteration stays one record at a time; batching requires an application choice.
+Python's ordinary reader returns one message per call. The native extension
+passes that message directly to Python. The historical batch experiment below
+measured how much work readers could save by taking several records in one call.
 
 Node keeps waiting off the runtime's shared filesystem/DNS workers. Local streams
 check for ready records on four private workers and park empty reads per handle;
@@ -36,7 +29,7 @@ median wait falls from about 54 ms to 0.14 ms. The
 [integrated scheduling results](language-boundary-results/node-views/README.md#integrated-scheduling-checkpoint)
 also record the thread/memory cost and slower tiny-message view cases.
 
-## Matched results
+## Earlier matched results
 
 Each row compares the same requested result within one recorded experiment.
 The fixtures, runtimes and paths differ across rows; this table does not rank
@@ -58,7 +51,12 @@ extension, with matching producer and conversion work. HTTP retains the owner
 that append already built, eliminating a second copy/validation after the
 receipt. Small HTTP append changes overlap run variation.
 
-## Choose by the result your application needs
+## Choose how much of a message to read
+
+Read the sequence and tags directly for bookkeeping. Use `field()` in Rust,
+Python, or JavaScript, or decode into a struct with the fields you need in Go. Ask the
+message for its full data when your application needs the whole object. To
+forward the same data and tags, pass the message itself to `feed`.
 
 Sparse access can avoid decoding large unused values. In the
 [portable Node experiment](language-boundary-results/portable-views/README.md#central-results),
@@ -82,14 +80,12 @@ assuming later adapter changes have the same cost. [Rust writer and decoder
 results](language-boundary-results/owned-views/README.md) cover direct Serde
 encoding/decoding and retained construction proof.
 
-A retained child keeps the complete message alive. Explicit mutable exports
-copy; Python compatibility buffers also require extra encoded copies. Larger
-batches retain more messages at once. Lite3 can occupy more bytes than compact
-JSON, so fewer conversions do not guarantee less wire traffic or CPU. HTTP JSON and binary readers both report terminal errors. UDP views deliver
-messages in arrival order, including duplicates and late packets.
-Each library guide's Advanced section covers exact-number rules, copy boundaries, cleanup and transport support: [Rust](../../README-crate.md), [Python](../../bindings/python/README.md#advanced), [JavaScript](../../bindings/node/README.md#advanced) and [Go](../../bindings/go/README.md#advanced).
+Lite3 can occupy more bytes than compact JSON. HTTP readers report terminal
+errors, and UDP readers deliver messages in arrival order, including duplicates
+and late packets. The library guides cover number types, copying, and cleanup.
+[Rust](../../README-crate.md#keep-decode-or-forward-a-message) · [Python](../../bindings/python/README.md#message-data-and-forwarding) · [JavaScript](../../bindings/node/README.md#messages) · [Go](../../bindings/go/README.md#message-bytes-and-forwarding)
 
-## Plasmite 2.0 read and write check
+## Earlier 2.0 candidate measurements
 
 On the same Apple Silicon Mac, release builds from `80a92f1` and the 2.0
 candidate each read 10,000 retained small messages per run. The baseline
@@ -105,7 +101,7 @@ and ranges in nanoseconds per message.
 | View, full decode | 1,146 (1,110–1,216) | 1,175 (1,111–1,248) |
 
 Five alternating 2,000-operation runs of `bench_owned_views` also compared
-the old append calls with `feed_view`. Typed feed measured 3.47 → 3.68 µs
+the 1.x append calls with the candidate's typed or JSON producer. Typed feed measured 3.47 → 3.68 µs
 and JSON-to-view feed 3.78 → 3.97 µs. The ranges overlapped. An independent
 cold field read measured 282 → 286 ns. The 2.0 feed samples the clock as
 part of each write.
@@ -129,6 +125,59 @@ Seven alternating release runs compared the review changes with `ea7ab55` on the
 | Encode and feed typed input | 4,880 | 4,243 |
 | Encode and feed via JSON | 5,144 | 4,318 |
 | Open a cold view and read one field, 64 KiB string | 5,911 | 2,119 |
+
+## Single-message API
+
+Twelve paired release runs compared the public Rust `Message` with the earlier interface at `94dd55a`. Each process read or forwarded 30,000 small retained messages on the same Apple Silicon Mac. These are nanoseconds per message. Ranges show the fastest and slowest run.
+
+| Requested work | Earlier API | `Message` |
+| --- | ---: | ---: |
+| Read the encoded bytes | 606 (591–634) | 748 (738–934) |
+| Decode the full JSON object | 790 (771–809) | 925 (915–939) |
+| Read one field | 773 (755–795) | 770 (759–814) |
+| Decode to a Rust struct | 964 (958–989) | 961 (947–975) |
+| Read and forward the message | 2,378 (2,349–2,400) | 2,381 (2,363–2,426) |
+
+The encoded-only and full JSON lanes increased by about 0.14 µs each. The `Message` path carries an owned snapshot and validates its lookup index for later field access. Full JSON conversion reuses that validation and caches the result. Selected-field reads, typed decoding and forwarding overlapped the earlier ranges.
+
+Build `bench_view_streams` in release mode at each revision. Run `bench_view_streams local LANE small 30000`, alternating revisions. Earlier lanes are `raw`, `json`, `view_selected`, `view_full` and `view_forward`. Match them to `message_raw`, `json`, `message_selected`, `message_full` and `message_forward` in the new build. Each run checks the result.
+
+The Python debug comparison found near parity for metadata, native conversion and selected fields. Forwarding added 0.25–0.42 µs to the median. The Go debug comparison found overlapping ranges for selected fields and forwarding. [Python results](language-boundary-results/owned-views/python/README.md#one-message-in-the-public-api), [Go results](language-boundary-results/owned-views/go/README.md).
+
+### Fixed field lookups and single-message reads
+
+The reader now looks up fixed Lite3 envelope keys without copying them and checks tag types without opening an iterator. The Lite3 verifier also uses a short ASCII scan and checks each fixed node once. Seven alternating release runs on the same Mac compared the implementation in `b92a417` with `94dd55a`. Each process read 30,000 small records or 6,000 wide records. The wide fixture adds an object with 200 fields. Figures are median nanoseconds per message.
+
+| Requested work | Small before → after | Wide before → after |
+| --- | ---: | ---: |
+| Read the encoded bytes | 610 → 693 | 3,207 → 3,566 |
+| Decode the full JSON object | 808 → 870 | 13,983 → 14,856 |
+| Read one field | 781 → 725 | 3,966 → 3,600 |
+| Decode to a Rust struct | 971 → 914 | 17,361 → 16,880 |
+| Read and forward the message | 2,415 → 2,331 | 6,840 → 6,451 |
+
+The encoded and full-JSON runs still take longer than the earlier API. The new reader checks the Lite3 lookup index on read so a caller can later use the same message for selected fields, typed decoding, or forwarding. Run the commands above with fixture `small 30000` or `wide 6000` to repeat the comparison.
+
+Nine alternating pairs on the same local Node pool used the same native debug library. At 128 B, feed plus a selected field took 23.3 → 22.7 µs, and fetch plus a selected field took 21.2 → 20.6 µs. At 64 KiB the corresponding comparisons were 99.2 → 97.9 µs and 29.5 → 28.9 µs. The new path used `message.field()` to match the earlier direct view lookup.
+
+#### Catch-up and relay with release builds
+
+Twelve paired runs on an Apple M5 Pro compared `94dd55a` with the single-message implementation. Both used a release native library. Rust drained a prefilled local pool and verified the result. Python 3.14.10 used freshly built native extensions on both revisions and copied a prefilled pool into a second local pool. The timed interval included opening the reader, reading each message and, for Python, appending it to the destination with default `fast` durability. The Python benchmark checked every source and destination sequence and read the first and last copies back outside the timed interval. Fixture creation stayed outside the timed interval.
+
+Wall time in microseconds per message, shown as median and range. The final column counts the pairs where the new API took longer.
+
+| Workload | Messages | Earlier API | `Message` | Slower pairs |
+| --- | ---: | ---: | ---: | ---: |
+| Rust, read raw bytes, 554 B | 30,000 | 0.601 (0.594–0.680) | 0.755 (0.740–0.852) | 12/12 |
+| Rust, read raw bytes, 10,423 B | 5,000 | 3.227 (3.130–4.932) | 3.660 (3.559–4.010) | 11/12 |
+| Rust, decode full JSON, 554 B | 30,000 | 0.804 (0.784–0.872) | 0.927 (0.915–0.987) | 12/12 |
+| Rust, decode full JSON, 10,423 B | 5,000 | 13.899 (13.592–15.330) | 14.938 (14.679–16.974) | 12/12 |
+| Python, relay one-field objects | 5,000 | 4.770 (4.680–6.000) | 5.095 (5.030–5.710) | 11/12 |
+| Python, relay objects with 160 nested fields | 800 | 19.280 (18.760–22.320) | 19.545 (18.860–22.810) | 9/12 |
+
+Rust's selected-field and typed-decode controls also ran at both sizes. Their ranges overlapped, with medians within 6% of the earlier API. For Python, CPU time followed wall time. The median paired wall-time increase was 6.8% for small messages and 1.0% for wide messages.
+
+For Rust, run the same `bench_view_streams` lane pairs above with `small 30000` and `wide 5000`. For Python, run [message_surface.py](../../bindings/python/benchmarks/message_surface.py) with `--operation relay --repeats 1`, choosing each revision's native Python package through `PYTHONPATH` and its versioned release library through `PLASMITE_LIB_DIR`. Alternate which revision runs first in each pair.
 
 ### Indexed starts and HTTP streaming
 
@@ -156,8 +205,8 @@ used ten runs per build after warmup. To reproduce the point checks, create a
 256 MiB pool with `pool create --size 256M --index-capacity 600000` and seed it
 with 300,000 small records. Time `fetch POOL 300000` or the first record of an
 HTTP fetch starting at `since=300000`. Set the index capacity to zero to
-measure the scan. For HTTP throughput, compare the complete finite `/v2`
-fetch with the 1.x finite follow of the same retained records.
+measure the scan. For HTTP throughput, compare a complete 2.0 fetch with a
+1.x finite follow of the same retained records.
 
 Against the original 2.0 candidate (`e4b2429`), a time seek past all 300,000
 retained records reduced a concurrent writer's median lock wait from 17.4 ms

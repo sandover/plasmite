@@ -10,12 +10,8 @@ can cost more for another.
 | How do views affect Rust, Python, Go and Node? | [Owned-view measurements](language-boundary-results/owned-views/README.md) |
 | What does HTTP encoding and forwarding cost? | [HTTP views](language-boundary-results/http-views/README.md) |
 | How does portable JavaScript compare with JSON? | [Portable views](language-boundary-results/portable-views/README.md) |
-| How do UDP and HTTP compare? | [UDP transport](udp-transport.md) |
 | How does Plasmite compare with a Python pipe? | [Pipe comparison](pipe-comparison.md) |
-| What do local, HTTP and MCP paths cost? | [Transport comparison](transport-comparison.md) |
 | How many live watchers can a server support? | [Live watcher capacity](watcher-capacity/README.md) |
-| What did the 1.0 release change? | [Release measurements](1.0-release.md) |
-| How did 1.0 perform in a Windows VM? | [Windows 1.0 measurements](windows-access-1.0.md) |
 
 ## Measure a change
 
@@ -42,3 +38,10 @@ These reports explain individual costs when changing the implementation:
 - [Append receipts](language-boundary-results/append-receipts/README.md).
 - [Binary validation](language-boundary-results/core-binary/README.md).
 - [Node buffer ownership](language-boundary-results/node-owned/README.md).
+
+## Historical measurements
+
+- [UDP and HTTP on loopback](udp-transport.md) measures the earlier UDP receiver, which dropped late and duplicate packets.
+- [Native and MCP transports](transport-comparison.md) includes the remote stdio bridge that Plasmite removed.
+- [Plasmite 1.0 release measurements](1.0-release.md) compares 1.0 with 0.8.0 on macOS.
+- [Plasmite 1.0 on Windows](windows-access-1.0.md) compares local and remote access in a Windows VM.

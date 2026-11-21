@@ -114,6 +114,14 @@ PLASMITE_MANYLINUX_PLATFORM=manylinux_2_35_x86_64 \
 
 The check uses `auditwheel` and rejects a newer glibc dependency instead of only renaming the wheel. Without these variables the script runs the ordinary local wheel smoke.
 
+### Release targets
+
+Edit [release/targets.json](../release/targets.json) to change the targets,
+runners, or artifacts that the release workflows build. The
+[distribution guide](record/distribution.md) states the support tier for each
+channel. Run `just check-release-targets` after a change to check the manifest,
+the support policy, and the workflow scripts that use it.
+
 ## Windows builds
 
 Build in an x64 Visual Studio developer terminal with `clang-cl` on `PATH`, the Visual Studio C++ linker and the Windows SDK. Use the x64 Rust and LLVM toolchains, including on ARM64 Windows, where the build runs under emulation. `cl.exe` cannot build the vendored C code, which uses compiler extensions it lacks.

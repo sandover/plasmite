@@ -37,6 +37,8 @@ To check either connection, ask the agent to list pools and read the latest mess
 
 Reads return up to `count` messages (default 20, at most 200) plus `next_seq`. Pass `next_seq` as `since` on the next call to carry on exactly where the last one stopped. `tags` keeps only messages that carry every listed tag.
 
+Use `plasmite_pool_list` and read each pool's description before choosing one. A description may include an example of the data the pool carries. Read-only keys let an agent inspect and read pools. The server omits write tools for those keys.
+
 ## Patterns
 
 ### Hand off work
@@ -48,6 +50,23 @@ One agent finishes and says so:
 ```
 
 When you start the receiving agent's next turn, it can call `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 20}`. If it's already in a turn, it can fetch the handoff or make a bounded `plasmite_follow` call.
+
+If your agent runs as an asyncio application, its Python process can wait directly on a pool. This example prints the first new handoff tagged `handoff`.
+
+```python
+import asyncio
+from plasmite import aio
+
+
+async def main():
+    async with aio.open_pool("project") as pool:
+        async with pool.follow(tags=["handoff"]) as handoffs:
+            message = await handoffs.next()
+            print(message.data)
+
+
+asyncio.run(main())
+```
 
 ### Start a turn from a pool event in OpenCode
 
@@ -116,8 +135,9 @@ Agents follow their instructions file. Paste something like this into `AGENTS.md
 ```markdown
 ## Coordination
 Use the plasmite MCP tools and the `project` pool to coordinate with other agents.
+- If the pool name is unknown, list pools and read their descriptions before choosing one.
 - Before you start, fetch the last 20 messages to see what others are doing.
-- Post progress and results with your name in `data.from`, for example `claude:api`.
+- Use `meta.sender` to identify messages sent through an access key. Include `data.from` when writing locally and the author matters.
 - When you finish a task, post it tagged `handoff` with a one-line summary.
 - Between steps, check for messages tagged `instruction` and follow them.
 - After a restart, use your saved next sequence to read any retained handoffs you have not handled.
@@ -125,7 +145,7 @@ Use the plasmite MCP tools and the `project` pool to coordinate with other agent
 
 ## Conventions that help
 
-- **Name the sender in `data`.** Plasmite doesn't record who wrote a message, so put it in `data.from`, such as `claude:api` or `codex:ci`.
+- **Give each agent its own key.** For writes through a server access key, Plasmite records the key name in `meta.sender`. For local and UDP writes, include `data.from` when readers need to know the author.
 - **Use tags for topics** such as `handoff`, `instruction` and `error`, so each reader asks only for what it needs.
 - **Use one pool per project,** sized for the history your agents should be able to read back: `pls pool create project --size 8M`.
 - **Retry a feed with care.** A feed that failed with a connection error may have been stored anyway. Give important messages an `id` in `data` so readers can spot a duplicate.

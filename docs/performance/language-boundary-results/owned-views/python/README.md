@@ -46,6 +46,29 @@ and readonly-buffer checks survive pool closure. Encoded byte lengths identify
 the snapshot each child retains; peak process RSS does not measure live retained
 owner memory. A small child keeps the entire encoded message alive.
 
+## One `Message` in the public API
+
+The [message benchmark](../../../../../bindings/python/benchmarks/message_surface.py) compares the earlier view-based interface at `94dd55a` with the single-message implementation. Each run used standard CPython 3.14.10 and a freshly built native extension on an Apple M5 Pro Mac. Both libraries used Rust's debug profile. Each cell reports median CPU microseconds per message across five runs. The small input has one integer. The wide input adds 160 objects beside that same integer. Each finite read starts with the pool already populated.
+
+Ordinary iteration now returns one native message directly, without allocating the temporary result list that explicit batches use. A pool also keeps its native address and backend so a feed can reuse both. Ten alternating runs used the same Mac and Python version with release Rust libraries. The `relay` lane read from a populated pool and forwarded every message to a second pool. Small messages took 4.73 → 3.40 µs of CPU per message, and wide messages took 19.75 → 16.66 µs. For a direct feed that reads only the returned sequence, the medians were 2.96 → 2.35 µs for small messages and 24.37 → 23.12 µs for wide messages. Use `--operation relay --repeats 1` for the relay and `--operation feed_metadata --repeats 1` for the direct feed. Alternate builds to repeat the comparison.
+
+| Work | Small before | Small with `Message` | Wide before | Wide with `Message` |
+| --- | ---: | ---: | ---: | ---: |
+| Feed and read the sequence | 5.62 | 5.83 | 109.82 | 109.34 |
+| Forward the stored message and read the new sequence | 3.80 | 4.05 | 6.17 | 6.59 |
+| Read only the sequence | 3.47 | 3.46 | 40.45 | 40.43 |
+| Read a native Python dict | 4.24 | 4.14 | 153.17 | 155.13 |
+| Read only the selected integer | 3.86 | 3.91 | 40.53 | 40.51 |
+
+`Message.field("target")` kept the cost of reading one field from a wide message. The new range was 40.02–41.07 µs, and the prior range was 40.49–51.35 µs. Forwarding added 0.25–0.42 µs to the median. The forwarding ranges were 3.73–3.98 µs before and 4.01–4.21 µs after for the small input, and 6.07–6.31 µs before and 6.51–6.91 µs after for the wide input.
+
+Run the same script against each checkout's built library and native Python extension. The script uses `feed` and `fetch` on the single-message API and the earlier owned-view calls on the baseline. The measured library SHA-256 values were `d2563c00bef0f817b943a8b39cacb5b821160217956f29b5ad5cd9465cf792f5` before and `ce9975ddccbbf0e42c1efab5831f13cc7e0ec212245779ded80672e41a89d5fc` for the working tree.
+
+```sh
+PLASMITE_LIB_DIR=/path/to/target/debug PYTHONPATH=/path/to/bindings/python \
+  uv run --no-project python bindings/python/benchmarks/message_surface.py
+```
+
 ## Owned UDP receiving: final central checkpoint
 
 Owned DATA now crosses C/Python as one checked message owner. Native Python

@@ -23,7 +23,7 @@ fn main() -> Result<(), plasmite::api::Error> {
 
     let mut history = pool.fetch(Read::last(10).tags(["ci"]))?;
     while let Some(message) = history.next_message()? {
-        println!("{} {}", message.seq, message.data);
+        println!("{} {}", message.seq, message.data()?);
     }
     Ok(())
 }
@@ -31,7 +31,7 @@ fn main() -> Result<(), plasmite::api::Error> {
 
 `LocalClient::new()` keeps pools in `~/.plasmite/pools`; `with_pool_dir` picks another directory. Passing `true` to `open_pool` creates a missing pool at the default size of 1 MiB.
 
-Each `Message` has a `seq` that identifies it, a `time` in Unix nanoseconds, `meta.tags`, and your JSON object in `data`.
+Each `Message` has a sequence number in `seq` and a Unix nanosecond timestamp in `time`. Call `tags()` for its labels and `data()` for the JSON object. `sender()` returns the access key name for a write made through a server with that key.
 
 ## Choose where a read starts
 
@@ -58,7 +58,7 @@ fn main() -> Result<(), Error> {
     loop {
         let result = pool.follow(Read::since(Since::Seq(next))).and_then(|mut reader| {
             while let Some(message) = reader.next_message()? {
-                println!("{} {}", message.seq, message.data);
+                println!("{} {}", message.seq, message.data()?);
                 next = message.seq + 1; // save this after handling the message
             }
             Ok(())
@@ -77,20 +77,28 @@ fn main() -> Result<(), Error> {
 ## Manage pools
 
 ```rust
-use plasmite::api::{LocalClient, PoolOptions, PoolRef};
+use plasmite::api::{LocalClient, PoolDescription, PoolOptions, PoolRef};
 
 fn main() -> Result<(), plasmite::api::Error> {
     let client = LocalClient::new();
     let sensors = PoolRef::name("sensors");
-    let pool = client.create_pool(&sensors, PoolOptions::new(64 * 1024 * 1024))?;
+    let description = PoolDescription {
+        about: Some("Kitchen temperature readings".into()),
+        example: Some(serde_json::json!({"temp_c": 21.4})),
+    };
+    let options = PoolOptions::new(64 * 1024 * 1024).with_description(description);
+    let mut pool = client.create_pool(&sensors, options)?;
     println!("bounds: {:?}", pool.info()?.bounds);
+    println!("description: {:?}", pool.info()?.description);
     println!("{} pools", client.list_pools()?.len());
+    pool.set_description(PoolDescription::default())?;
     drop(pool);
     client.delete_pool(&sensors)?;
     Ok(())
 }
 ```
 
+`set_description()` replaces both fields. An empty `PoolDescription` clears them.
 `PoolRef::path` names a pool file directly. `client.validate_pool(&reference)` checks a pool for corruption.
 
 ## Remote pools
@@ -107,7 +115,7 @@ fn main() -> Result<(), plasmite::api::Error> {
     pool.feed(&json!({"temp_c": 21.4}), Feed::new())?;
     let mut history = pool.fetch(Read::last(10))?;
     while let Some(message) = history.next_message()? {
-        println!("{}", message.data);
+        println!("{}", message.data()?);
     }
     Ok(())
 }
@@ -115,26 +123,32 @@ fn main() -> Result<(), plasmite::api::Error> {
 
 `RemoteClient::new` uses the access key that `plasmite access connect` saved for that server; `RemoteClient::with_access_key(url, key)` takes one directly. The [serving guide](https://github.com/sandover/plasmite/blob/main/docs/record/serving.md) covers server setup. `UdpClient` sends and follows over UDP on a trusted network.
 
-## Read without decoding to JSON
+## Keep, decode, or forward a message
 
-Pools store messages in [Lite3](https://github.com/fastserial/lite3), a binary JSON encoding. `follow_view` and `fetch_view` return `MessageView` values that read fields straight from the stored bytes:
+`feed`, `follow`, and `fetch` use one owned `Message`. You can read its `seq`, `time`, `tags()`, or `sender()` without decoding the application object. `data()` decodes that object on first access and caches it. Use `decode()` when you only need fields named in a Rust type.
 
 ```rust
-use plasmite::api::{LocalClient, PoolRef, Read};
+use plasmite::api::{Feed, LocalClient, PoolRef, Read};
+
+#[derive(serde::Deserialize)]
+struct Reading {
+    temp_c: f64,
+}
 
 fn main() -> Result<(), plasmite::api::Error> {
-    let pool = LocalClient::new().open_pool(&PoolRef::name("sensors"), true)?;
-    let mut history = pool.fetch_view(Read::last(10))?;
-    while let Some(view) = history.next_view()? {
-        if let Some(temp) = view.data().get("temp_c")? {
-            println!("{}", temp.decode::<f64>()?);
-        }
+    let client = LocalClient::new();
+    let pool = client.open_pool(&PoolRef::name("sensors"), true)?;
+    let mut archive = client.open_pool(&PoolRef::name("archive"), true)?;
+    for message in pool.fetch(Read::last(10))? {
+        let message = message?;
+        println!("{}", message.decode::<Reading>()?.temp_c);
+        archive.feed(&message, Feed::new())?;
     }
     Ok(())
 }
 ```
 
-Each view owns an immutable copy of one message, so it stays valid after the reader or pool closes, and later writes can't change it. Forward a view to another pool with `feed_view` without re-encoding it. `follow_lite3` and `fetch_lite3` return the raw encoded frames, and `feed_lite3_receipt` stores encoded bytes and returns only the new `seq` and `time`. The [specification](https://github.com/sandover/plasmite/blob/main/spec/v2/SPEC.md) gives the exact ownership and transport rules.
+A message stays valid after you close its pool or reader. `raw()` borrows the stored Lite3 bytes. `FeedInput::Json` and `FeedInput::Lite3` let you pass explicitly encoded bytes to `feed`. Forwarding a `Message` retains its data and tags and gives it a new sequence and time. A shared server uses the destination key to set the sender. See the [2.0 contract](https://github.com/sandover/plasmite/blob/main/spec/v2/SPEC.md).
 
 ## CLI
 

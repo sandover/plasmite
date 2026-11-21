@@ -12,7 +12,7 @@ Every message has four fields:
 {"seq":42,"time":"2026-11-19T09:00:00.123456789Z","meta":{"tags":["deploy"]},"data":{"service":"api"}}
 ```
 
-The pool assigns `seq`, which starts at 1, never repeats, and defines the order. `time` records the clock when the pool stored the message. Clocks can step backward, so keep a measurement's own time in `data` when it matters. `meta.tags` holds labels for filtering, and `data` is your JSON object.
+The pool assigns `seq`, which starts at 1, never repeats, and defines the order. `time` records the clock when the pool stored the message. Clocks can step backward, so keep a measurement's own time in `data` when it matters. `meta.tags` holds labels for filtering, and `data` is your JSON object. If you write through a server with an access key, `meta.sender` holds the key name.
 
 ## Reading
 
@@ -82,7 +82,7 @@ By default `feed` returns once the message is in the pool. `--durability flush` 
 make 2>&1 | plasmite feed builds --input-format lines
 ```
 
-**Forwarding.** An object shaped exactly like a stored message (`seq`, `time`, `meta` with only `tags`, and `data`) counts as a message. `feed` keeps its data and tags and gives it a new sequence and time. That makes copying a pool one pipe:
+**Forwarding.** An object with exactly `seq`, `time`, `meta` and `data` counts as a message when `meta` is an object with `tags`. `feed` keeps its data and tags. The destination assigns a new sequence and time and supplies any sender name. That makes copying a pool one pipe:
 
 ```bash
 plasmite follow events | plasmite feed archive
@@ -96,17 +96,32 @@ A forwarded message brings its own tags, so adding `--tag` fails.
 
 ## Output
 
-In a terminal, `plasmite` prints readable, indented JSON. In a pipe or file, it prints one compact JSON message per line. `--format` overrides the choice:
+In a terminal, `follow`, `fetch`, and `duplex` show one line per message with its local time, sequence, sender when available, tags, and JSON data. The display includes the date for messages from other days and trims the line to the terminal width. `feed` shows indented JSON in a terminal. Pipes and files receive one complete JSON message per line by default. Choose a format with `--format` or `-o`.
 
 | `--format` | Output |
 | --- | --- |
+| `compact` | one readable line per message |
 | `pretty` | readable, indented JSON |
 | `json` | one compact message per line |
 | `yaml` | one YAML document per message |
 | `lite3` | a binary stream for fast copies between pools |
 | `lite3-raw` | one message's raw binary, with `fetch POOL SEQ` |
 
+`--color auto` uses color in a terminal unless you set `NO_COLOR` to a nonempty value. Use `--color always` or `--color never` to choose explicitly.
+
 `feed` reads JSON, YAML and `lite3` output back directly. Bash and Zsh pass binary through pipes unchanged, and so does [PowerShell 7.4 and later](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_redirection#example-7-redirecting-binary-data-from-a-native-command); with older PowerShell, run binary pipelines in `cmd.exe`. Keep stderr out of a binary pipe. The [binary stream contract](../spec/v2/SPEC.md#binary-stream) gives the byte layout.
+
+## Describe a pool
+
+Give readers a short description and an example of the data the pool carries.
+
+```bash
+plasmite pool create builds --about "Build results" --example '{"status":"passed"}'
+plasmite pool info builds
+plasmite pool describe builds --about "Build and deploy results" --example '{"status":"deployed"}'
+```
+
+`pool describe` replaces both fields. Leave out a field to clear it. Each field allows up to 1,024 bytes. `pool info` and structured `pool list` output show both fields. The terminal list shows the description.
 
 ## Pool references
 
@@ -121,7 +136,7 @@ Remote pools use a URL in the same place:
 | Command | Local | HTTPS | UDP |
 | --- | --- | --- | --- |
 | `feed`, `fetch`, `follow`, `duplex` | yes | yes | yes |
-| `pool info`, `pool list` | yes | yes | no |
+| `pool info`, `pool list`, `pool describe` | yes | yes | no |
 | `pool create`, `pool delete`, `doctor` | yes | no | no |
 
 The [serving guide](record/serving.md) covers starting a server, access keys and [UDP](record/serving.md#send-and-read-over-udp).

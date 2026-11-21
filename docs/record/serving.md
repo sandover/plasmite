@@ -4,7 +4,7 @@ Plasmite shares a directory of pools over HTTPS. The owner runs the server and g
 
 ## What you expose
 
-- **An access key grants full access to the served directory.** Its holder can list, read, feed, create and delete every pool in it, including pools created later. To share fewer pools, serve a separate directory.
+- **An access key covers the served directory.** A full-access key can list, read, feed, create and delete every pool, including pools you create later. A read-only key can list and read the same pools. To share fewer pools, serve a separate directory.
 - **The local listener needs no credentials.** It binds `127.0.0.1:9700`, and every OS user who can reach that port can read and change pools and create access keys. Run the server on a host or container whose local users you trust with the whole directory, and never forward this port through a proxy.
 - **The remote HTTPS listener binds all IPv4 interfaces by default.** It listens on `0.0.0.0` at the server URL's port (`9743` with no URL, `443` for a URL without a port). Use `--remote-bind` to choose an address, including an IPv6 address.
 - **UDP has no authentication or encryption.** `--udp` lets any sender that reaches the socket feed every pool; `--udp-follow` also lets it read them. UDP stays off until you enable it.
@@ -81,7 +81,7 @@ For Plasmite's browser trust setup:
 1. Run `plasmite access connect https://pools.example.net:9743` and enter the key. Run it again if you declined browser setup earlier.
 2. Review the address, certificate fingerprint, names, expiry and trust scope that Plasmite shows. Answer `y` to the browser trust prompt.
 3. Approve the operating system's certificate prompt. On Windows, use a signed-in interactive terminal so Windows can show the prompt.
-4. Plasmite opens the HTTPS address. Enter the access key, open `chat`, and use Feed to send a message.
+4. Plasmite opens the HTTPS address. Enter the access key, open `chat`, and use Feed to send a message if the key allows writes.
 
 The browser keeps a private session for later visits. Sign out to end it; the key stays valid until the owner revokes it.
 
@@ -113,11 +113,12 @@ Keep the fingerprint if you may need to remove trust after the certificate chang
 On the server machine, open `http://127.0.0.1:9700/access` to invite clients, list keys and revoke access. The same controls work from the command line while the server runs:
 
 ```console
+plasmite --dir ./shared access invite laptop --read-only
 plasmite --dir ./shared access keys
 plasmite --dir ./shared access revoke KEY_ID
 ```
 
-Replace `KEY_ID` with the ID from the list. Last-used times cover activity this server has seen since it started. Revocation persists across restarts and ends that key's native, browser and MCP access; other keys keep working. It closes active streams and cancels active MCP waits, though bytes already sent can still arrive and a write the server already accepted may finish.
+`access keys` shows each key’s mode. The server records the key name in `meta.sender` on messages that key writes. Use a separate key for each person or agent you want to identify. Replace `KEY_ID` with the ID from the list. Last-used times cover activity this server has seen since it started. Revocation persists across restarts and ends that key's native, browser and MCP access; other keys keep working. It closes active streams and cancels active MCP waits, though bytes already sent can still arrive and a write the server already accepted may finish.
 
 ### Recipient: check and remove saved connections
 

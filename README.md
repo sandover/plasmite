@@ -8,7 +8,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/sandover/plasmite/bindings/go/v2/local.svg)](https://pkg.go.dev/github.com/sandover/plasmite/bindings/go/v2/local)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Easy interprocess communication.**
+**A pipe that remembers.**
 
 What would make it pleasant and predictable for programs (and agents) to communicate?
 
@@ -37,9 +37,9 @@ Read down: each row happens after the one above.
 |---|---|---|
 | 1 | **Creates a message pool**<br>`pls pool create channel` | |
 | 2 | | **Starts watching**<br>`pls follow channel` |
-| 3 | **Sends a message**<br>`pls feed channel '{"msg":"hello world"}'` | **Sees it**<br>`{"data":{"msg":"hello world"}, ...}` |
+| 3 | **Sends a message**<br>`pls feed channel '{"msg":"hello world"}'` | **Sees it**<br>`14:02:11  #1  {"msg":"hello world"}` |
 
-The message stays in the pool, so a later reader can fetch it: `pls fetch channel --last 1`.
+The message stays in the pool, so a later reader can fetch it with `pls fetch channel --last 1`. To pick up after a restart, save the sequence of the last message you handled and follow from the next one. If you saved sequence 42, run `pls follow channel --since 43`. See the [restart recipe](docs/cookbook.md#resume-after-a-restart).
 
 #### Remote message passing
 
@@ -50,7 +50,7 @@ Remote pools take the same commands as local ones.
 | 4 | **Starts the server** in the background<br>`pls serve https://alice.local:9743 &` | | |
 | 5 | **Invites Bob**, then sends him the address and key<br>`pls access invite Bob` | | |
 | 6 | | | **Connects, pastes in the key, and then watches**<br>`pls access connect https://alice.local:9743`<br>`pls follow https://alice.local:9743/channel` |
-| 7 | **Sends**<br>`pls feed channel '{"msg":"hi all"}'` | **Sees it**<br>`{"data":{"msg":"hi all"}, ...}` | **Sees it**<br>`{"data":{"msg":"hi all"}, ...}` |
+| 7 | **Sends**<br>`pls feed channel '{"msg":"hi all"}'` | **Sees it**<br>`14:03:05  #2  {"msg":"hi all"}` | **Sees it**<br>`14:03:05  #2  {"msg":"hi all"}` |
 
 Bob can also browse the pools at `https://alice.local:9743` once his browser trusts Alice's certificate. See the [serving guide](docs/record/serving.md).
 
@@ -83,7 +83,7 @@ A pool is a `.plasmite` file in `~/.plasmite/pools/` by default. Any number of p
 Every message has four fields:
 
 - `data`: your JSON payload
-- `meta.tags`: optional text labels you attach with `--tag`, for cheap filtering
+- `meta`: labels you attach with `--tag` and the sender name when you write with a server access key
 - `seq`: message index, counting up from 1
 - `time`: when the pool stored it
 
@@ -96,19 +96,13 @@ pls follow channel --since 10m     # the last 10 minutes, then keep waiting
 
 **Pipes just work.** Pipe `fetch` or `follow` into `feed` to copy messages between pools, tags and all. `jq` and similar tools work great.
 
-## Comparison with other styles of IPC
+## When to use Plasmite
 
-| If you'd reach for | What gets in the way | With Plasmite |
-|---|---|---|
-| **Kafka**, **RabbitMQ** | Lots to set up before the first message: brokers, partitions, consumer groups | No config — just make a pool & go |
-| **Redis**, **NATS** | Always needs a server; messages lost on restart unless configured | Local pools don't need a server; messages survive restarts |
-| **Log files and `tail -f`** | A wall of text, growing without limits | Numbered series of JSON objects, fixed-size file |
-| **Temp files and watched folders** | Polling loops, stale lock files after a crash, files piling up | No polling, no lock files, nothing to clean up |
-| **SQLite as a queue** | Your own table, cleanup job and polling loop | Following, replay and bounded history built in |
-| **Pipes and sockets** | One reader & no memory | Many readers and writers; late readers catch up |
-| **ZeroMQ** | Messages gone on restart, in frames ordinary tools can't read | Messages survive restarts, as JSON you can pipe through `jq` |
-
-**Use cases**: agent handoffs, CI gates, live event streams, sensor feeds, duplex chat, system log ring buffers, replay & debug. See the **[Cookbook](docs/cookbook.md)**.
+Use Plasmite when programs or agents need to share small, structured messages
+and catch up after a restart. A pool keeps recent messages in a fixed-size
+file. Programs on the same machine open the file directly, and programs on
+other machines connect through a Plasmite server. The [cookbook](docs/cookbook.md)
+shows agent handoffs, CI gates, sensor feeds, and replay.
 
 ## Performance
 

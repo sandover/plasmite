@@ -63,8 +63,10 @@ The crate builds one library (`src/lib.rs`) and two binaries. `plasmite` (`src/m
 | `src/cli/message_stream.rs` | Splits stdin into complete messages (JSON, YAML, lines, Lite3) and writes framed Lite3 output. |
 | `src/cli/*_support.rs`, `support.rs`, `output.rs`, `context.rs`, `result.rs` | Helpers for the command families, pool-reference parsing, JSON and human output, process-wide context and exit codes. |
 | `src/serve.rs` | The axum server: local administration and web UI, HTTPS authorization, MCP over HTTP, the storage-operation budget. |
-| `src/http_v2.rs` | The `/v2/pools` routes and the response streams for `fetch` and `follow`. |
-| `src/pool_wait.rs` | One write waiter per watched pool file and a bounded set of workers for live reads. |
+| `src/http_v2.rs` | The `/pools` routes and the response streams for `fetch` and `follow`. |
+| `src/api/notify/shared.rs` | One native wait per watched pool file. Registered Rust callbacks signal changes to the server and async Python. |
+| `src/pool_wait.rs` | Adapts pool change callbacks to Tokio and bounds the server's local read work. |
+| `src/abi_async.rs`, `bindings/python/plasmite/aio.py` | Async HTTPS and UDP operations and the asyncio bridge. Local Python readers use the shared waiter and bounded workers, and remote readers wait on network I/O. |
 | `src/secure_serve.rs` | Starts the loopback listener and the authenticated HTTPS listener together. |
 | `src/udp_input.rs`, `src/udp_wire.rs` | The UDP server and the datagram codec it shares with `api/udp.rs`. |
 | `src/mcp.rs`, `src/mcp_stdio.rs`, `src/oauth.rs` | The MCP dispatcher, its stdin/stdout transport, and OAuth for the HTTPS MCP endpoint. |
@@ -80,12 +82,12 @@ The crate builds one library (`src/lib.rs`) and two binaries. `plasmite` (`src/m
 `plasmite follow https://pools.example.net:9743/chat --tag error` shows every layer.
 
 1. **CLI.** `main.rs` parses the arguments with `cli/args.rs` and calls `cli::dispatch`. `cli/stream.rs::follow` turns `--since` or `--last` into a `Read`, and `cli/support.rs::resolve_pool_target` classifies the reference as a local path, an HTTPS pool or a UDP pool.
-2. **HTTP client.** `RemoteClient::open_pool` (`api/remote.rs`) checks that the pool exists. `stream_support::follow_remote` calls `RemotePool::follow_lite3` (`api/remote/read_v2.rs`), which sends `GET /v2/pools/chat/follow?tag=error` with the saved access key from `api/access.rs`. It asks for the binary Lite3 stream. The CLI can pass those bytes through for binary output or decode them for text output. On Unix, a watcher can cancel the request when the downstream reader closes stdout.
+2. **HTTP client.** `RemoteClient::open_pool` (`api/remote.rs`) checks that the pool exists. `stream_support::follow_remote` calls `RemotePool::follow_lite3` (`api/remote/read_v2.rs`), which sends `GET /pools/chat/follow?tag=error` with the saved access key from `api/access.rs`. It asks for the binary Lite3 stream. The CLI can pass those bytes through for binary output or decode them for text output. On Unix, a watcher can cancel the request when the downstream reader closes stdout.
 3. **Server.** `serve.rs` authorizes the key against `access_store.rs`. `http_v2.rs` takes a live-read slot, returns the pool's identity in the `plasmite-incarnation` header, and streams the read in short turns.
 4. **Core.** `api/message.rs` resolves the start under the pool's read lock and keeps each reader's own position. At the end of the pool, the server stops reading until the shared pool waiter reports a change. A skipped sequence raises `RetentionGap`.
 5. **Back in the CLI.** Each frame reaches `emit_frame`, which writes JSON or Lite3 to stdout. If the reader falls behind retention, `report_read_gap` prints a notice and reopens at the reported `next_seq`.
 
-The write side is shorter. `plasmite feed chat` on a local pool runs `cli/feed.rs` → `feed_support::ingest_from_stdin`. `message_stream::read_records` yields one complete message at a time, `record_payload` encodes it as Lite3, and `Pool::feed_lite3` (`api/message.rs`) calls `core/pool.rs::append_with_options`. That function takes the writer lock, asks `plan.rs` where the frame goes, writes and commits it, publishes the header and wakes waiting readers.
+The write side is shorter. `plasmite feed chat` on a local pool runs `cli/feed.rs` → `feed_support::ingest_from_stdin`. `message_stream::read_records` yields one complete message at a time, `record_payload` encodes it as Lite3, and `Pool::feed` with `FeedInput::Lite3` (`api/message.rs`) calls `core/pool.rs::append_with_options`. That function takes the writer lock, asks `plan.rs` where the frame goes, writes and commits it, publishes the header and wakes waiting readers.
 
 ## Message representation
 
@@ -93,13 +95,13 @@ Storage holds Lite3 payloads plus a sequence and timestamp per frame. Every read
 
 ### Immutable message ownership
 
-`MessageView` (`src/view.rs`) owns an immutable payload and the result of validating it. Lookups and iterators read Lite3 in place; a language adapter builds a wrapper or a requested scalar, never an eager native tree. Explicit conversion (`view/de.rs`, `view/json.rs`) builds ordinary containers or JSON text. A retained child (`view/owned.rs`) keeps its whole snapshot alive. Forwarding a view to another pool shares the payload and assigns a new sequence and time.
+The libraries return one `Message` that owns an immutable Lite3 payload. `MessageView` (`src/view.rs`) holds the payload and its validation result. Metadata and selected-field reads use those bytes directly. Access to the full data object decodes and caches an ordinary language value. A retained child (`view/owned.rs`) keeps the whole snapshot alive.
 
-Each language holds snapshots its own way. C gets retained message owners and borrowed references (`abi_views.rs`). Rust borrows or takes an owned child. Python and Node wrappers keep the owner alive. Go keeps the immutable bytes and their validation proof in its own heap and passes them to `abi_borrowed/` on each call. Any mutable byte export copies.
+C gets retained message owners and borrowed references (`abi_views.rs`). Rust borrows values or takes an owned child. Python and Node keep the message owner alive through its wrapper. Go keeps its bytes and validation proof in its heap. A mutable byte export copies its payload.
 
-Writers validate as they encode. `view/ser.rs` and `abi_builder.rs` read each caller value once, so a callback that mutates a value later cannot change bytes already encoded. Validation proof always travels with immutable bytes; a mutable buffer needs its own copy or validation.
+Writers validate each input as they encode it. `view/ser.rs` and `abi_builder.rs` read each value once. A forwarded message keeps its data and tags. The destination assigns its own sequence, time and sender. It can reuse the bytes and proof when the stored metadata already matches.
 
-Decoded messages, views and raw Lite3 are three outputs of one reader state in `api/message.rs`; the selection and loss checks run once for all three. Node's HTTP client runs the same checked core as WebAssembly and exposes the same read-only views.
+Reader selection and loss checks live in `api/message.rs`. The CLI and wire codecs can format a frame directly. Node's portable client runs the same checked Lite3 core in WebAssembly and returns the same JavaScript `Message`.
 
 ### JSON output
 
@@ -134,7 +136,7 @@ Binary output with tag filters checks metadata without decoding the data. JSON o
 
 A pool file is `header | index_region | ring`.
 
-- Header: metadata, bounds and offsets.
+- Header: metadata, bounds and offsets. Optional description text and an example object occupy reserved bytes starting at offset 112. Appends update the frame bounds and leave the description bytes alone.
 - Index region: optional fixed-size `(u64 seq, u64 offset)` slots.
 - Ring: frames holding encoded `{meta, data}` payloads.
 
@@ -184,6 +186,13 @@ A bounded recheck recovers a commit if a writer exits before signalling or a wak
 
 Correctness never depends on a wake-up. A reader that never receives one can still read retained messages and detects gaps when writers overtake it. Removing wake-ups must leave non-timing tests passing.
 
+The Python asyncio binding shares one native waiter per open pool file. The
+waiter uses a Rust callback independent of an async runtime. Python schedules
+the wake-up on the event loop with `loop.call_soon_threadsafe()`, then each
+reader checks from its own position with its own filter. Sharing the waiter
+lets many readers follow a quiet pool without parking a thread for each reader.
+Cancelling one read leaves the other readers waiting.
+
 ### Reader handles
 
 Rust and C readers share the reader state in `api/message.rs`. Rust readers borrow their pool; C streams own an independently opened pool, serialize their reader state and expose a separate atomic cancellation signal, so callers keep handles until active reads finish. Node workers share ownership through an active read, so closing a JavaScript wrapper cancels without freeing a worker's handle. A bounded wait can expire without ending the reader or losing its position.
@@ -194,6 +203,8 @@ Every transport adapts requests into the same core calls. Network code and deliv
 
 ### HTTP
 
+Clients and the browser use the same `/pools` routes. The pool list streams snapshots when the browser requests `text/event-stream`. The outer HTTP response layer sets `Plasmite-Version: 2` for every route.
+
 Each HTTP listener reserves capacity separately for short storage operations, finite fetches, ordinary MCP requests and live reads. HTTP follows, hosted MCP follow calls and MCP event streams use the live-read budget. Admission returns a busy error when the relevant slots are full.
 
 The listeners share one waiter per watched pool file. The waiter uses the native write notification and checks for missed notifications once per pool. Each live reader keeps its own position and filter, examines a bounded number of records per turn, and releases the worker before it waits for a write or for output space. A reader records the latest notification before reading so a write that arrives during the read prompts another turn. Access revocation, disconnect and shutdown end a live read without waiting for a write.
@@ -202,7 +213,7 @@ Fetch keeps its opening end and its response deadline. A follow whose output sta
 
 JSON and binary streams end with an explicit record. `complete` ends a finite fetch; `error` carries a failure; `cutoff` carries the next unread sequence when a fetch hits the server's deadline. The client reopens at that sequence with the original end boundary and the pool's incarnation, so it never mistakes partial history for a finished fetch or reads from a replaced pool. A connection that ends without a final record raises `Io`.
 
-An HTTP feed returns the committed message or a numeric receipt.
+An HTTP feed can return the committed message as JSON or as the stored Lite3 bytes with sequence and time headers. The server stamps keyed writes with the access key name.
 
 ### UDP
 
@@ -240,9 +251,7 @@ Each claim is checkable by inspection or test.
 
 - `src/core` has no `async` code and no network dependencies.
 - Every public error condition maps to a named `ErrorKind`.
-- The CLI, API and HTTP server run the same pool operations for equivalent actions.
 - `plan.rs` has no side effects.
-- Removing wake-ups fails no non-timing test.
 - A pool with an unknown format version produces an actionable error, never a panic or silent access.
 - The C ABI stays an adapter: argument translation, error mapping and stream orchestration, with no storage rules of its own.
 
@@ -252,7 +261,6 @@ Guaranteed:
 
 - A stable error-kind surface and exit-code mapping.
 - Pool file invariants survive crashes and restarts.
-- The CLI, API and HTTP server behave the same for the same operation.
 
 Not guaranteed:
 

@@ -17,7 +17,6 @@ Short recipes for everyday tasks, from the shell and from Python, JavaScript and
 - [Record TouchOSC messages](#record-touchosc-messages)
 - [Hand off work between agents](#hand-off-work-between-agents)
 - [Use Plasmite from Python, JavaScript and Go](#use-plasmite-from-python-javascript-and-go)
-- [When Plasmite isn't the right fit](#when-plasmite-isnt-the-right-fit)
 
 ## Log events and watch them
 
@@ -99,6 +98,13 @@ done
 
 `sensors.next` holds the next sequence to handle, so a restarted script continues where the last run stopped. If the pool overwrote messages while the script was down, `follow` reports a `RetentionGap` on stderr and continues with the oldest message it still holds. The [library examples](#use-plasmite-from-python-javascript-and-go) show the same pattern with explicit gap handling.
 
+Save the next sequence only after handling the message successfully. Keep
+the checkpoint with its pool and discard it if you replace the pool, because
+the new pool starts at sequence 1. A gap reports which sequence numbers
+expired, even when you filter by tag. If missing a matching message would
+leave your application in an inconsistent state, rebuild from a trusted
+snapshot before applying more updates.
+
 ## Save history to a file and replay it
 
 ```bash
@@ -115,22 +121,11 @@ Saved messages keep their data and tags. The destination pool gives each one a n
 plasmite duplex chat --create --last 20
 ```
 
-Run this in two terminals and type a message such as `{"from": "ana", "text": "hi"}` in either. Each side sees every message, including its own. Press Ctrl+C to leave.
+Run this in two terminals and type `{"from":"ana","text":"hi"}` in either. Both terminals show the message on one line, for example `14:02:11  #1  {"from":"ana","text":"hi"}`. Press Ctrl+C to leave.
 
 ## Share a pool with a teammate
 
-```bash
-# On the server:
-plasmite pool create builds
-plasmite serve https://pools.example.net:9743
-plasmite access invite laptop        # in a second terminal; prints an access key
-
-# On the teammate's laptop:
-plasmite access connect https://pools.example.net:9743     # enter the key when asked
-plasmite follow https://pools.example.net:9743/builds --last 20
-```
-
-The key grants full access to every pool in the server's directory. [Share pools across machines](record/serving.md#share-your-first-pool) covers certificates, browsers and starting the server at boot.
+Follow the [pool-sharing walkthrough](record/serving.md#share-your-first-pool) to start a server, invite a teammate and read a pool from their machine.
 
 ## Collect sensor readings over UDP
 
@@ -183,14 +178,7 @@ The adapter turns each OSC message into data such as `{"address": "/fader/1", "a
 
 ## Hand off work between agents
 
-```bash
-claude mcp add --transport stdio plasmite -- plasmite mcp     # once for each agent; Codex: codex mcp add plasmite -- plasmite mcp
-plasmite follow project --tag handoff                         # watch the handoffs yourself
-```
-
-Tell the first agent: "When the tests pass, post a handoff to the `project` pool." Tell the second: "Fetch the latest handoff from the `project` pool and pick up from there." The first calls `plasmite_feed` with `{"pool": "project", "create": true, "tags": ["handoff"], "data": {"from": "claude:api", "summary": "login tests pass"}}`, and the second calls `plasmite_fetch` with `{"pool": "project", "tags": ["handoff"], "last": 1}`.
-
-[Plasmite for agents](agents.md) covers shared servers and instructions to paste into `AGENTS.md`.
+See [Hand off work](agents.md#hand-off-work) for what the first agent posts and how the next agent reads it.
 
 ## Use Plasmite from Python, JavaScript and Go
 
@@ -240,14 +228,14 @@ import { openPool } from "plasmite";
 const pool = openPool("builds", { create: true });
 await pool.feed({ step: "test", status: "ok" }, { tags: ["ci"] });
 for await (const msg of await pool.fetch({ last: 10, tags: ["ci"] })) {
-  console.log(msg.seq, msg.tags, msg.data);
+  console.log(msg.seq, msg.field("step"), msg.field("status"));
 }
 pool.close();
 ```
 
 ```js
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { ErrorKind, openPool } from "plasmite";
+import { ErrorKind, openPool, toJson } from "plasmite";
 
 const checkpoint = "sensors.next"; // the next sequence to handle
 let since = existsSync(checkpoint) ? BigInt(readFileSync(checkpoint, "utf8")) : 1n;
@@ -256,7 +244,7 @@ const pool = openPool("sensors", { create: true });
 for (;;) {
   try {
     for await (const msg of await pool.follow({ since })) {
-      console.log(msg.seq, msg.data);
+      console.log(toJson(msg));
       since = msg.seq + 1n;
       writeFileSync(checkpoint, String(since));
     }
@@ -302,7 +290,7 @@ func main() {
 			break
 		}
 		must(msg, err)
-		fmt.Println(msg.Seq, msg.Tags(), string(msg.Data))
+		fmt.Println(msg.Seq(), msg.Tags(), string(msg.Data()))
 	}
 }
 
@@ -352,23 +340,11 @@ func follow(pool *plasmite.Pool, since *uint64) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(msg.Seq, string(msg.Data))
-		*since = msg.Seq + 1
+		fmt.Println(msg.Seq(), string(msg.Data()))
+		*since = msg.Seq() + 1
 		if err := os.WriteFile(checkpoint, []byte(strconv.FormatUint(*since, 10)), 0o644); err != nil {
 			return err
 		}
 	}
 }
 ```
-
-## When Plasmite isn't the right fit
-
-Plasmite serves processes on one machine and the machines close to it. Other tools fit these needs better:
-
-| If you need | Consider |
-| --- | --- |
-| Replication across a cluster of hosts | Kafka, NATS JetStream or Redpanda; a pool lives on one filesystem. |
-| Schema registry or contract enforcement | Confluent Schema Registry or Buf; Plasmite accepts any JSON object. |
-| Workflow orchestration with retries and state machines | Temporal or Inngest. |
-| The fastest channel between threads in one process | OS pipes, `crossbeam` or Go channels; writing to disk adds cost. |
-| Durable storage for large files | S3 or MinIO; a pool holds a bounded window of small messages. |

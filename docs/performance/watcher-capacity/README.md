@@ -163,11 +163,11 @@ baseline="$scratch/baseline/target/release/plasmite"
 
 for streams in 1 64; do
   uv run docs/performance/watcher-capacity/measure.py \
-    --binary "$baseline" --revision 234cc5b --events "$streams" \
+    --binary "$baseline" --legacy-pool-routes --revision 234cc5b --events "$streams" \
     --output "$scratch/baseline-$streams.json"
 done
 uv run docs/performance/watcher-capacity/measure.py \
-  --binary "$baseline" --revision 234cc5b --events 0 --http-follows 1 \
+  --binary "$baseline" --legacy-pool-routes --revision 234cc5b --events 0 --http-follows 1 \
   --output "$scratch/baseline-http-1.json"
 git worktree remove "$scratch/baseline"
 ```

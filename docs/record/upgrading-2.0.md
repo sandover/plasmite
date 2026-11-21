@@ -46,21 +46,21 @@ Every binding shares one model: `feed` writes, `follow` waits for new messages, 
 
 | 1.x | 2.0 |
 | --- | --- |
-| `append`, `append_json`, `append_lite3` | `feed`, `feed_json`, `feed_lite3` |
-| `get(seq)`, `get_json`, `get_lite3` | Take the first item in a `with pool.fetch(since=seq) as reader:` block. Use `message.raw` for the JSON bytes or open `fetch_lite3` for a Lite3 frame. |
-| `tail(...)`, `open_stream`, `open_lite3_stream` | `follow(...)` or `fetch(...)`, and their `_lite3` forms |
+| `append`, `append_json`, `append_lite3` | `feed`, with `format="json"` or `format="lite3"` for bytes |
+| `get(seq)`, `get_json`, `get_lite3` | Take the first item in a `with pool.fetch(since=seq) as reader:` block. Use `message.raw` for the stored Lite3 bytes. |
+| `tail(...)`, `open_stream`, `open_lite3_stream` | `follow(...)` or `fetch(...)` |
 | `replay(speed=...)` | `fetch()` and your own timer |
 | `since_seq=N`, `max_messages`, `timeout_ms`, `error_on_gap` | Use `since=N`, count results yourself and use `reader.next(wait=seconds)` for a bounded wait. Retention gaps always raise an error. |
 | `Client.pool(ref, size)` | `Client.open_pool(ref, create=True)` |
 | `message.time` (`datetime`), `time_rfc3339` | `message.time` (nanoseconds) |
-| `UdpPool.send_json`, `send_lite3` | `UdpPool.feed`, `feed_lite3` |
+| `UdpPool.send_json`, `send_lite3` | `UdpPool.feed` with the input format when passing bytes |
 | `UdpPool.follow(UdpFollowOptions(...))` | `UdpPool.follow(since=..., last=...)` or `fetch(...)` |
 
 **JavaScript**
 
 | 1.x | 2.0 |
 | --- | --- |
-| `append`, `appendJson`, `appendLite3` | `feed`, `feedJson`, `feedLite3`, which return promises |
+| `append`, `appendJson`, `appendLite3` | `feed`, with `format: "json"` or `format: "lite3"` for bytes |
 | `get(seq)`, `getJson` | The first message of `await pool.fetch({ since: seq })` |
 | `tail(options)`, `replay(options)`, `openStream` | `follow(options)` or `fetch(options)` |
 | `sinceSeq`, `maxMessages`, `timeoutMs`, `errorOnGap` | Use `since`, count results yourself and pass a `signal` or call `reader.next(waitSeconds)`. Retention gaps always raise an error. |
@@ -71,51 +71,49 @@ Every binding shares one model: `feed` writes, `follow` waits for new messages, 
 
 **Go**
 
-| 1.x | 2.0 |
+| Earlier call or field | 2.0 |
 | --- | --- |
-| `Append`, `AppendJSON`, `AppendLite3`, `AppendOption` | `Feed`, `FeedJSON`, `FeedLite3`, `FeedOption` |
-| `Get(seq)`, `GetJSON`, `GetLite3` | The first message of `Fetch(api.Since(seq))` |
-| `Tail`, `TailLite3` (channels), `Replay`, `OpenStream`, `OpenLite3Stream` | `Follow`, `Fetch` and their `Lite3` forms, read with `Next(ctx)` |
+| `Append`, `AppendOption` | `Feed`, `FeedOption` |
+| `AppendJSON`, `FeedJSON`, `FeedJSONView` | `Feed(plasmite.JSON(payload), tags)` |
+| `AppendLite3`, `FeedLite3` | `Feed(plasmite.Lite3(payload), nil)` |
+| `FeedReceipt`, `FeedJSONReceipt`, `FeedLite3Receipt` | Call `Seq()` and `Time()` on the message from `Feed` |
+| `FeedView` | `Feed(value, tags)` for new data or `Feed(message, nil)` for a forward |
+| `Get(seq)`, `GetJSON`, `GetLite3` | Take the first message of `Fetch(api.Since(seq))`. Use `json.Marshal(message)` for the JSON envelope or `message.Raw()` for Lite3. |
+| `Tail`, `TailLite3`, `Replay`, `OpenStream`, `OpenLite3Stream`, `FollowLite3`, `FollowView`, `FetchLite3`, `FetchView` | Open `Follow` or `Fetch` and read with `Next(ctx)` |
 | `TailOptions{SinceSeq, MaxMessages, Timeout}` | Use `api.Since`, count results yourself and pass a context deadline to `Next`. |
 | `Client.Pool(ref, size)` | `Client.OpenPool(ref, api.Create(true))` |
-| `Message.Time` (`time.Time`), `TimeRFC3339` | `Message.Time` (`uint64` nanoseconds) |
-| `udp.Pool.SendJSON`, `SendLite3`, `Follow(NewFollowOptions())` | `Feed`, `FeedLite3`, `Follow(opts...)` or `Fetch(opts...)` |
+| `message.Seq`, `message.Time`, `message.Data`, `message.Meta.Tags` | `message.Seq()`, `message.Time()` (`uint64` nanoseconds), `message.Data()`, `message.Tags()` |
+| `TimeRFC3339`, `message.Raw` (JSON envelope), `view.Lite3()` | Use `json.Marshal(message)` for the RFC 3339 envelope or `message.Raw()` for Lite3 |
+| `Prepare` and `selector.Read` | Decode selected fields with `message.Decode(&target)` where `target` is a struct |
+| `udp.Pool.SendJSON`, `SendLite3`, `FeedLite3` | `Feed(plasmite.JSON(payload), tags)` or `Feed(plasmite.Lite3(payload), nil)` |
+| `udp.Follow(NewFollowOptions())`, `ViewFrame` | Open `Follow(opts...)` or `Fetch(opts...)`. Each `*udp.Frame` carries the record in `frame.Message`. |
 
 **Rust**
 
 | 1.x | 2.0 |
 | --- | --- |
-| `append_json`, `append_json_now`, `append_lite3` | `feed`, `feed_json`, `feed_lite3` with `Feed` options |
+| `append_json`, `append_json_now`, `append_lite3` | `feed`, with `FeedInput::Json` or `FeedInput::Lite3` for bytes |
 | `get_message(seq)` | The first message of `fetch(Read::since(Since::Seq(seq)))` |
 | `tail(TailOptions)`, `replay(ReplayOptions)` | `follow(Read)` or `fetch(Read)` |
 | `TailOptions::gap_policy` | Removed; reads always report `RetentionGap` |
 | `create_pool` returns `PoolInfo` | `create_pool` returns a pool handle |
 | `Message.time` (RFC 3339 `String`) | `Message.time` (`u64` nanoseconds) |
 
+**Earlier 2.0 development builds**
+
+| Former operation | Use in 2.0 |
+| --- | --- |
+| Python/Rust `feed_json`, JavaScript `feedJson` | `feed` with explicit JSON input |
+| Python/Rust `feed_lite3`, JavaScript `feedLite3` | `feed` with explicit Lite3 input |
+| `feed_view` / `feedView`, including JSON-to-view forms | `feed` with a message or the matching explicit input |
+| Numeric receipt forms of any feed | Read sequence and time from the returned message |
+| `follow_view` / `followView` and `fetch_view` / `fetchView` | `follow` and `fetch` return immutable messages |
+| `follow_lite3` / `followLite3` and `fetch_lite3` / `fetchLite3` | `follow` and `fetch`, then read the stored bytes from the message |
+| Python `next_batch` | Iterate the reader or call `reader.next(wait=...)`. Collect messages in your own batch when the next operation takes several at once. |
+| Python or JavaScript view data and conversion helpers | Read `message.data` for the full object and `message.field(name)` for one field. Use `message.raw` for stored bytes. |
+| Rust `MessageView` reads | `Message::field` reads a field, `Message::decode` reads into a Rust type, and `Message::data` reads the full JSON value. |
+
 Python, Go and the Node add-on check the native library's major version when they load it. The library names are `libplasmite.so.2` on Linux, `libplasmite.2.dylib` on macOS and `plasmite2.dll` on Windows.
-
-## Resume Brygg's shared canvas listener
-
-Brygg's app draws a shared canvas from tagged messages. It supplies the callback and two checkpoint functions. On the first run, `load_last_handled()` returns `None`, so `follow` starts with new messages. After a restart, the listener asks for the message after the last one it handled.
-
-```python
-import plasmite
-
-pool = plasmite.open_pool("grObjPool")
-print(pool.info())  # Shows the oldest and newest sequences still in the pool.
-
-last_seq = load_last_handled()
-since = None if last_seq is None else last_seq + 1
-for message in pool.follow(since=since, tags=["gfx", "scope:sharedCanvas"]):
-    handle_message(message)
-    save_last_handled(message.seq)
-```
-
-If the app last handled 100 and `pool.info()` shows 90 through 120, the listener starts at 101, catches up, and keeps waiting for new messages. It saves each sequence only after the callback succeeds.
-
-If 101 has already expired, `follow` raises `RetentionGapError` before delivering anything. The pool knows which sequence numbers it lost, but not whether any of them carried canvas tags, so the app can no longer verify that its canvas is complete. It needs a known state, such as a fresh snapshot from wherever the canvas is saved, before it applies more updates.
-
-Keep a checkpoint with the pool it came from. Discard it if you replace the pool, because the new pool assigns its own sequences starting at 1.
 
 ## Control playback timing
 
@@ -160,21 +158,23 @@ For an installed server, run the new executable's `plasmite --dir DIR serve inst
 
 ## Upgrade HTTP clients and servers together
 
-A 2.0 server answers 1.x routes with an error that names the required protocol version, and a 2.0 client reports a 1.x server the same way.
+A 2.0 server answers old versioned pool routes with an error that names the required protocol version. New client requests go directly to `/pools` and the server includes `Plasmite-Version: 2` in its responses.
 
 | 1.x route | 2.0 route |
 | --- | --- |
-| `GET /v0/pools`, `POST /v0/pools` | `GET /v2/pools`, `POST /v2/pools` |
-| `GET /v0/pools/{p}/info` | `GET /v2/pools/{p}` |
-| `DELETE /v0/pools/{p}` | `DELETE /v2/pools/{p}` |
-| `POST /v0/pools/open` | `POST /v2/pools/{p}/open` |
-| `POST /v0/pools/{p}/append` | `POST /v2/pools/{p}/feed` |
-| `POST /v0/pools/{p}/append_lite3` | `POST /v2/pools/{p}/feed` with `Content-Type: application/x-plasmite-lite3` |
-| `GET /v0/pools/{p}/messages/{seq}` | First record of `GET /v2/pools/{p}/fetch?since={seq}` |
+| `GET /v0/pools`, `POST /v0/pools` | `GET /pools`, `POST /pools` |
+| `GET /v0/pools/{p}/info` | `GET /pools/{p}` |
+| `DELETE /v0/pools/{p}` | `DELETE /pools/{p}` |
+| `POST /v0/pools/open` | `POST /pools/{p}/open` |
+| `POST /v0/pools/{p}/append` | `POST /pools/{p}/feed` |
+| `POST /v0/pools/{p}/append_lite3` | `POST /pools/{p}/feed` with `Content-Type: application/x-plasmite-lite3` |
+| `GET /v0/pools/{p}/messages/{seq}` | First record of `GET /pools/{p}/fetch?since={seq}` |
 | `GET /v0/pools/{p}/messages/{seq}/lite3` | The same, with `Accept: application/x-plasmite-lite3-stream` |
-| `GET /v0/pools/{p}/tail` | `GET /v2/pools/{p}/follow`, or `/fetch` for a finite read |
+| `GET /v0/pools/{p}/tail` | `GET /pools/{p}/follow`, or `/fetch` for a finite read |
 | `GET /v0/pools/{p}/tail_lite3` | The same, with `Accept: application/x-plasmite-lite3-stream` |
 | `since_seq`, `max`, `timeout_ms`, `gap_policy` query parameters | `since`, `last`, repeated `tag`; the client closes the response to stop |
+
+Sign in again in the browser after upgrading. The browser uses `/browser/session` and gets a cookie that reaches the new pool routes.
 
 An open read that reaches a server ending carries one control record when the connection can deliver it. `complete` ends a fetch normally. `error` carries the failure, such as `RetentionGap` with `missing` and `next_seq`. `cutoff` means the server reached its time limit. Send a new fetch with `since` set to its `next_seq`, the same `until`, and `incarnation` set to the `Plasmite-Incarnation` header from the first response. A response that ends on its own without a control record failed. See the [HTTP contract](../../spec/v2/SPEC.md#http).
 
@@ -184,13 +184,15 @@ Rebuild C programs against the 2.0 header.
 
 | 1.x C call | 2.0 C call |
 | --- | --- |
-| `plsm_pool_append_json`, `plsm_pool_append_lite3` | `plsm_pool_feed_json`, `plsm_pool_feed_lite3`, with `plsm_feed_options_t` |
-| `plsm_pool_get_json`, `plsm_pool_get_lite3` | Open `plsm_pool_fetch` or `plsm_pool_fetch_lite3` at the sequence and take the first record |
-| `plsm_stream_open(_ex)`, `plsm_lite3_stream_open(_ex)` | `plsm_pool_follow`, `plsm_pool_fetch` or their `_lite3` forms, with `plsm_read_options_t` |
-| `plsm_stream_next`, `plsm_lite3_stream_next` | `plsm_stream_next_wait`, `plsm_lite3_stream_next_wait`, with a timeout in milliseconds |
+| `plsm_pool_append_json`, `plsm_pool_append_lite3` | `plsm_pool_feed` with `PLSM_FEED_JSON` or `PLSM_FEED_LITE3` and `plsm_feed_options_t` |
+| `plsm_pool_get_json`, `plsm_pool_get_lite3` | Open `plsm_pool_fetch` at the sequence and take the first message. Use `plsm_message_raw` for stored bytes. |
+| `plsm_stream_open(_ex)`, `plsm_lite3_stream_open(_ex)` | `plsm_pool_follow` or `plsm_pool_fetch`, with `plsm_read_options_t` |
+| `plsm_stream_next`, `plsm_lite3_stream_next` | `plsm_stream_next_message`, with a timeout in milliseconds |
+| Earlier 2.0 `plsm_stream_next_wait`, `plsm_lite3_stream_next_wait`, `plsm_view_stream_next` | Use `plsm_stream_next_message` for one message. Read its bytes with `plsm_message_raw` or use `plsm_message_to_json` for the envelope. |
+| Earlier 2.0 `plsm_pool_feed_json`, `plsm_pool_feed_lite3`, view and receipt variants | Use `plsm_pool_feed` with the input kind. Read the sequence and time from the returned message, then release it with `plsm_message_release`. |
 | `plsm_stream_options_t`, `plsm_gap_policy_t` | Removed; reads always report `PLSM_ERROR_RETENTION_GAP` |
-| `plsm_udp_pool_send_json`, `plsm_udp_pool_send_lite3` | `plsm_udp_pool_feed_json`, `plsm_udp_pool_feed_lite3` |
-| `plsm_udp_pool_follow` | `plsm_udp_pool_read` |
+| `plsm_udp_pool_send_json`, `plsm_udp_pool_send_lite3` | `plsm_udp_pool_feed` with `PLSM_FEED_JSON` or `PLSM_FEED_LITE3` |
+| `plsm_udp_pool_follow`, `plsm_udp_pool_read` | `plsm_udp_pool_follow` or `plsm_udp_pool_fetch`. Read messages and control events with `plsm_udp_follow_next_view`. |
 
 ## Upgrade Go imports
 
@@ -198,7 +200,7 @@ Add `/v2` after `bindings/go` in each Plasmite import. For example, change the l
 
 ## Duplex sends and receives ordinary messages
 
-`duplex` uses the same input parser as `feed`, including at a terminal. Enter JSON objects, complete messages, marked YAML or framed Lite3. Remove `--me` and `--echo-self`. The receive stream includes the process's own messages, so put any application-specific identity in `data` or tags and filter on the receiving side.
+`duplex` uses the same input parser as `feed`, including at a terminal. Enter JSON objects, complete messages, marked YAML or framed Lite3. Remove `--me` and `--echo-self`. The receive stream includes the process's own messages, so use `meta.sender` for access-key names and put any other application identity in `data` or tags.
 
 `plasmite duplex chat` opens its reader before it sends its first message. Input EOF closes sending, so a program can send a request, close stdin, and still read a reply. Stop the process or close stdout when it has what it needs. Use `feed` for a finite copy that exits at input EOF.
 
@@ -230,5 +232,7 @@ C, Node and Python tell names from paths by native path separators. Use `./work.
 
 ## New in 2.0
 
-- **Owned views** read selected fields from one immutable Lite3 snapshot without decoding the whole message, and forward messages without re-encoding. See the [Rust](../../README-crate.md), [Python](../../bindings/python/README.md), [JavaScript](../../bindings/node/README.md) and [Go](../../bindings/go/README.md) guides.
-- **Numeric feed receipts** return only the committed sequence and time, for producers that don't need the stored message back. The same guides list each binding's receipt calls.
+- **One owned message per result.** `feed`, `follow`, and `fetch` return messages that keep their stored bytes. Access sequence, time, tags, and sender without decoding data. Forward a message by passing it to `feed`.
+- **Read-only keys and sender names.** Use `access invite --read-only` for a reader. On a keyed write, the server stores the key name with the message.
+- **Pool descriptions.** Use `pool create --about` and `--example` to explain what a pool carries.
+- **Compact terminal messages.** `follow`, `fetch`, and `duplex` use one line per message in a terminal. Choose `--format pretty` for complete indented JSON.

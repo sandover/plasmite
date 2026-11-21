@@ -9,7 +9,7 @@ import argparse
 import asyncio
 from collections import Counter, defaultdict
 from contextlib import AsyncExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 import os
@@ -43,6 +43,7 @@ class Endpoint:
     http_key: str | None = None
     h2_context: ssl.SSLContext | None = None
     mcp_token: str | None = None
+    pool_route: str = "/pools"
 
 
 def https_endpoint(url, pid, certificate, key, token):
@@ -57,20 +58,21 @@ def https_endpoint(url, pid, certificate, key, token):
 
 @contextmanager
 def endpoint(args):
+    route = "/v2/pools" if args.legacy_pool_routes else "/pools"
     if args.url:
-        yield https_endpoint(
+        yield replace(https_endpoint(
             args.url.rstrip("/"), args.pid, args.ca_file,
             args.http_key_file.read_text().strip(), args.mcp_token_file.read_text().strip(),
-        )
+        ), pool_route=route)
         return
 
     with temporary_server(args.binary, args.https, args.server_arg) as (
         url, pid, certificate, key, token
     ):
         if certificate:
-            yield https_endpoint(url, pid, certificate, key, token)
+            yield replace(https_endpoint(url, pid, certificate, key, token), pool_route=route)
         else:
-            yield Endpoint(url, pid)
+            yield Endpoint(url, pid, pool_route=route)
 
 
 def client(server, http2=False, stall=False):
@@ -125,14 +127,14 @@ async def rpc(server, session, method, params):
 
 
 async def create_pool(server, session, pool, size):
-    response = await session.post("/v2/pools", json={"pool": pool, "size_bytes": size},
+    response = await session.post(server.pool_route, json={"pool": pool, "size_bytes": size},
                                   headers=headers(server))
     response.raise_for_status()
 
 
 async def feed(server, session, pool, body, tag):
     response = await session.post(
-        f"/v2/pools/{pool}/feed", headers=headers(server),
+        f"{server.pool_route}/{pool}/feed", headers=headers(server),
         json={"data": body, "tags": [tag], "durability": "fast"},
     )
     response.raise_for_status()
@@ -240,7 +242,7 @@ async def watch(server, session, mode, pool, delivery, started, request_id, dedi
                                     timeout=httpx.Timeout(15, read=None),
                                     **mcp_request(server, "events/stream", params, request_id))
         else:
-            stream = session.stream("GET", f"/v2/pools/{pool}/follow",
+            stream = session.stream("GET", f"{server.pool_route}/{pool}/follow",
                                     params={"tag": WATCH_TAG}, headers=headers(server),
                                     timeout=httpx.Timeout(15, read=None))
         async with stream as response:
@@ -317,7 +319,7 @@ async def timed_controls(server, session, pool, count, pause=0):
                 if name == "feed":
                     await feed(server, session, pool, {"control": turn}, "control")
                 elif name == "fetch":
-                    response = await session.get(f"/v2/pools/{pool}/fetch", params={"last": 1},
+                    response = await session.get(f"{server.pool_route}/{pool}/fetch", params={"last": 1},
                                                  headers=headers(server))
                     response.raise_for_status()
                     rows = [json.loads(line) for line in response.text.splitlines()]
@@ -380,7 +382,7 @@ async def start_stalled_reader(server, stack, writer, pool):
     # output queue. The separate pool keeps these writes out of delivery data.
     reader = await stack.enter_async_context(client(server, stall=True))
     response = await stack.enter_async_context(reader.stream(
-        "GET", f"/v2/pools/{pool}/follow", headers=headers(server),
+        "GET", f"{server.pool_route}/{pool}/follow", headers=headers(server),
     ))
     response.raise_for_status()
     data = {"text": "x" * (512 * 1024)}
@@ -514,6 +516,8 @@ def parse_args():
     origin.add_argument("--binary", type=Path, help="start a disposable server and use its local listener")
     origin.add_argument("--url", help="HTTPS origin of a dedicated, disposable benchmark server")
     parser.add_argument("--https", action="store_true", help="use HTTPS on the disposable binary fixture")
+    parser.add_argument("--legacy-pool-routes", action="store_true",
+                        help="use the versioned pool routes from the benchmark baseline")
     parser.add_argument("--pid", type=int, help="PID of the server at --url")
     parser.add_argument("--server-arg", action="append", default=[], help="extra argument for --binary")
     parser.add_argument("--ca-file", type=Path)
@@ -575,6 +579,7 @@ def main():
             "drain_seconds": args.drain_seconds,
             "controls": args.controls,
             "server_arguments": args.server_arg,
+            "legacy_pool_routes": args.legacy_pool_routes,
         },
         "trials": [],
     }

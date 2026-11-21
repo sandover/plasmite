@@ -81,6 +81,35 @@ new stream whole-message forwarding shortcut and the separate retained-child
 wrapper reassignment fix; their frozen executables never load later Go code.
 The wide-object producer gap remains a limit of this implementation.
 
+## Unified message check
+
+On an Apple M5 Pro, seven runs of 5,000 messages compared the earlier Go view
+path with `Fetch` and `Feed` using the unified message. Both paths used the same
+debug native library. The benchmark opened a new finite reader every 128
+messages. The sparse read decoded one integer into a struct. The forward sent
+the same stored bytes to a second local pool and verified the result.
+
+| Work per message | Earlier view median (range) | Unified message median (range) |
+| --- | ---: | ---: |
+| Small object, sparse read | 3.81 µs (3.71–4.70) | 3.81 µs (3.78–3.87) |
+| 32,000-byte string, sparse read | 8.59 µs (8.50–9.56) | 8.70 µs (8.61–8.93) |
+| Small object, read and forward | 6.38 µs (6.33–6.64) | 6.59 µs (6.47–6.73) |
+| 32,000-byte string, read and forward | 13.21 µs (13.12–13.93) | 13.35 µs (12.90–13.98) |
+
+The unified message adds 200 Go bytes to each read and 400 bytes to the
+read-and-forward cycle, with the same cgo call count. A local forward shares
+the source payload when its metadata holds only tags. Forwards that must
+change metadata use the regular feed path.
+
+After staging the debug library as in `just bindings-go-test`, run this command
+from `bindings/go` with the same native library paths.
+
+```bash
+go test ./local -run '^$' \
+  -bench '^BenchmarkOwnedStreams/(small|long)/(view_selected|message_selected|view_forward|message_forward)$' \
+  -benchtime=5000x -count=7
+```
+
 ## Reproduce
 
 Use the benchmarks in [bindings/go/local](../../../../../bindings/go/local/):

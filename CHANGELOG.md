@@ -14,10 +14,10 @@ All notable changes to this project will be documented in this file.
 - **Local and HTTP readers report overwritten history.** `RetentionGap` gives the first missing sequence (`missing`) and the first one still retained (`next_seq`). A tag filter can't hide a gap.
 - **Feed stores an object or forwards a message.** Input shaped exactly like a Plasmite message keeps its data and tags and gets a new sequence and time at the destination.
 - **The CLI drops `tap` and the flags `--no-follow`, `--tail`, `--timeout` (including on `duplex`), `--replay`, `--where`, `--file`, `--create-size`, `--retry`, `--retry-delay`, `--quiet-drops`, `--no-notify`, `--me` and `--echo-self`.** Use `fetch` or `--last` for history, `feed --input-format lines` to capture command output, and the shell for timeouts and retries. `follow --one` stays.
-- **HTTP pool operations move to `/v2`.** The server uses `complete`, `error` and `cutoff` records to signal the end of a read stream. Clients continue from a `cutoff` automatically. Upgrade servers and clients together.
+- **HTTP pool operations move to `/pools`.** The server advertises the protocol version in the `Plasmite-Version` header and uses `complete`, `error` and `cutoff` records to signal the end of a read stream. Clients continue from a `cutoff` automatically. Upgrade servers and clients together.
 - **MCP renames `plasmite_read` and `plasmite_wait` to `plasmite_fetch` and `plasmite_follow`.** Results carry `next_seq` and `ended`, and loss arrives as a structured `RetentionGap` error. MCP keeps tag strings exactly, including whitespace.
 - **New HTTPS MCP sign-ins require Client ID Metadata Documents.** Plasmite supports MCP revisions `2025-11-25` and `2026-07-28` over stdio and HTTPS. See the [MCP migration guide](docs/record/upgrading-2.0.md#migrate-mcp-clients) for how to sign in again.
-- **Libraries share names and one `time` field.** Every message carries `time` as integer Unix nanoseconds. Python and JavaScript mark a time with `plasmite.at(t)` because a bare number always means a sequence; Go uses `At`.
+- **Libraries share one owned `Message`.** `feed`, `follow` and `fetch` return the same type. Read metadata without decoding data, or forward the message directly. Every message carries `time` as integer Unix nanoseconds. Python and JavaScript mark a time with `plasmite.at(t)` because a bare number always means a sequence; Go uses `At`.
 - **Native libraries carry their major version in the file name:** `libplasmite.so.2`, `libplasmite.2.dylib` and `plasmite2.dll`. Bindings check `plsm_abi_major()` when they load.
 - **Framed Lite3 files start with `PLS2`.** 2.0 doesn't read `PLS1` files.
 - **Readers check pool identity** when they open from a local handle or resume an HTTP stream. A different pool with the same name produces `NotFound`.
@@ -56,7 +56,9 @@ The [language interface guide](docs/performance/language-interfaces.md) covers m
 #### Other improvements
 
 - **Local writes wake waiting followers** on Linux, Windows and macOS 14.4 or newer. In the Windows VM measurements, four-reader paced delivery fell from about 50 ms to 2.5 ms at p95. At saturation those readers drained 11–15% fewer messages per second.
-- **Owned message views** in Rust, C, Python, JavaScript and Go read encoded data without converting it, and outlive the pool or stream that produced them. Direct native writers, whole-message forwarding and bounded Python batches come with them. View writers reject integers outside signed 64 bits.
+- **Pool descriptions** tell readers what a pool carries and can include an example. Set them with `pool create --about` and `--example`, then update them with `pool describe`.
+- **Read-only keys** let someone list and read the pools you serve. The server records the key name in `meta.sender` on keyed writes.
+- **`follow`, `fetch` and `duplex` fit one message per terminal line.** Use `--format pretty` for indented JSON. Pipes keep the complete JSON envelope.
 - **JSON reads keep stored floating-point values exactly.** C JSON reads format messages directly from storage, and Rust parses JSON floats with correct rounding. Applications that compare exact float text should check the [upgrade guide](docs/record/upgrading-2.0.md).
 - **Binary `follow --tag`** checks tags and validates the payload without building a decoded data tree. Rust adds `Meta::from_lite3`.
 - **Local appends are cheaper.** Native streams use notifications in place of 50 ms polling; median paced Python delivery latency fell from 26.9 ms to 4.2 ms. Each pool derives its notification name once, which raised one Mac's Python producer/reader throughput 54%. See the [pipe comparison](docs/performance/pipe-comparison.md).
