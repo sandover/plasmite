@@ -66,7 +66,7 @@ The crate builds one library (`src/lib.rs`) and two binaries. `plasmite` (`src/m
 | `src/http_v2.rs` | The `/pools` routes and the response streams for `fetch` and `follow`. |
 | `src/api/notify/shared.rs` | One native wait per watched pool file. Registered Rust callbacks signal changes to the server and async Python. |
 | `src/pool_wait.rs` | Adapts pool change callbacks to Tokio and bounds the server's local read work. |
-| `src/abi_async.rs`, `bindings/python/plasmite/aio.py` | Async HTTPS and UDP operations and the asyncio bridge. Local Python readers use the shared waiter and bounded workers, and remote readers wait on network I/O. |
+| `src/abi_async.rs`, `bindings/python/plasmite/aio.py` | Async HTTPS and UDP operations and the asyncio bridge. Bounded workers open local readers separately from the workers that read messages. Local followers use the shared waiter, and remote readers wait on network I/O. |
 | `src/secure_serve.rs` | Starts the loopback listener and the authenticated HTTPS listener together. |
 | `src/udp_input.rs`, `src/udp_wire.rs` | The UDP server and the datagram codec it shares with `api/udp.rs`. |
 | `src/mcp.rs`, `src/mcp_stdio.rs`, `src/oauth.rs` | The MCP dispatcher, its stdin/stdout transport, and OAuth for the HTTPS MCP endpoint. |

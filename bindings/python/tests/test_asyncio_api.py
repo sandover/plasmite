@@ -30,6 +30,30 @@ class AsyncReadDeadlineTests(unittest.IsolatedAsyncioTestCase):
                                 await reader.aclose()
 
 
+class NetworkResultTests(unittest.TestCase):
+    def test_closing_stopped_loop_releases_queued_message(self):
+        loop = asyncio.new_event_loop()
+        token = None
+
+        def start(result_token, _report, _out, _error):
+            nonlocal token
+            token = result_token
+            return 0
+
+        async def open_job():
+            return aio._NetworkJob(start)
+
+        try:
+            job = loop.run_until_complete(open_job())
+            with patch.object(aio._LIB, "plsm_view_release") as release:
+                aio._network_result(token, 1, 123, None)
+                self.assertFalse(job.future.done())
+                loop.close()
+                release.assert_called_once_with(123)
+        finally:
+            loop.close()
+
+
 class LocalAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         scope = AsyncExitStack()
@@ -51,6 +75,35 @@ class LocalAsyncTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(received.raw, sent.raw)
                 self.assertEqual([message.seq async for message in fetch], [1, 2])
         self.assertEqual([m.field("index") async for m in self.pool.fetch(tags=["keep"])], [0, 2])
+
+    async def test_blocked_opens_leave_workers_for_an_open_follower(self):
+        async with self.client.create_pool("locked", 65536) as locked, self.pool.follow() as follower:
+            locked_native = await locked._get_pool()
+            loop = asyncio.get_running_loop()
+            started = asyncio.Queue()
+            release = threading.Event()
+            original = aio._open_reader
+
+            def blocked_open(pool, *args):
+                if pool is locked_native:
+                    loop.call_soon_threadsafe(started.put_nowait, None)
+                    if not release.wait(5):
+                        raise AssertionError("test never released the opening worker")
+                return original(pool, *args)
+
+            readers = [locked.follow() for _ in range(aio._workers._max_workers)]
+            with patch.object(aio, "_open_reader", blocked_open):
+                opening = [asyncio.create_task(reader.__aenter__()) for reader in readers]
+                try:
+                    for _ in readers:
+                        await asyncio.wait_for(started.get(), 2)
+                    sent = await self.pool.feed({"ready": True})
+                    received = await asyncio.wait_for(follower.next(), 2)
+                    self.assertEqual(received.seq, sent.seq)
+                finally:
+                    release.set()
+                    await asyncio.gather(*opening, return_exceptions=True)
+                    await asyncio.gather(*(reader.aclose() for reader in readers))
 
     async def test_wait_expiry_concurrent_reads_and_close(self):
         async with self.pool.follow() as reader:
@@ -221,6 +274,8 @@ class NetworkAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connect.returncode, 0, error.decode())
 
         async with self.client.open_pool(self.origin + "/events") as pool:
+            with self.assertRaises(OverflowError):
+                await pool.feed({"n": 2**63 + 1})
             async with pool.follow(tags=["keep"]) as reader:
                 self.assertIsNone(await reader.next(0.02))
                 sent = await pool.feed({"value": b"binary"}, ["keep"], durability="flush")

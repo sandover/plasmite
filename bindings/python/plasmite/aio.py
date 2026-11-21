@@ -8,7 +8,7 @@ import itertools
 import json
 import os
 import weakref
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
 from threading import Lock
 from time import monotonic_ns
@@ -42,9 +42,9 @@ from . import (
 from ._views import ViewStream, backend
 
 
-_workers = ThreadPoolExecutor(
-    max_workers=min(8, max(2, os.cpu_count() or 2)), thread_name_prefix="plasmite"
-)
+_worker_count = min(8, max(2, os.cpu_count() or 2))
+_workers = ThreadPoolExecutor(max_workers=_worker_count, thread_name_prefix="plasmite")
+_open_workers = ThreadPoolExecutor(max_workers=_worker_count, thread_name_prefix="plasmite-open")
 
 
 async def _work(call, *args, **kwargs):
@@ -116,7 +116,7 @@ class Pool:
             raise UsageError(ErrorKind.USAGE, "pool is closed")
         if self._native is None:
             if self._opening is None:
-                self._opening = asyncio.wrap_future(_workers.submit(self._open))
+                self._opening = asyncio.wrap_future(_open_workers.submit(self._open))
             native = await _wait(self._opening, deadline)
             if self._closed:
                 raise UsageError(ErrorKind.USAGE, "pool is closed")
@@ -236,25 +236,37 @@ _NetReport = c.CFUNCTYPE(None, c.c_uint64, c.c_int, c.c_void_p, c.POINTER(plsm_e
 _network_jobs = {}
 
 
-def _discard_result(status, value, error):
-    if status == 4:
-        _LIB.plsm_internal_async_network_close(value)
-    elif status == 1:
-        _LIB.plsm_view_release(value)
-    elif status < 0:
-        _LIB.plsm_error_free(error)
+class _NetworkResult:
+    """Own a native result until asyncio delivers or discards its callback."""
+
+    def __init__(self, status, value, error):
+        self.status = status
+        self.value = value
+        self.error = error
+
+    def take(self):
+        status, value, error = self.status, self.value, self.error
+        self.status = 0
+        return status, value, error
+
+    def __del__(self):
+        if self.status == 4:
+            _LIB.plsm_internal_async_network_close(self.value)
+        elif self.status == 1:
+            _LIB.plsm_view_release(self.value)
+        elif self.status < 0:
+            _LIB.plsm_error_free(self.error)
 
 
 @_NetReport
 def _network_result(token, status, value, error):
+    result = _NetworkResult(status, value, error)
     job = _network_jobs.pop(token, None)
     if job is not None:
         try:
-            job.loop.call_soon_threadsafe(job.complete, status, value, error)
-            return
+            job.loop.call_soon_threadsafe(job.complete, result)
         except RuntimeError:
             pass
-    _discard_result(status, value, error)
 
 
 class _NetworkReader:
@@ -300,12 +312,13 @@ class _NetworkJob:
     def __del__(self):
         self._release()
 
-    def complete(self, status, value, error):
+    def complete(self, result):
         self._release()
         if self.discard:
-            _discard_result(status, value, error)
             self.future.set_result(None)
-        elif status < 0:
+            return
+        status, value, error = result.take()
+        if status < 0:
             self.future.set_exception(_take_error(error))
         elif status == 4:
             self.future.set_result(_NetworkReader(value))
@@ -361,13 +374,14 @@ async def _feed_http(pool, value, tags, durability, format):
     elif format == "json":
         payload, kind = value, 1
     else:
-        kind = 1
         tags = None if tags is None else list(tags)
+        durability = int(durability)
         try:
-            payload = json.dumps(value).encode("utf-8")
-        except TypeError:
-            payload = bytes(backend.append(None, value, tags, int(durability)))
+            payload = bytes(backend.append(None, value, tags, durability))
             kind, tags = 2, None
+        except TypeError:
+            # Match the synchronous feed for JSON-compatible subclasses.
+            payload, kind = json.dumps(value).encode("utf-8"), 1
     spans, keepalive = _tag_array([] if tags is None else tags)
     options = plsm_feed_options_t(c.sizeof(plsm_feed_options_t), int(durability), spans, len(keepalive))
     with pool._lock:
@@ -419,19 +433,29 @@ class _ReaderState:
             if self.network_reader is not None:
                 self.network_reader.close()
             if self.opening is not None:
-                try:
-                    self.closing = _workers.submit(self.release)
-                except RuntimeError:
-                    # The executor can shut down before interpreter finalizers run.
-                    pass
+                self.closing = Future()
+                self.opening.add_done_callback(self.schedule_release)
         return self.closing
 
-    def release(self):
+    def schedule_release(self, opening):
         try:
-            reader = self.opening.result()
+            reader = opening.result()
         except Exception:
+            self.closing.set_result(None)
             return
-        reader.close()
+        try:
+            _workers.submit(self.release, reader)
+        except RuntimeError:
+            # The executor can shut down before interpreter finalizers run.
+            self.closing.set_result(None)
+
+    def release(self, reader):
+        try:
+            reader.close()
+        except Exception as error:
+            self.closing.set_exception(error)
+        else:
+            self.closing.set_result(None)
 
 
 class _WaitExpired(Exception):
@@ -480,7 +504,7 @@ class Reader:
                 if self._live:
                     state.signal = _LocalSignal()
                 token = 0 if state.signal is None else state.signal.token
-                state.opening = _workers.submit(_open_reader, pool, self._live, *self._options, token)
+                state.opening = _open_workers.submit(_open_reader, pool, self._live, *self._options, token)
                 self._opening = asyncio.wrap_future(state.opening)
         reader = await _wait(self._opening, deadline)
         if self._pool._remote and not state.closed:
