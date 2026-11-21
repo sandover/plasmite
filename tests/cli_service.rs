@@ -1,7 +1,5 @@
 //! Purpose: Verify foreground and installed-server CLI behavior at process boundaries.
 
-#[cfg(windows)]
-use plasmite::api::internal::LocalPoolTransport;
 use serde_json::Value;
 use std::fs;
 use std::io::Read;
