@@ -8,8 +8,6 @@ Repeat a check before applying its result to a different version or host.
 - [MCP resource notifications and agent wake-up](mcp-wake-up.md): resource notification experiments, native OpenCode wake-up with MCP Events, and the client compatibility findings (November 2026, `2.0.0-dev`).
 - [Windows and Mac services](windows-boot-validation.md): native Windows service startup before sign-in, updates and rollback, and a macOS LaunchDaemon trial (October 2026, `1.1.0-dev`).
 - [Debian VM services](debian-vm-validation.md): startup before login, reboot recovery, connection failures and retained sensor history (November 2026, `1.3.0-dev`).
-- [Linux ARM SDK CI run](arm-sdk-ci.md): the hosted CI run that first built and exercised the ARM64 and ARMv7 archives.
-- [Dependency audit, February 2026](dependency-audit-2026-02-08.md): a review of dependency and supply-chain risk from the 0.1.0 checkout. Run `just audit` for current advisories.
 
 ## Recording a check
 

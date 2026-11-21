@@ -33,7 +33,7 @@ Not currently targeted:
 - Linux ARM64: `aarch64-unknown-linux-gnu` (`linux_arm64`), ARMv8-A, built natively on Ubuntu 22.04 for ARM64.
 - Linux ARMv7, 32-bit hard-float: `armv7-unknown-linux-gnueabihf` (`linux_armv7`), cross-built with GCC's `arm-linux-gnueabihf` compiler against an Ubuntu 22.04 sysroot. It requires Armv7-A with VFPv3-D16 and Thumb-2 (`-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard`); NEON is optional.
 
-Both need glibc 2.35 or newer. Each archive holds the CLI, server and C SDK, so you can run Plasmite without Rust; npm, PyPI and Homebrew do not cover ARM Linux. Release CI smoke-tests each packaged archive, runs the core and server test suites on each target, and hands a pool between 64-bit and ARMv7 CLIs; ARMv7 runs under QEMU. No check on physical Raspberry Pi hardware has passed yet, so both targets stay in preview. The [ARM SDK CI report](../validation/arm-sdk-ci.md) records the first run.
+Both need glibc 2.35 or newer. Each archive holds the CLI, server and C SDK, so you can run Plasmite without Rust; npm, PyPI and Homebrew do not cover ARM Linux. Release CI smoke-tests each packaged archive, runs the core and server test suites on each target, and hands a pool between 64-bit and ARMv7 CLIs; ARMv7 runs under QEMU. No check on physical Raspberry Pi hardware has passed yet, so both targets stay in preview. The [first ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793) records the original checks.
 
 On ARMv7 a pool file can be at most 2,147,483,647 bytes (2 GiB minus one byte). Plasmite refuses to create or map a larger pool. A smaller pool can still fail to map when memory is short.
 

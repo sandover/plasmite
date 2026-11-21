@@ -12,9 +12,10 @@ can cost more for another.
 | How does portable JavaScript compare with JSON? | [Portable views](language-boundary-results/portable-views/README.md) |
 | How do UDP and HTTP compare? | [UDP transport](udp-transport.md) |
 | How does Plasmite compare with a Python pipe? | [Pipe comparison](pipe-comparison.md) |
-| What do local, HTTP and MCP paths cost? | [Transport comparison](transport-comparison.md), [Windows access](windows-access-1.0.md) |
+| What do local, HTTP and MCP paths cost? | [Transport comparison](transport-comparison.md) |
 | How many live watchers can a server support? | [Live watcher capacity](watcher-capacity/README.md) |
 | What did the 1.0 release change? | [Release measurements](1.0-release.md) |
+| How did 1.0 perform in a Windows VM? | [Windows 1.0 measurements](windows-access-1.0.md) |
 
 ## Measure a change
 
