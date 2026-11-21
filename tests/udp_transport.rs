@@ -396,6 +396,8 @@ fn replacing_a_pool_ends_the_old_stream_instead_of_resetting_sequence() -> TestR
 fn completed_follow_rejects_pool_replacement_before_answering_renewal() -> TestResult {
     let server = Server::start(true, 1)?;
     let socket = raw_socket()?;
+    // This test expects a reply at every step, including on emulated runners.
+    socket.set_read_timeout(Some(Duration::from_secs(2)))?;
     let id = [21; 16];
     let selection = wire::Selection {
         pool: "events".into(),
