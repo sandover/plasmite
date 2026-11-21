@@ -206,7 +206,7 @@ fn cli_forwarding_accepts_offset_times_and_rejects_zero_sequence() {
     assert!(
         records
             .iter()
-            .all(|m| m.data == json!({"value":9}) && m.meta.tags == ["source"])
+            .all(|m| *m.data().unwrap() == json!({"value":9}) && m.tags().unwrap() == ["source"])
     );
 }
 
@@ -438,16 +438,16 @@ fn rust_feed_and_pool_contract() {
         .feed(&seed.data, Feed::new().tags(seed.tags.clone()))
         .expect("store canvas message");
     assert_eq!(sent.seq, 1);
-    assert_eq!(sent.data, seed.data);
-    assert_eq!(sent.meta.tags, seed.tags);
+    assert_eq!(sent.data().unwrap(), &seed.data);
+    assert_eq!(sent.tags().unwrap(), seed.tags);
     assert!(sent.time > 0);
     seed_rust(&mut destination_pool, &cases.seed);
     let copied = destination_pool
         .feed(&sent, Feed::new().durability(Durability::Flush))
         .expect("forward message");
     assert_eq!(copied.seq, 4);
-    assert_eq!(copied.data, sent.data);
-    assert_eq!(copied.meta.tags, sent.meta.tags);
+    assert_eq!(copied.data().unwrap(), sent.data().unwrap());
+    assert_eq!(copied.tags().unwrap(), sent.tags().unwrap());
     assert_eq!(
         destination_pool
             .fetch(Read::since(Since::Seq(copied.seq)))
@@ -481,14 +481,14 @@ fn reads_pool_from_last_1x_release() {
     assert_eq!(messages.len(), fixture.messages.len());
     for (i, (message, seed)) in messages.iter().zip(fixture.messages).enumerate() {
         assert_eq!(message.seq, i as u64 + 1);
-        assert_eq!(message.data, seed.data);
-        assert_eq!(message.meta.tags, seed.tags);
+        assert_eq!(message.data().unwrap(), &seed.data);
+        assert_eq!(message.tags().unwrap(), seed.tags);
         assert!(message.time > 0);
     }
     let forwarded = pool.feed(&messages[0], Feed::new()).unwrap();
     assert_eq!(forwarded.seq, messages.len() as u64 + 1);
-    assert_eq!(forwarded.data, messages[0].data);
-    assert_eq!(forwarded.meta.tags, messages[0].meta.tags);
+    assert_eq!(forwarded.data().unwrap(), messages[0].data().unwrap());
+    assert_eq!(forwarded.tags().unwrap(), messages[0].tags().unwrap());
     let error = pool
         .feed(&messages[0], Feed::new().tags(["override"]))
         .unwrap_err();

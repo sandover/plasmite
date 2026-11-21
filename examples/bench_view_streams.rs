@@ -1,5 +1,6 @@
 //! Run one lane per process. Setup/encoding stays outside the timed consumer.
-//! Usage: bench_view_streams local|udp raw|raw_forward|view_selected|view_full|view_forward|json FIXTURE COUNT
+//! Usage: bench_view_streams local|udp LANE FIXTURE COUNT
+use plasmite::api::internal::{LocalPoolTransport, UdpPoolTransport};
 use plasmite::api::{
     AppendOptions, Durability, Pool, PoolOptions, PoolRef, Read, Since, UdpClient, UdpEvent,
     UdpViewEvent,
@@ -49,10 +50,15 @@ fn main() {
             "view_selected",
             "view_full",
             "view_forward",
-            "json"
+            "json",
+            "message_raw",
+            "message_selected",
+            "message_full",
+            "message_forward",
         ]
         .contains(&lane)
     );
+    assert!(transport == "local" || !lane.starts_with("message_"));
     let extra = match fixture {
         "small" => json!([true, "sensor"]),
         "wide" => (0..200)
@@ -116,10 +122,35 @@ fn local(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
                 sum += 7;
             }
         }
+        "message_raw" | "message_selected" | "message_full" | "message_forward" => {
+            for message in pool.fetch(Read::default()).unwrap() {
+                let message = message.unwrap();
+                sum += match lane {
+                    "message_raw" => {
+                        black_box(message.raw());
+                        7
+                    }
+                    "message_selected" => {
+                        message.field("value").unwrap().unwrap().integer().unwrap()
+                    }
+                    "message_full" => message.decode::<Input>().unwrap().value,
+                    "message_forward" => {
+                        black_box(
+                            destination
+                                .feed(&message, plasmite::api::Feed::new())
+                                .unwrap(),
+                        );
+                        7
+                    }
+                    _ => unreachable!(),
+                };
+                black_box(message);
+            }
+        }
         "json" => {
             let mut tail = pool.fetch(Read::default()).unwrap();
             while let Some(message) = tail.next_message().unwrap() {
-                sum += message.data["value"].as_i64().unwrap();
+                sum += message.data().unwrap()["value"].as_i64().unwrap();
                 black_box(message);
             }
         }
@@ -224,18 +255,15 @@ fn udp(lane: &str, count: usize, source: &MessageView) -> (Duration, i64) {
             };
             assert_eq!(frame.seq, seq);
             if lane == "json" {
-                sum += frame.message().unwrap().data["value"].as_i64().unwrap();
+                sum += frame.data().unwrap()["value"].as_i64().unwrap();
             } else {
                 sum += 7;
                 if lane == "raw_forward" {
                     destination
-                        .append_with_options(
-                            &frame.payload,
-                            AppendOptions::new(456, Durability::Fast),
-                        )
+                        .append_with_options(frame.raw(), AppendOptions::new(456, Durability::Fast))
                         .unwrap();
                 }
-                black_box(frame.payload);
+                black_box(frame.raw());
             }
             ack_tx.send(()).unwrap();
         }

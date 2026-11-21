@@ -1,6 +1,7 @@
 //! CLI output and cancellation for local, HTTPS and UDP readers.
 
 use crate::RunOutcome;
+use plasmite::api::internal::{LocalPoolTransport, RemotePoolTransport};
 use plasmite::api::{Error, Pool, UdpEvent};
 use plasmite::notice::Notice;
 use serde_json::{Map, json};
@@ -165,7 +166,7 @@ pub(super) fn follow_udp(
                 if let Some(event) = event {
                     match event {
                         UdpEvent::Frame(frame) => {
-                            emit_frame(frame.seq, frame.time, &frame.payload, context)?;
+                            emit_frame(frame.seq, frame.time, frame.raw(), context)?;
                             if args.one {
                                 return Ok(());
                             }

@@ -70,7 +70,8 @@ impl<'a> JsonValue<'a> {
         unsafe { Self::from_validated(doc, offset) }.to_owned_value()
     }
 
-    fn to_owned_value(&self) -> Result<Value, Error> {
+    // entries() checks counts against the byte length before reserving output.
+    pub(crate) fn to_owned_value(&self) -> Result<Value, Error> {
         let Source::Lite3(doc) = self.source else {
             unreachable!("direct decoding starts from Lite3");
         };

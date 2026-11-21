@@ -110,9 +110,18 @@ fn local_responses_include_the_remote_protocol_version() -> Result<(), Box<dyn s
     let temp = tempfile::tempdir()?;
     let server = TestServer::try_start(temp.path())?;
 
-    for (path, version) in [("/healthz", "0"), ("/v2/pools", "2")] {
+    for path in ["/healthz", "/pools", "/ui", "/browser/session"] {
         let response = ureq::get(&format!("{}{path}", server.local_url)).call()?;
-        assert_eq!(response.header("plasmite-version"), Some(version), "{path}");
+        assert_eq!(response.header("plasmite-version"), Some("2"), "{path}");
+    }
+    for (path, status) in [("/mcp", 405), ("/not-a-route", 404)] {
+        let Err(ureq::Error::Status(actual, response)) =
+            ureq::get(&format!("{}{path}", server.local_url)).call()
+        else {
+            panic!("expected HTTP {status} for {path}");
+        };
+        assert_eq!(actual, status, "{path}");
+        assert_eq!(response.header("plasmite-version"), Some("2"), "{path}");
     }
     Ok(())
 }

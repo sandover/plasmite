@@ -163,6 +163,14 @@ unsafe extern "C" {
         out_ofs: *mut usize,
     ) -> c_int;
 
+    pub(crate) fn plasmite_lite3_get_str(
+        buf: *const c_uchar,
+        len: usize,
+        ofs: usize,
+        key: *const c_char,
+        out_ptr: *mut *const c_char,
+        out_len: *mut usize,
+    ) -> c_int;
     pub fn plasmite_lite3_get_bool(
         buf: *const c_uchar,
         buf_len: usize,

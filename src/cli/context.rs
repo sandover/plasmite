@@ -81,6 +81,8 @@ mod tests {
                 names: vec![path.to_str().unwrap().into()],
                 size: None,
                 index_capacity: None,
+                about: None,
+                example: None,
             },
             &context,
         )

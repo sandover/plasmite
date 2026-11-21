@@ -13,6 +13,7 @@ pub(crate) enum OutputMode {
     #[default]
     #[value(name = "pretty")]
     Human,
+    Compact,
     Json,
     Yaml,
     Lite3,
@@ -37,7 +38,11 @@ pub(crate) fn render_output(value: &Value, mode: OutputMode) -> String {
                 .expect("JSON values serialize as YAML");
             format!("---\n{}\n...\n", body.trim_end_matches('\n'))
         }
-        OutputMode::Human | OutputMode::Json | OutputMode::Lite3 | OutputMode::Lite3Raw => {
+        OutputMode::Human
+        | OutputMode::Compact
+        | OutputMode::Json
+        | OutputMode::Lite3
+        | OutputMode::Lite3Raw => {
             format!(
                 "{}\n",
                 serde_json::to_string(value).expect("JSON value serializes")

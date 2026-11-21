@@ -69,7 +69,7 @@ func run() error {
 					return err
 				}
 				timings = append(timings, time.Since(call).Nanoseconds())
-				sequences = append(sequences, message.Seq)
+				sequences = append(sequences, message.Seq())
 			} else {
 				reader, err := pool.Fetch(local.Since(req.Sequences[i]))
 				if err != nil {
@@ -81,11 +81,11 @@ func run() error {
 					return err
 				}
 				var value any
-				if err := json.Unmarshal(message.Data, &value); err != nil {
+				if err := json.Unmarshal(message.Data(), &value); err != nil {
 					return err
 				}
 				timings = append(timings, time.Since(call).Nanoseconds())
-				if message.Seq != req.Sequences[i] || !reflect.DeepEqual(value, req.Expected[i]) {
+				if message.Seq() != req.Sequences[i] || !reflect.DeepEqual(value, req.Expected[i]) {
 					return fmt.Errorf("readback mismatch at %d", i)
 				}
 			}

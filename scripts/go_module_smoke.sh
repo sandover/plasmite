@@ -54,12 +54,12 @@ func main() {
 	defer pool.Close()
 	sent := must(pool.Feed(map[string]bool{"ok": true}, []string{"smoke"}))
 
-	reader := must(pool.Fetch(local.Since(sent.Seq), local.Tags("smoke")))
+	reader := must(pool.Fetch(local.Since(sent.Seq()), local.Tags("smoke")))
 	defer reader.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	got := must(reader.Next(ctx))
-	if got.Seq != sent.Seq || string(got.Data) != `{"ok":true}` {
+	if got.Seq() != sent.Seq() || string(got.Data()) != `{"ok":true}` {
 		log.Fatalf("unexpected record: %+v", got)
 	}
 	if _, err := reader.Next(ctx); !errors.Is(err, io.EOF) {

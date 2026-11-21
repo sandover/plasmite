@@ -22,7 +22,7 @@ func TestNativeAppendOmitZeroMatchesCurrentGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := pool.FeedView(value, nil)
+	view, err := pool.feedView(value, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

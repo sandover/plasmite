@@ -16,7 +16,8 @@ import (
 )
 
 var streamBenchmarkValue int
-var streamBenchmarkView *MessageView
+var streamBenchmarkView *messageView
+var streamBenchmarkMessage *Message
 var streamBenchmarkFull streamDecoded
 var streamBenchmarkRaw []byte
 
@@ -24,7 +25,7 @@ var streamBenchmarkRaw []byte
 // 128 records keeps source size fixed and includes amortized stream setup.
 func BenchmarkOwnedStreams(b *testing.B) {
 	fixtures := []string{"small", "wide", "long", "array", "bytes"}
-	lanes := []string{"raw", "view_selected", "view_full", "json_selected", "json_full", "raw_forward", "view_forward", "view_copy", "json_forward"}
+	lanes := []string{"raw", "view_selected", "view_full", "json_selected", "json_full", "raw_forward", "view_forward", "view_copy", "json_forward", "message_selected", "message_full", "message_forward"}
 	if os.Getenv("PLASMITE_GO_REVERSE") == "1" {
 		reverseStrings(fixtures)
 		reverseStrings(lanes)
@@ -43,7 +44,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 			seed := initial
 			defer seed.Close()
 			input := streamFixture(fixture)
-			source, err := seed.FeedView(input, nil)
+			source, err := seed.feedView(input, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -74,19 +75,22 @@ func BenchmarkOwnedStreams(b *testing.B) {
 					destination := destinationAPI
 					defer destination.Close()
 					for i := 0; i < window; i++ {
-						if _, err = pool.FeedView(source, nil); err != nil {
+						if _, err = pool.feedView(source, nil); err != nil {
 							b.Fatal(err)
 						}
 					}
-					var viewStream *ViewStream
-					var rawStream *Lite3Stream
-					var jsonStream *Stream
+					var viewStream *viewStream
+					var rawStream *lite3Stream
+					var jsonStream *stream
+					var messages api.Reader
 					open := func() {
 						selection := Since(uint64(1))
-						if strings.HasPrefix(lane, "view") {
-							viewStream, err = pool.FetchView(selection)
+						if strings.HasPrefix(lane, "message") {
+							messages, err = pool.Fetch(selection)
+						} else if strings.HasPrefix(lane, "view") {
+							viewStream, err = pool.fetchView(selection)
 						} else if strings.HasPrefix(lane, "raw") {
-							rawStream, err = pool.FetchLite3(selection)
+							rawStream, err = pool.fetchLite3(selection)
 						} else {
 							jsonStream, err = pool.openRead(true, []api.ReadOption{selection})
 						}
@@ -104,6 +108,9 @@ func BenchmarkOwnedStreams(b *testing.B) {
 						if jsonStream != nil {
 							jsonStream.Close()
 						}
+						if messages != nil {
+							messages.Close()
+						}
 					}
 					open()
 					defer closeReader()
@@ -115,7 +122,31 @@ func BenchmarkOwnedStreams(b *testing.B) {
 							closeReader()
 							open()
 						}
-						if viewStream != nil {
+						if messages != nil {
+							message, e := messages.Next(context.Background())
+							if e != nil {
+								b.Fatal(e)
+							}
+							if message.Seq() != uint64(i%window+1) {
+								b.Fatal("out of order")
+							}
+							switch lane {
+							case "message_selected":
+								var out struct{ Value int }
+								e = message.Decode(&out)
+								streamBenchmarkValue = out.Value
+							case "message_full":
+								var out streamDecoded
+								e = message.Decode(&out)
+								streamBenchmarkFull = out
+								streamBenchmarkValue = out.Value
+							case "message_forward":
+								streamBenchmarkMessage, e = destination.Feed(message, nil)
+							}
+							if e != nil {
+								b.Fatal(e)
+							}
+						} else if viewStream != nil {
 							view, e := viewStream.Next(context.Background())
 							if e != nil {
 								b.Fatal(e)
@@ -138,9 +169,9 @@ func BenchmarkOwnedStreams(b *testing.B) {
 								streamBenchmarkValue = out.Value
 								streamBenchmarkFull = out
 							case "view_forward":
-								streamBenchmarkView, e = destination.FeedView(view, nil)
+								streamBenchmarkView, e = destination.feedView(view, nil)
 							case "view_copy":
-								streamBenchmarkView, e = destination.FeedView(view.Data(), nil)
+								streamBenchmarkView, e = destination.feedView(view.Data(), nil)
 							}
 							if e != nil {
 								b.Fatal(e)
@@ -154,7 +185,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 								b.Fatal("out of order")
 							}
 							if lane == "raw_forward" {
-								_, e = destination.FeedLite3Receipt(frame.Payload)
+								_, e = destination.feedLite3Receipt(frame.Payload)
 								if e != nil {
 									b.Fatal(e)
 								}
@@ -169,8 +200,11 @@ func BenchmarkOwnedStreams(b *testing.B) {
 							if e != nil {
 								b.Fatal(e)
 							}
-							message, e := api.DecodeOwnedMessage(raw)
-							if e != nil {
+							var message struct {
+								Seq  uint64
+								Data json.RawMessage
+							}
+							if e := json.Unmarshal(raw, &message); e != nil {
 								b.Fatal(e)
 							}
 							if message.Seq != uint64(i%window+1) {
@@ -187,7 +221,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 								streamBenchmarkValue = out.Value
 								streamBenchmarkFull = out
 							case "json_forward":
-								streamBenchmarkView, e = destination.FeedJSONView(message.Data, nil)
+								streamBenchmarkView, e = destination.feedJSONView(message.Data, nil)
 							}
 							if e != nil {
 								b.Fatal(e)
@@ -223,7 +257,7 @@ func BenchmarkOwnedStreams(b *testing.B) {
 						if !reflect.DeepEqual(want, got) {
 							b.Fatal("forwarded value mismatch")
 						}
-						if (lane == "raw_forward" || lane == "view_forward") && !reflect.DeepEqual(final.Lite3(), encoded) {
+						if (lane == "raw_forward" || lane == "view_forward" || lane == "message_forward") && !reflect.DeepEqual(final.Lite3(), encoded) {
 							b.Fatal("forwarded payload changed")
 						}
 					} else if lane != "raw" && streamBenchmarkValue != 7 {

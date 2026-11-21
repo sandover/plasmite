@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 os.environ.setdefault("PLASMITE_LIB_DIR", str(REPO_ROOT / "target" / "debug"))
 
 import plasmite
+from plasmite import _views
 
 
 class ThreadSafetyTests(unittest.TestCase):
@@ -33,7 +34,8 @@ class ThreadSafetyTests(unittest.TestCase):
             for index in range(100):
                 value = {"worker": worker, "index": index}
                 appended = self.pool.feed(value)
-                self.assertEqual(plasmite.parse_message(self.pool._get_json(appended.seq)).data, value)
+                with self.pool.fetch(since=appended.seq) as reader:
+                    self.assertEqual(next(reader).data, value)
                 sequences.append(appended.seq)
             return sequences
 
@@ -96,53 +98,53 @@ class ThreadSafetyTests(unittest.TestCase):
         with self.assertRaises(plasmite.PlasmiteError):
             self.client.open_pool("threads")
 
-    def test_pool_close_waits_for_get_and_owned_result(self):
+    def test_pool_close_waits_for_read_open(self):
         message = self.pool.feed({"owned": True})
-        original = plasmite._buf_to_bytes
-        payload = self._assert_close_waits(
-            self.pool, lambda: self.pool._get_json(message.seq),
-            "plasmite._buf_to_bytes", "plsm_pool_free", original,
+        original = plasmite._LIB.plsm_pool_fetch
+        reader = self._assert_close_waits(
+            self.pool, lambda: self.pool.fetch(since=message.seq),
+            "plasmite._LIB.plsm_pool_fetch", "plsm_pool_free", original,
         )
-        self.assertEqual(plasmite.parse_message(payload).data, {"owned": True})
+        with reader:
+            self.assertEqual(next(reader).data, {"owned": True})
         with self.assertRaises(plasmite.PlasmiteError):
-            plasmite.parse_message(self.pool._get_json(message.seq))
+            self.pool.fetch(since=message.seq)
 
     def test_stream_close_waits_for_native_next(self):
-        cases = (
-            (self.pool.follow, "next_json", "plsm_stream_next_wait", "plsm_stream_free"),
-            (self.pool.follow_lite3, "next", "plsm_lite3_stream_next_wait", "plsm_lite3_stream_free"),
-        )
-        for open_follow, method, native_next, native_free in cases:
-            with self.subTest(method=method):
-                stream = open_follow()._stream
-                self.addCleanup(stream.close)
-                result = self._assert_close_waits(
-                    stream, getattr(stream, method), "plasmite._LIB." + native_next,
-                    native_free, lambda *_: 3,
-                )
-                self.assertIsNone(result)
-                with self.assertRaises(plasmite.PlasmiteError):
-                    getattr(stream, method)()
+        reader = self.pool.follow()
+        native = reader._reader._stream
+        self.addCleanup(reader.close)
 
-    def test_stream_close_waits_for_result_copy_and_free(self):
-        message = self.pool.feed({"copy": "before close"})
-        cases = (
-            (self.pool.follow, "next_json", "_buf_to_bytes", "plsm_stream_free"),
-            (self.pool.follow_lite3, "next", "_frame_to_py", "plsm_lite3_stream_free"),
+        def cancelled(*_):
+            raise StopIteration
+
+        def pull():
+            try:
+                return reader.next(wait=1)
+            except StopIteration:
+                return None
+
+        result = self._assert_close_waits(
+            native, pull, "plasmite._views.backend.next_message",
+            "plsm_stream_free", cancelled,
         )
-        for open_follow, method, converter, native_free in cases:
-            with self.subTest(method=method):
-                stream = open_follow(since=message.seq)._stream
-                self.addCleanup(stream.close)
-                result = self._assert_close_waits(
-                    stream, getattr(stream, method), "plasmite." + converter,
-                    native_free, getattr(plasmite, converter),
-                )
-                if method == "next_json":
-                    self.assertEqual(plasmite.parse_message(result).data, message.data)
-                else:
-                    self.assertEqual(result.seq, message.seq)
-                    self.assertTrue(result.payload)
+        self.assertIsNone(result)
+        with self.assertRaises(StopIteration):
+            next(reader)
+
+    def test_stream_close_waits_for_owned_native_result(self):
+        message = self.pool.feed({"copy": "before close"})
+        reader = self.pool.follow(since=message.seq)
+        native = reader._reader._stream
+        self.addCleanup(reader.close)
+        original = _views.backend.next_message
+        with mock.patch.object(plasmite._LIB, "plsm_stream_cancel"):
+            received = self._assert_close_waits(
+                native, lambda: next(reader), "plasmite._views.backend.next_message",
+                "plsm_stream_free", original,
+            )
+        self.assertEqual(received.data, message.data)
+        self.assertEqual(received.raw, message.raw)
 
     def test_tail_yield_does_not_hold_pool_lock(self):
         first = self.pool.feed({"index": 1})
@@ -169,26 +171,16 @@ class ThreadSafetyTests(unittest.TestCase):
         self.assertIsNone(client._ptr)
 
     def test_bounded_waits_keep_position_and_allow_concurrent_cancel(self):
-        for opener in (self.pool.follow, self.pool.follow_lite3):
-            with self.subTest(opener=opener.__name__):
-                stream = opener(since=1)._stream
-                self.addCleanup(stream.close)
-                status, value = stream.next_wait(0)
-                if status == 0:
-                    self.pool.feed({"after_wait": True})
-                    status, value = stream.next_wait(0)
-                self.assertEqual(status, 1)
-                message = plasmite.parse_message(value) if isinstance(value, bytes) else value
-                self.assertEqual(message.seq, 1)
-                self.assertEqual(stream.next_wait(0)[0], 0)
+        with self.pool.follow(since=1) as reader:
+            self.assertIsNone(reader.next(0))
+            self.pool.feed({"after_wait": True})
+            self.assertEqual(reader.next(0).seq, 1)
+            self.assertIsNone(reader.next(0))
 
-                quiet = opener()._stream
-                self.addCleanup(quiet.close)
-                with ThreadPoolExecutor(max_workers=1) as threads:
-                    pending = threads.submit(quiet.next_wait, 3000)
-                    quiet.cancel()
-                    self.assertEqual(pending.result(timeout=1)[0], 3)
-                quiet.close()
+        with self.pool.follow() as reader, ThreadPoolExecutor(max_workers=1) as threads:
+            pending = threads.submit(next, reader, None)
+            reader.cancel()
+            self.assertIsNone(pending.result(timeout=1))
 
     def test_tail_event_cancels_a_quiet_wait(self):
         cancel = Event()

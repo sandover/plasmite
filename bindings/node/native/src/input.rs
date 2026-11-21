@@ -1,6 +1,6 @@
 //! Evaluate input once on the environment thread, then commit its owned encoding.
 use super::*;
-use napi::sys::{self, ValueType as Type};
+use napi::sys;
 use napi::{JsUnknown, NapiRaw};
 
 type Raw = sys::napi_value;
@@ -104,7 +104,7 @@ unsafe extern "C" {
         arg4: views::ValueRef,
         arg5: *mut *mut plsm_error_t,
     ) -> i32;
-    fn plsm_pool_feed_builder_view(
+    #[link_name = "plsm_internal_pool_feed_builder_view"]    fn plsm_pool_feed_builder_view(
         arg0: *mut plsm_pool_t,
         arg1: *mut Builder,
         arg2: *const plsm_feed_options_t,
@@ -112,14 +112,14 @@ unsafe extern "C" {
         arg4: *mut *mut plsm_error_t,
     ) -> i32;
     fn plsm_builder_free(arg0: *mut Builder);
-    fn plsm_pool_feed_view(
+    #[link_name = "plsm_internal_pool_feed_view"]    fn plsm_pool_feed_view(
         arg0: *mut plsm_pool_t,
         arg1: *const views::Owner,
         arg2: *const plsm_feed_options_t,
         arg3: *mut *const views::Owner,
         arg4: *mut *mut plsm_error_t,
     ) -> i32;
-    fn plsm_pool_feed_json_view(
+    #[link_name = "plsm_internal_pool_feed_json_view"]    fn plsm_pool_feed_json_view(
         arg0: *mut plsm_pool_t,
         arg1: *const u8,
         arg2: usize,
@@ -163,11 +163,6 @@ fn invalid(env: Env, message: &str) -> Error {
 // coerces them to text and cannot reference every primitive thrown value.
 // Returning PendingException preserves identity without invoking more user code.
 
-fn kind(env: Env, value: Raw) -> Result<sys::napi_valuetype> {
-    let mut result = Type::napi_undefined;
-    napi::check_status!(unsafe { sys::napi_typeof(env.raw(), value, &mut result) })?;
-    Ok(result)
-}
 // Inspect the actual backing store before passing bytes to C. In particular,
 // do not construct a Rust slice over concurrently mutable shared memory.
 fn typed_span(
@@ -206,52 +201,6 @@ fn typed_span(
 }
 fn byte_span(env: Env, value: Raw) -> Result<(*const u8, usize)> {
     typed_span(env, value, sys::TypedarrayType::uint8_array)
-}
-
-// Transfer the VM's UTF8 write buffer into String without napi's extra Vec copy.
-// Only U+FFFD output can conceal replacement of an isolated UTF16 surrogate.
-fn text(env: Env, value: Raw) -> Result<String> {
-    let mut len = 0;
-    napi::check_status!(unsafe {
-        sys::napi_get_value_string_utf8(env.raw(), value, ptr::null_mut(), 0, &mut len)
-    })?;
-    let mut bytes = Vec::<u8>::with_capacity(len + 1);
-    napi::check_status!(unsafe {
-        sys::napi_get_value_string_utf8(
-            env.raw(),
-            value,
-            bytes.as_mut_ptr().cast(),
-            len + 1,
-            &mut len,
-        )
-    })?;
-    unsafe { bytes.set_len(len) };
-    let text =
-        String::from_utf8(bytes).map_err(|_| invalid(env, "input string is not valid UTF8"))?;
-    if text.contains('\u{fffd}') {
-        let mut len = 0;
-        napi::check_status!(unsafe {
-            sys::napi_get_value_string_utf16(env.raw(), value, ptr::null_mut(), 0, &mut len)
-        })?;
-        let mut units = Vec::<u16>::with_capacity(len + 1);
-        napi::check_status!(unsafe {
-            sys::napi_get_value_string_utf16(
-                env.raw(),
-                value,
-                units.as_mut_ptr(),
-                len + 1,
-                &mut len,
-            )
-        })?;
-        unsafe { units.set_len(len) };
-        if char::decode_utf16(units).any(|unit| unit.is_err()) {
-            return Err(invalid(
-                env,
-                "input string contains an isolated UTF16 surrogate",
-            ));
-        }
-    }
-    Ok(text)
 }
 
 #[napi]
@@ -537,17 +486,26 @@ impl NativeAppendTarget {
     pub fn json(
         &mut self,
         env: Env,
-        value: JsUnknown,
+        value: Either<String, Buffer>,
         tags: Vec<String>,
     ) -> Result<AsyncTask<AppendTask>> {
         let (handle, _) = self.consume(env)?;
-        if kind(env, unsafe { value.raw() })? != Type::napi_string {
-            return Err(invalid(env, "JSON input must be text"));
-        }
-        let text = text(env, unsafe { value.raw() })?;
+        let bytes = match value {
+            Either::A(value) => value.into_bytes(),
+            Either::B(bytes) => bytes.to_vec(),
+        };
         Ok(AsyncTask::new(AppendTask {
             handle,
-            input: AppendInput::Json { text, tags },
+            input: AppendInput::Json { bytes, tags },
+            durability: self.durability,
+        }))
+    }
+    #[napi]
+    pub fn lite3(&mut self, env: Env, bytes: Buffer) -> Result<AsyncTask<AppendTask>> {
+        let (handle, _) = self.consume(env)?;
+        Ok(AsyncTask::new(AppendTask {
+            handle,
+            input: AppendInput::Lite3(bytes.to_vec()),
             durability: self.durability,
         }))
     }
@@ -574,9 +532,10 @@ enum AppendInput {
         tags: Vec<String>,
     },
     Json {
-        text: String,
+        bytes: Vec<u8>,
         tags: Vec<String>,
     },
+    Lite3(Vec<u8>),
     Forwarded(Option<views::NativeView>),
 }
 pub struct AppendTask {
@@ -669,7 +628,7 @@ impl Task for AppendTask {
             AppendInput::CopyRoot { source: None, .. } => {
                 return Err(Error::from_reason("append job already finished"));
             }
-            AppendInput::Json { text, tags } => {
+            AppendInput::Json { bytes, tags } => {
                 let spans = text_spans(tags);
                 let options = plsm_feed_options_t {
                     struct_size: std::mem::size_of::<plsm_feed_options_t>() as u32,
@@ -681,9 +640,23 @@ impl Task for AppendTask {
                 unsafe {
                     (api().json)(
                         self.handle.ptr,
-                        text.as_ptr(),
-                        text.len(),
+                        bytes.as_ptr(),
+                        bytes.len(),
                         &options,
+                        &mut owner,
+                        &mut error,
+                    )
+                }
+            }
+            AppendInput::Lite3(bytes) => {
+                let _operation = lock()?;
+                unsafe {
+                    plsm_pool_feed(
+                        self.handle.ptr,
+                        2,
+                        bytes.as_ptr().cast(),
+                        bytes.len(),
+                        &feed_options,
                         &mut owner,
                         &mut error,
                     )

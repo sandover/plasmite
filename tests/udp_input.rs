@@ -1,6 +1,7 @@
 //! Real-process UDP input checks using loopback sockets and ordinary pool readers.
 
 use plasmite::api::Pool;
+use plasmite::api::internal::RemotePoolTransport;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -392,9 +393,9 @@ fn newest_sequence(path: &Path) -> TestResult<Option<u64>> {
     Ok(Pool::open(path)?.bounds()?.newest_seq)
 }
 
-fn message(path: &Path, seq: u64) -> TestResult<plasmite::api::Message> {
+fn message(path: &Path, seq: u64) -> TestResult<plasmite::api::MessageEnvelope> {
     let frame = Pool::open(path)?.get(seq)?;
-    Ok(plasmite::api::Message::from_lite3(
+    Ok(plasmite::api::MessageEnvelope::from_lite3(
         frame.seq,
         frame.time,
         &frame.payload,
@@ -514,8 +515,9 @@ fn assert_http_pool_readers(pool_dir: &Path, lite3: &[u8]) -> TestResult<()> {
         .fetch(options.clone())?
         .next_message()?
         .expect("message");
-    assert_eq!(json_message.data["sample"], 81);
-    assert_eq!(json_message.meta.tags, ["sensor", " udp ", "sensor"]);
+    assert_eq!(json_message.data()?["sample"], 81);
+    assert_eq!(json_message.tags()?, ["sensor", " udp ", "sensor"]);
+    assert_eq!(json_message.sender(), None);
 
     let lite_pool = client.open_pool(&PoolRef::name("lite"), false)?;
     let frame = lite_pool

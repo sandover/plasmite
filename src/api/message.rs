@@ -19,6 +19,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Meta {
     pub tags: Vec<String>,
+    pub sender: Option<String>,
 }
 
 impl Meta {
@@ -35,14 +36,14 @@ impl Meta {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Message {
+pub struct MessageEnvelope {
     pub seq: u64,
     pub time: u64,
     pub meta: Meta,
     pub data: Value,
 }
 
-impl Message {
+impl MessageEnvelope {
     /// Decode a message payload using the sequence and timestamp of its frame.
     pub fn from_lite3(seq: u64, timestamp_ns: u64, payload: &[u8]) -> Result<Self, Error> {
         let (meta, data) = decode_payload(payload)?;
@@ -57,6 +58,81 @@ impl Message {
     /// Format the stored instant for a text envelope.
     pub fn time_rfc3339(&self) -> String {
         format_ts(self.time).expect("u64 Unix nanoseconds fit in RFC 3339")
+    }
+}
+
+/// An immutable, owned stored message. Data decodes only when requested.
+#[derive(Clone)]
+pub struct Message {
+    view: crate::view::MessageView,
+    pub seq: u64,
+    pub time: u64,
+}
+
+impl Message {
+    pub(crate) fn from_view(view: crate::view::MessageView) -> Self {
+        Self {
+            seq: view.seq,
+            time: view.time,
+            view,
+        }
+    }
+
+    pub fn from_lite3(seq: u64, time: u64, bytes: &[u8]) -> Result<Self, Error> {
+        crate::view::MessageView::from_bytes(bytes, seq, time).map(Self::from_view)
+    }
+
+    #[inline]
+    pub fn raw(&self) -> &[u8] {
+        self.view.bytes()
+    }
+
+    pub fn tags(&self) -> Result<Vec<&str>, Error> {
+        self.view.tags()
+    }
+
+    pub fn sender(&self) -> Option<&str> {
+        self.view.sender()
+    }
+
+    pub fn data(&self) -> Result<&Value, Error> {
+        self.view.decoded_data()
+    }
+
+    /// Borrow one field from the data object without decoding the rest.
+    pub fn field(&self, key: &str) -> Result<Option<crate::view::ValueRef<'_>>, Error> {
+        self.view.data().get(key)
+    }
+
+    /// Decode directly into a Rust type using the stored fields it requests.
+    pub fn decode<'a, T: serde::Deserialize<'a>>(&'a self) -> Result<T, Error> {
+        self.view.data().decode()
+    }
+
+    pub fn time_rfc3339(&self) -> String {
+        format_ts(self.time).expect("u64 Unix nanoseconds fit in RFC 3339")
+    }
+
+    #[doc(hidden)]
+    pub fn to_json(&self) -> Result<Vec<u8>, Error> {
+        self.view.to_json()
+    }
+}
+
+impl PartialEq for Message {
+    fn eq(&self, other: &Self) -> bool {
+        self.seq == other.seq && self.time == other.time && self.raw() == other.raw()
+    }
+}
+
+impl Eq for Message {}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Message")
+            .field("seq", &self.seq)
+            .field("time", &self.time)
+            .finish_non_exhaustive()
     }
 }
 
@@ -192,6 +268,8 @@ impl Feed {
 /// A feed either stores data or forwards a complete message.
 pub enum FeedInput<'a> {
     Data(&'a Value),
+    Json(&'a [u8]),
+    Lite3(&'a [u8]),
     Message(&'a Message),
 }
 
@@ -208,24 +286,31 @@ impl<'a> From<&'a Message> for FeedInput<'a> {
 }
 
 impl Feed {
-    pub(super) fn resolve<'a>(
-        &'a self,
-        input: FeedInput<'a>,
-    ) -> Result<(&'a Value, &'a [String], Durability), Error> {
-        let (data, tags) = match input {
-            FeedInput::Data(data) => (data, self.tags.as_deref().unwrap_or_default()),
+    pub(crate) fn prepare(
+        &self,
+        input: FeedInput<'_>,
+    ) -> Result<(crate::view::MessageView, Durability), Error> {
+        use crate::view::MessageView;
+        let tags = self.tags.as_deref().unwrap_or_default();
+        let labels = tags.iter().map(String::as_str).collect::<Vec<_>>();
+        let view = match input {
+            FeedInput::Data(data) => {
+                MessageView::encode_legacy_value(data, &labels).or_else(|_| {
+                    let bytes = crate::core::lite3::encode_message(tags, data)?;
+                    MessageView::from_feed_bytes(bytes.as_slice())
+                })?
+            }
+            FeedInput::Json(bytes) => MessageView::from_json(bytes, &labels)?,
+            FeedInput::Lite3(bytes) => {
+                self.encoded_durability()?;
+                MessageView::from_feed_bytes(bytes)?.for_feed(None)?
+            }
             FeedInput::Message(message) => {
-                if self.tags.is_some() {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("tags cannot accompany a forwarded message"));
-                }
-                (&message.data, message.meta.tags.as_slice())
+                self.encoded_durability()?;
+                message.view.for_feed(None)?
             }
         };
-        if !data.is_object() {
-            return Err(Error::new(ErrorKind::Usage).with_message("message data must be an object"));
-        }
-        Ok((data, tags, self.durability))
+        Ok((view, self.durability))
     }
 
     pub(crate) fn encoded_durability(&self) -> Result<Durability, Error> {
@@ -250,34 +335,66 @@ pub struct Follow<'a>(TailReader<'a>);
 /// Retaining a message keeps only that message alive after this tail or pool closes.
 pub struct ViewFollow<'a>(TailReader<'a>);
 
-impl Pool {
-    /// Store data or forward a message using a new sequence and wall-clock time.
-    pub fn feed<'a>(
-        &mut self,
-        input: impl Into<FeedInput<'a>>,
-        options: Feed,
-    ) -> Result<Message, Error> {
-        let (data, tags, durability) = options.resolve(input.into())?;
-        self.append_json_now(data, tags, durability)
-    }
+pub trait LocalPoolTransport {
+    fn feed_json(&mut self, json: &[u8], options: Feed) -> Result<MessageEnvelope, Error>;
 
-    /// Store an application object from JSON text.
-    pub fn feed_json(&mut self, json: &[u8], options: Feed) -> Result<Message, Error> {
+    fn feed_lite3(&mut self, bytes: &[u8], options: Feed) -> Result<MessageEnvelope, Error>;
+
+    fn feed_lite3_receipt(&mut self, bytes: &[u8], options: Feed) -> Result<FeedReceipt, Error>;
+
+    fn feed_view(
+        &mut self,
+        view: &crate::view::MessageView,
+        options: Feed,
+    ) -> Result<crate::view::MessageView, Error>;
+
+    fn feed_received_view(
+        &mut self,
+        view: &crate::view::MessageView,
+        options: Feed,
+        sender: Option<&str>,
+    ) -> Result<crate::view::MessageView, Error>;
+
+    fn feed_received_data(
+        &mut self,
+        data: &Value,
+        tags: Vec<String>,
+        durability: Durability,
+        sender: Option<&str>,
+    ) -> Result<MessageEnvelope, Error>;
+
+    fn follow_view(&self, read: Read) -> Result<ViewFollow<'_>, Error>;
+
+    fn fetch_view(&self, read: Read) -> Result<ViewFollow<'_>, Error>;
+
+    fn follow_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error>;
+
+    fn fetch_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error>;
+
+    fn continue_fetch_lite3(&self, read: Read, until: u64) -> Result<Lite3Follow<'_>, Error>;
+}
+
+impl LocalPoolTransport for Pool {
+    fn feed_json(&mut self, json: &[u8], options: Feed) -> Result<MessageEnvelope, Error> {
         let data: Value = serde_json::from_slice(json).map_err(|err| {
             Error::new(ErrorKind::Usage)
                 .with_message("invalid JSON object")
                 .with_source(err)
         })?;
-        self.feed(&data, options)
+        self.append_json_now(
+            &data,
+            options.tags.as_deref().unwrap_or_default(),
+            options.durability,
+        )
     }
 
-    /// Forward a complete Lite3 envelope with a fresh identity.
-    pub fn feed_lite3(&mut self, bytes: &[u8], options: Feed) -> Result<Message, Error> {
+    fn feed_lite3(&mut self, bytes: &[u8], options: Feed) -> Result<MessageEnvelope, Error> {
         let durability = options.encoded_durability()?;
         crate::core::lite3::validate_feed_bytes(bytes)?;
-        let (meta, data) = decode_payload(bytes)?;
-        let FeedReceipt { seq, time } = self.append_prepared(bytes, durability)?;
-        Ok(Message {
+        let prepared = self.forwarded_payload(bytes)?;
+        let (meta, data) = decode_payload(&prepared)?;
+        let FeedReceipt { seq, time } = self.append_prepared(&prepared, durability)?;
+        Ok(MessageEnvelope {
             seq,
             time,
             meta,
@@ -285,25 +402,99 @@ impl Pool {
         })
     }
 
-    /// Forward a complete Lite3 envelope without decoding the stored result.
-    pub fn feed_lite3_receipt(
-        &mut self,
-        bytes: &[u8],
-        options: Feed,
-    ) -> Result<FeedReceipt, Error> {
+    fn feed_lite3_receipt(&mut self, bytes: &[u8], options: Feed) -> Result<FeedReceipt, Error> {
         let durability = options.encoded_durability()?;
         crate::core::lite3::validate_feed_bytes(bytes)?;
-        self.append_prepared(bytes, durability)
+        let prepared = self.forwarded_payload(bytes)?;
+        self.append_prepared(&prepared, durability)
     }
 
-    /// Forward an immutable message view while retaining its encoded payload.
-    pub fn feed_view(
+    fn feed_view(
         &mut self,
         view: &crate::view::MessageView,
         options: Feed,
     ) -> Result<crate::view::MessageView, Error> {
-        let receipt = self.append_prepared(view.bytes(), options.encoded_durability()?)?;
-        Ok(view.with_identity(receipt.seq, receipt.time, 0))
+        self.feed_received_view(view, options, None)
+    }
+
+    fn feed_received_view(
+        &mut self,
+        view: &crate::view::MessageView,
+        options: Feed,
+        sender: Option<&str>,
+    ) -> Result<crate::view::MessageView, Error> {
+        let durability = options.encoded_durability()?;
+        let prepared = view.for_feed(sender)?;
+        self.feed_prepared_view(prepared, durability)
+    }
+
+    fn feed_received_data(
+        &mut self,
+        data: &Value,
+        tags: Vec<String>,
+        durability: Durability,
+        sender: Option<&str>,
+    ) -> Result<MessageEnvelope, Error> {
+        let Some(sender) = sender else {
+            return self.append_json_now(data, &tags, durability);
+        };
+        let labels = tags.iter().map(String::as_str).collect::<Vec<_>>();
+        let view = crate::view::MessageView::encode_legacy_value(data, &labels).or_else(|_| {
+            let payload = crate::core::lite3::encode_message(&tags, data)?;
+            crate::view::MessageView::from_feed_bytes(payload.as_slice())
+        })?;
+        let prepared =
+            self.feed_received_view(&view, Feed::new().durability(durability), Some(sender))?;
+        MessageEnvelope::from_lite3(prepared.seq, prepared.time, prepared.bytes())
+    }
+
+    fn follow_view(&self, read: Read) -> Result<ViewFollow<'_>, Error> {
+        self.open_read(read, true).map(ViewFollow)
+    }
+
+    fn fetch_view(&self, read: Read) -> Result<ViewFollow<'_>, Error> {
+        self.open_read(read, false).map(ViewFollow)
+    }
+
+    fn follow_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error> {
+        self.open_read(read, true).map(Lite3Follow)
+    }
+
+    fn fetch_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error> {
+        self.open_read(read, false).map(Lite3Follow)
+    }
+
+    fn continue_fetch_lite3(&self, read: Read, until: u64) -> Result<Lite3Follow<'_>, Error> {
+        Ok(Lite3Follow(TailReader {
+            pool: self,
+            state: self.read_state_until(read, false, Some(until), false)?,
+        }))
+    }
+}
+
+impl Pool {
+    /// Store data or forward a message using a new sequence and wall-clock time.
+    pub fn feed<'a>(
+        &mut self,
+        input: impl Into<FeedInput<'a>>,
+        options: Feed,
+    ) -> Result<Message, Error> {
+        let (view, durability) = options.prepare(input.into())?;
+        self.feed_prepared_view(view, durability)
+            .map(Message::from_view)
+    }
+
+    fn forwarded_payload<'a>(
+        &self,
+        payload: &'a [u8],
+    ) -> Result<std::borrow::Cow<'a, [u8]>, Error> {
+        let doc = Lite3DocRef::new(payload);
+        let meta = doc.key_offset_cstr_at(0, c"meta")?;
+        if doc.count_at(meta)? == 1 {
+            return Ok(std::borrow::Cow::Borrowed(payload));
+        }
+        let view = crate::view::MessageView::from_feed_bytes(payload)?.for_feed(None)?;
+        Ok(std::borrow::Cow::Owned(view.bytes().to_vec()))
     }
 
     pub(crate) fn append_prepared(
@@ -338,22 +529,6 @@ impl Pool {
         self.open_read(read, false).map(Follow)
     }
 
-    pub fn follow_view(&self, read: Read) -> Result<ViewFollow<'_>, Error> {
-        self.open_read(read, true).map(ViewFollow)
-    }
-
-    pub fn fetch_view(&self, read: Read) -> Result<ViewFollow<'_>, Error> {
-        self.open_read(read, false).map(ViewFollow)
-    }
-
-    pub fn follow_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error> {
-        self.open_read(read, true).map(Lite3Follow)
-    }
-
-    pub fn fetch_lite3(&self, read: Read) -> Result<Lite3Follow<'_>, Error> {
-        self.open_read(read, false).map(Lite3Follow)
-    }
-
     fn open_read(&self, read: Read, live: bool) -> Result<TailReader<'_>, Error> {
         Ok(TailReader {
             pool: self,
@@ -361,17 +536,12 @@ impl Pool {
         })
     }
 
-    /// Finish the same finite HTTP range after the server's time limit.
-    #[doc(hidden)]
-    pub fn continue_fetch_lite3(&self, read: Read, until: u64) -> Result<Lite3Follow<'_>, Error> {
-        Ok(Lite3Follow(TailReader {
-            pool: self,
-            state: self.read_state_until(read, false, Some(until), false)?,
-        }))
-    }
-
     pub(crate) fn read_state(&self, read: Read, live: bool) -> Result<TailState, Error> {
         self.read_state_until(read, live, None, live)
+    }
+
+    pub(crate) fn shared_read_state(&self, read: Read, live: bool) -> Result<TailState, Error> {
+        self.read_state_until(read, live, None, false)
     }
 
     fn read_state_until(
@@ -861,10 +1031,9 @@ impl TailState {
 
 impl Follow<'_> {
     pub fn next_message(&mut self) -> Result<Option<Message>, Error> {
-        self.0.next(|frame, tags| {
-            let message = message_from_frame(&frame)?;
-            Ok(has_required_tags(&message.meta.tags, tags).then_some(message))
-        })
+        self.0
+            .next(select_view)
+            .map(|view| view.map(Message::from_view))
     }
 }
 
@@ -1090,14 +1259,14 @@ pub(crate) trait PoolApiExt {
         data: &Value,
         tags: &[String],
         options: AppendOptions,
-    ) -> Result<Message, Error>;
+    ) -> Result<MessageEnvelope, Error>;
 
     fn append_json_now(
         &mut self,
         data: &Value,
         tags: &[String],
         durability: Durability,
-    ) -> Result<Message, Error>;
+    ) -> Result<MessageEnvelope, Error>;
 
     /// Append and return only the committed sequence and Unix timestamp in nanoseconds.
     /// The identity comes from this commit; it never requires a later pool read.
@@ -1134,11 +1303,11 @@ pub(crate) trait PoolApiExt {
         &mut self,
         payload: &[u8],
         options: AppendOptions,
-    ) -> Result<Message, Error>;
+    ) -> Result<MessageEnvelope, Error>;
 
     /// Append with a generated timestamp and a receipt prepared from input.
     #[cfg(test)]
-    fn get_message(&self, seq: u64) -> Result<Message, Error>;
+    fn get_message(&self, seq: u64) -> Result<MessageEnvelope, Error>;
 
     /// Fetch the raw Lite3 payload for a sequence number.
     #[cfg(test)]
@@ -1174,7 +1343,7 @@ impl PoolApiExt for Pool {
         data: &Value,
         tags: &[String],
         options: AppendOptions,
-    ) -> Result<Message, Error> {
+    ) -> Result<MessageEnvelope, Error> {
         let labels: Vec<_> = tags.iter().map(String::as_str).collect();
         let seq = match crate::view::MessageView::encode_legacy_value(data, &labels) {
             Ok(view) => self.append_with_options(view.bytes(), options)?,
@@ -1185,11 +1354,12 @@ impl PoolApiExt for Pool {
                 self.append_with_options(payload.as_slice(), options)?
             }
         };
-        Ok(Message {
+        Ok(MessageEnvelope {
             seq,
             time: options.timestamp_ns,
             meta: Meta {
                 tags: tags.to_vec(),
+                sender: None,
             },
             data: data.clone(),
         })
@@ -1200,7 +1370,7 @@ impl PoolApiExt for Pool {
         data: &Value,
         tags: &[String],
         durability: Durability,
-    ) -> Result<Message, Error> {
+    ) -> Result<MessageEnvelope, Error> {
         let labels = tags.iter().map(String::as_str).collect::<Vec<_>>();
         let (receipt, data) = match crate::view::MessageView::encode_legacy_value(data, &labels) {
             Ok(view) => (
@@ -1217,11 +1387,12 @@ impl PoolApiExt for Pool {
             }
         };
         let FeedReceipt { seq, time } = receipt;
-        Ok(Message {
+        Ok(MessageEnvelope {
             seq,
             time,
             meta: Meta {
                 tags: tags.to_vec(),
+                sender: None,
             },
             data,
         })
@@ -1238,11 +1409,11 @@ impl PoolApiExt for Pool {
         &mut self,
         payload: &[u8],
         options: AppendOptions,
-    ) -> Result<Message, Error> {
+    ) -> Result<MessageEnvelope, Error> {
         crate::core::lite3::validate_feed_bytes(payload)?;
         let (meta, data) = decode_payload(payload)?;
         let seq = self.append_with_options(payload, options)?;
-        Ok(Message {
+        Ok(MessageEnvelope {
             seq,
             time: options.timestamp_ns,
             meta,
@@ -1251,7 +1422,7 @@ impl PoolApiExt for Pool {
     }
 
     #[cfg(test)]
-    fn get_message(&self, seq: u64) -> Result<Message, Error> {
+    fn get_message(&self, seq: u64) -> Result<MessageEnvelope, Error> {
         let frame = self.get(seq)?;
         message_from_frame(&frame)
     }
@@ -1262,8 +1433,9 @@ impl PoolApiExt for Pool {
     }
 }
 
-pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
-    Message::from_lite3(frame.seq, frame.time, &frame.payload)
+#[cfg(test)]
+pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<MessageEnvelope, Error> {
+    MessageEnvelope::from_lite3(frame.seq, frame.time, &frame.payload)
 }
 
 /// Produce the existing wire envelope while borrowing data from this owned frame.
@@ -1322,7 +1494,8 @@ fn frame_json(frame: &FrameRef, required: Option<&[String]>) -> Result<Option<Ve
         format_frame_time(frame.time)?,
         tags,
         data,
-    );
+    )
+    .with_sender(meta_sender(doc)?);
     wire.to_json_bytes(frame.payload.len())
         .map(Some)
         .map_err(payload_json_error)
@@ -1332,11 +1505,11 @@ pub(crate) fn message_from_udp_payload(
     seq: u64,
     timestamp_ns: u64,
     payload: &[u8],
-) -> Result<Message, Error> {
+) -> Result<MessageEnvelope, Error> {
     // The Lite3 reader expects its document to start at an aligned address.
     let aligned = payload.to_vec();
     validate_bytes(&aligned)?;
-    Message::from_lite3(seq, timestamp_ns, &aligned)
+    MessageEnvelope::from_lite3(seq, timestamp_ns, &aligned)
 }
 
 #[cfg(test)]
@@ -1395,7 +1568,20 @@ fn decode_meta(doc: Lite3DocRef<'_>) -> Result<Meta, Error> {
     for index in 0..count {
         tags.push(meta_tag(doc, ofs, index)?.to_owned());
     }
-    Ok(Meta { tags })
+    Ok(Meta {
+        tags,
+        sender: meta_sender(doc)?,
+    })
+}
+
+fn meta_sender(doc: Lite3DocRef<'_>) -> Result<Option<String>, Error> {
+    let meta = doc.key_offset_cstr_at(0, c"meta")?;
+    if doc.key_offset_cstr_at(meta, c"sender").is_err() {
+        return Ok(None);
+    }
+    doc.str_at_key(meta, c"sender")
+        .map(|sender| Some(sender.to_owned()))
+        .map_err(|err| err.with_message("meta.sender must be a string"))
 }
 
 fn validate_data(doc: Lite3DocRef<'_>) -> Result<(), Error> {
@@ -1466,7 +1652,10 @@ fn format_frame_time(timestamp_ns: u64) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PoolApiExt, Read, Since, TailOutcome, decode_payload, message_from_frame};
+    use super::{
+        LocalPoolTransport, PoolApiExt, Read, Since, TailOutcome, decode_payload,
+        message_from_frame,
+    };
     use crate::core::error::ErrorKind;
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
     use crate::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
@@ -1857,7 +2046,7 @@ mod tests {
             ["keep"]
         );
         super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 0));
-        super::Message::from_lite3(1, u64::MAX, bytes.as_slice()).unwrap();
+        super::MessageEnvelope::from_lite3(1, u64::MAX, bytes.as_slice()).unwrap();
         super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 1));
     }
 
@@ -1983,7 +2172,8 @@ mod tests {
                         .next()
                         .unwrap()
                         .unwrap();
-                    assert_eq!(receipt, stored);
+                    assert_eq!(receipt.raw(), stored.raw());
+                    assert_eq!((receipt.seq, receipt.time), (stored.seq, stored.time));
                     assert_eq!(pool.get(receipt.seq).unwrap().payload, expected.as_slice());
                 }
                 (Err(expected), Err(error)) => {
@@ -2271,8 +2461,11 @@ mod tests {
             let receipt = writer
                 .append_json_now(&json!({"n": 1}), &[], Durability::Fast)
                 .unwrap();
-            assert_eq!(one.join().unwrap(), receipt);
-            assert_eq!(two.join().unwrap(), receipt);
+            for message in [one.join().unwrap(), two.join().unwrap()] {
+                assert_eq!(message.seq, receipt.seq);
+                assert_eq!(message.time, receipt.time);
+                assert_eq!(message.data().unwrap(), &receipt.data);
+            }
         });
     }
 

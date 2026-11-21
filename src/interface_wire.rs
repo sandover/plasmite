@@ -34,6 +34,8 @@ pub(crate) struct MessageWire<D = Value, T = Vec<String>> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MessageMetaWire<T = Vec<String>> {
     pub(crate) tags: T,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sender: Option<String>,
 }
 
 impl<D, T> MessageWire<D, T> {
@@ -41,22 +43,28 @@ impl<D, T> MessageWire<D, T> {
         Self {
             seq,
             time,
-            meta: MessageMetaWire { tags },
+            meta: MessageMetaWire { tags, sender: None },
             data,
         }
+    }
+
+    pub(crate) fn with_sender(mut self, sender: Option<String>) -> Self {
+        self.meta.sender = sender;
+        self
     }
 }
 
 impl MessageWire {
     /// Move the existing data tree into the JSON envelope.
     pub(crate) fn into_json(self) -> Value {
+        let mut meta = Value::from_iter([("tags", Value::from(self.meta.tags))]);
+        if let Some(sender) = self.meta.sender {
+            meta["sender"] = sender.into();
+        }
         Value::from_iter([
             ("seq", self.seq.into()),
             ("time", self.time.into()),
-            (
-                "meta",
-                Value::from_iter([("tags", Value::from(self.meta.tags))]),
-            ),
+            ("meta", meta),
             ("data", self.data),
         ])
     }
@@ -88,6 +96,10 @@ pub(crate) struct PoolInfoWire {
     pub(crate) bounds: BoundsWire,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) metrics: Option<PoolMetricsWire>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) about: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) example: Option<Value>,
 }
 
 macro_rules! pool_info_wire {
@@ -107,6 +119,8 @@ macro_rules! pool_info_wire {
                 oldest: info.bounds.oldest_seq,
                 newest: info.bounds.newest_seq,
             },
+            about: info.description.about.clone(),
+            example: info.description.example.clone(),
             metrics: info
                 .metrics
                 .as_ref()
@@ -320,6 +334,7 @@ mod tests {
             time: "2026-07-28T12:00:00Z".to_string(),
             meta: MessageMetaWire {
                 tags: vec!["build".to_string(), "green".to_string()],
+                sender: None,
             },
             data: json!({"ok": true}),
         };
@@ -366,6 +381,8 @@ mod tests {
             ring_size: 3712,
             bounds: BoundsWire::default(),
             metrics: None,
+            about: None,
+            example: None,
         };
 
         let value = serde_json::to_value(wire).expect("serialize pool info");

@@ -7,7 +7,8 @@ const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const { performance, PerformanceObserver, monitorEventLoopDelay } = require('node:perf_hooks');
 const root = path.resolve(process.env.PLASMITE_BENCH_BINDING || path.join(__dirname, '..'));
-const { Client, Durability, toNative, toJson, toLite3 } = require(root);
+const { Client, Durability, toNative, toJson } = require(root);
+const { parseMessage } = require(path.join(root, 'message'));
 const { createNativeMessage, createMessageView, messageReference, valueReference } = require(path.join(root, 'views'));
 const iterations = Number(process.argv[2] || 200), repeats = Number(process.argv[3] || 5);
 const warmup = Number(process.env.PLASMITE_BENCH_WARMUP || 20);
@@ -51,12 +52,12 @@ async function measure(name, n, fn) {
 async function retention(pool, data) {
   global.gc?.(); await pause();
   const before = process.memoryUsage();
-  let original = await pool.feedView(data);
+  let original = await pool.feed(data);
   let backend = valueReference(original.data).backend.owner;
   const payload = { encodedBytes: backend.byteLength(), reportedBackingBytes: backend.retainedBytes() };
   backend = null;
   let views = [];
-  for (let i = 0; i < 16; i++) views.push(await pool.feedView(original));
+  for (let i = 0; i < 16; i++) views.push(await pool.feed(original));
   original = null;
   global.gc?.(); await pause();
   const retained = process.memoryUsage();
@@ -72,24 +73,24 @@ async function main() {
   const measurements = [];
   try {
     for (const [fixture, data] of Object.entries(fixtures)) {
-      const source = await pool.feedView(data, { tags: ['source'] });
+      const source = await pool.feed(data, { tags: ['source'] });
       assert.deepEqual(toNative(source.data), data);
       assert.deepEqual(toNative((await jsonAppend(pool, JSON.stringify(data))).data), data);
       const sourceJson = toJson(source.data);
       const n = fixture === 'array' ? Math.max(10, Math.floor(iterations / 4)) : iterations;
       const lanes = [
-        ['append-field/native', async () => (await pool.feedView(data)).data.metrics.power],
-        ['append-field/stringify-json', async () => (await jsonAppend(pool, JSON.stringify(data))).data.metrics.power],
-        ['append-field/legacy-message', async () => (await pool.feed(data)).data.metrics.power],
-        ['append-native-copy/native', async () => toNative((await pool.feedView(data)).data).metrics.power],
+        ['append-field/native', async () => (await pool.feed(data)).field('metrics').power],
+        ['append-field/stringify-json', async () => (await jsonAppend(pool, JSON.stringify(data))).field('metrics').power],
+        ['append-field/legacy-message', async () => parseMessage(await pool._feedJson(Buffer.from(JSON.stringify(data)))).data.metrics.power],
+        ['append-native-copy/native', async () => toNative((await pool.feed(data)).data).metrics.power],
         ['append-native-copy/stringify-json', async () => toNative((await jsonAppend(pool, JSON.stringify(data))).data).metrics.power],
-        ['append-consumer-field/native', async () => (await consumer._getView((await pool.feedView(data)).seq)).data.metrics.power],
-        ['append-consumer-field/stringify-json', async () => (await consumer._getView((await jsonAppend(pool, JSON.stringify(data))).seq)).data.metrics.power],
-        ['forward-field/native', async () => (await destination.feedView(source)).data.metrics.power],
-        ['forward-field/explicit-json', async () => (await jsonAppend(destination, toJson(source.data), ['source'])).data.metrics.power],
-        ['retag-field/native', async () => (await destination.feedView(source.data, { tags: ['changed'] })).data.metrics.power],
-        ['retag-field/explicit-json', async () => (await jsonAppend(destination, toJson(source.data), ['changed'])).data.metrics.power],
-        ['subtree-length/native', async () => (await destination.feedView({ subset: source.data.samples })).data.subset.length],
+        ['append-consumer-field/native', async () => (await consumer._getView((await pool.feed(data)).seq)).field('metrics').power],
+        ['append-consumer-field/stringify-json', async () => (await consumer._getView((await jsonAppend(pool, JSON.stringify(data))).seq)).field('metrics').power],
+        ['forward-field/native', async () => (await destination.feed(source)).field('metrics').power],
+        ['forward-field/explicit-json', async () => (await jsonAppend(destination, toJson(source.data), ['source'])).field('metrics').power],
+        ['retag-field/native', async () => (await destination.feed(source.data, { tags: ['changed'] })).field('metrics').power],
+        ['retag-field/explicit-json', async () => (await jsonAppend(destination, toJson(source.data), ['changed'])).field('metrics').power],
+        ['subtree-length/native', async () => (await destination.feed({ subset: source.data.samples })).data.subset.length],
         ['subtree-length/explicit-json', async () => (await jsonAppend(destination, '{"subset":' + toJson(source.data.samples) + '}')).data.subset.length],
       ];
       const sourceBackend = messageReference(source).backend;
@@ -103,11 +104,11 @@ async function main() {
         };
         const retained = foreign();
         lanes.push(
-          ['foreign-forward/cold-import', async () => (await destination.feedView(foreign())).data.metrics.power],
-          ['foreign-forward/warm-import', async () => (await destination.feedView(retained)).data.metrics.power],
+          ['foreign-forward/cold-import', async () => (await destination.feed(foreign())).field('metrics').power],
+          ['foreign-forward/warm-import', async () => (await destination.feed(retained)).field('metrics').power],
         );
       }
-      if (toLite3) lanes.push(['encoded-export/copy', async () => toLite3(source).length]);
+      lanes.push(['encoded-export/copy', async () => source.raw.length]);
       const measured = selectedLanes ? lanes.filter(([name]) => selectedLanes.has(name)) : lanes;
       if (!measured.length) throw new Error('selected lanes match no operations');
       for (const [, fn] of measured) for (let i = 0; i < warmup; i++) sink += await fn();
@@ -118,18 +119,18 @@ async function main() {
       measurements.push({ fixture, jsonBytes: Buffer.byteLength(sourceJson), rows, retention: await retention(destination, data) });
     }
     const exactJson = '{"value":9223372036854775807}', exactData = { value: 9223372036854775807n };
-    assert.equal((await pool.feedView(exactData)).data.value, exactData.value);
+    assert.equal((await pool.feed(exactData)).data.value, exactData.value);
     assert.equal((await jsonAppend(pool, exactJson)).data.value, exactData.value);
     const exact = [];
     for (let repeat = 0; repeat < repeats; repeat++) {
-      exact.push({ repeat, ...await measure('exact/native', iterations, async () => (await pool.feedView(exactData)).data.value === exactData.value ? 1 : 0) });
+      exact.push({ repeat, ...await measure('exact/native', iterations, async () => (await pool.feed(exactData)).data.value === exactData.value ? 1 : 0) });
       exact.push({ repeat, ...await measure('exact/explicit-json-text', iterations, async () => (await jsonAppend(pool, exactJson)).data.value === exactData.value ? 1 : 0) });
     }
     const byteData = { bytes: Buffer.alloc(65536, 7) };
-    assert.equal((await pool.feedView(byteData)).data.bytes.length, 65536);
-    const nativeBytes = await measure('native-bytes/no-json-equivalent', iterations, async () => (await pool.feedView(byteData)).data.bytes.length);
+    assert.equal((await pool.feed(byteData)).data.bytes.length, 65536);
+    const nativeBytes = await measure('native-bytes/no-json-equivalent', iterations, async () => (await pool.feed(byteData)).data.bytes.length);
     const files = ['index.js', 'views.js', 'input.js', `native/${process.platform}-${process.arch}/index.node`,
-      `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.dylib' : process.platform === 'win32' ? 'plasmite.dll' : 'libplasmite.so'}`];
+      `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.2.dylib' : process.platform === 'win32' ? 'plasmite2.dll' : 'libplasmite.so.2'}`];
     const result = { node: process.version, platform: process.platform, arch: process.arch, iterations, repeats,
       sink, warmup, selectedLanes: selectedLanes ? [...selectedLanes] : null, forceGc, measurements, exact, nativeBytes, hashes: Object.fromEntries(files.map(file => [file,
         crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex')])),

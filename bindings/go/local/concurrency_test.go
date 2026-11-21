@@ -21,7 +21,7 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame, err := pool.getLite3(seed.Seq)
+	frame, err := pool.getLite3(seed.Seq())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	// A reader that has already opened retains its independent native handle.
-	independent, err := pool.Fetch(Since(seed.Seq))
+	independent, err := pool.Fetch(Since(seed.Seq()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +61,9 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 			return err
 		}
 		firstAppend.Do(func() { close(readyToClose) })
-		read, err := getTestMessage(pool, message.Seq)
-		if err == nil && read.Seq != message.Seq {
-			return fmt.Errorf("JSON read changed sequence: %d != %d", read.Seq, message.Seq)
+		read, err := getTestMessage(pool, message.Seq())
+		if err == nil && read.Seq() != message.Seq() {
+			return fmt.Errorf("JSON read changed sequence: %d != %d", read.Seq(), message.Seq())
 		}
 		return err
 	})
@@ -79,13 +79,13 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 		return err
 	})
 	work(func() error {
-		stream, err := pool.FetchLite3(Since(seed.Seq))
+		stream, err := pool.fetchLite3(Since(seed.Seq()))
 		if err != nil {
 			return err
 		}
 		defer stream.Close()
 		read, err := stream.Next(ctx)
-		if err == nil && read.Seq != seed.Seq {
+		if err == nil && read.Seq != seed.Seq() {
 			return fmt.Errorf("independent Lite3 stream changed sequence")
 		}
 		return err
@@ -110,11 +110,11 @@ func TestPoolConcurrentNativeCallsAndClose(t *testing.T) {
 		t.Fatalf("foreground native operation: %v", err)
 	}
 	message, err := independent.Next(ctx)
-	if err != nil || message.Seq != seed.Seq {
+	if err != nil || message.Seq() != seed.Seq() {
 		t.Fatalf("existing stream after pool close: %#v, %v", message, err)
 	}
 
-	if _, err := getTestMessage(pool, seed.Seq); !isUsage(err) {
+	if _, err := getTestMessage(pool, seed.Seq()); !isUsage(err) {
 		t.Fatalf("read after close: expected ErrClosed, got %v", err)
 	}
 }
@@ -127,22 +127,21 @@ func TestNativeWaitExpiryKeepsTheCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	if _, status, err := stream.nextWait(0); err != nil || status != 0 {
+	if _, status, err := stream.nextMessage(0); err != nil || status != 0 {
 		t.Fatalf("initial poll: %d %v", status, err)
 	}
 	seed, err := pool.Feed(map[string]any{"waited": true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, status, err := stream.nextWait(0)
+	message, status, err := stream.nextMessage(0)
 	if err != nil || status != 1 {
 		t.Fatalf("next poll: %d %v", status, err)
 	}
-	message, err := api.DecodeMessage(raw)
-	if err != nil || message.Seq != seed.Seq {
+	if err != nil || message.Seq() != seed.Seq() {
 		t.Fatalf("checkpoint changed: %v %v", message, err)
 	}
-	if _, status, err := stream.nextWait(0); err != nil || status != 0 {
+	if _, status, err := stream.nextMessage(0); err != nil || status != 0 {
 		t.Fatalf("quiet follow: %d %v", status, err)
 	}
 }
@@ -217,7 +216,7 @@ func TestStreamsConcurrentReadAndClose(t *testing.T) {
 			var next func() error
 			var closeStream func()
 			if lite3 {
-				stream, err := pool.FollowLite3()
+				stream, err := pool.followLite3()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -275,12 +274,12 @@ func TestConcurrentReadObservesDeadlineWhileQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer json.Close()
-	lite3, err := pool.FollowLite3()
+	lite3, err := pool.followLite3()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lite3.Close()
-	view, err := pool.FollowView()
+	view, err := pool.followView()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +289,7 @@ func TestConcurrentReadObservesDeadlineWhileQueued(t *testing.T) {
 		reading chan struct{}
 		read    func(context.Context) error
 	}{
-		{"json", json.(*Stream).reading, func(ctx context.Context) error { _, err := json.Next(ctx); return err }},
+		{"json", json.(*stream).reading, func(ctx context.Context) error { _, err := json.Next(ctx); return err }},
 		{"lite3", lite3.reading, func(ctx context.Context) error { _, err := lite3.Next(ctx); return err }},
 		{"view", view.stream.reading, func(ctx context.Context) error { _, err := view.Next(ctx); return err }},
 	} {

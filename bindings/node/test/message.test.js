@@ -2,7 +2,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Message, parseMessage, parseMessageJson, parseNativeMessage } = require("../message");
-const { RemoteClient, RemotePool } = require("../remote");
 
 const time = "2026-01-01T00:00:00Z";
 const sequences = ["9007199254740992", "9007199254740993", "18446744073709551615"];
@@ -76,38 +75,6 @@ test("response parsing changes only the selected message envelope sequence", () 
     { pools: [{ seq: Number("9007199254740993") }] });
 });
 
-test("remote append, fetch, and tail preserve exact uint64 message sequences", async () => {
-  const originalFetch = global.fetch;
-  try {
-    for (const [source, seq] of [
-      ...sequences.map((value) => [value, BigInt(value)]),
-      ...numericForms,
-    ]) {
-      global.fetch = async (url) => new Response(
-        !new URL(url).pathname.endsWith("/feed")
-          ? `${envelope(source)}\n`
-          : `{"message":${envelope(source)}}`,
-        { headers: { "Content-Type": "application/json" } },
-      );
-      const pool = new RemotePool(new RemoteClient("http://localhost:9700"), "exact");
-      assertExact(await pool.feed({ test: true }), seq);
-      const retained = await pool.fetch({ since: BigInt(seq) });
-      assertExact((await retained.next()).value, seq);
-      await retained.return();
-      const seen = [];
-      for await (const message of await pool.follow({ since: "oldest" })) {
-        assertExact(message, seq);
-        assert.equal(message.raw.toString(), envelope(source));
-        seen.push(message.seq);
-        break;
-      }
-      assert.deepEqual(seen, [BigInt(seq)]);
-    }
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
 test("message object sequences reject unsafe, fractional, and invalid uint64 values", () => {
   for (const seq of [
     Number.MAX_SAFE_INTEGER + 1, 1.5, -1, NaN, Infinity,
@@ -120,30 +87,12 @@ test("message object sequences reject unsafe, fractional, and invalid uint64 val
   }
 });
 
-test("raw local and remote message sequences reject invalid uint64 boundaries", async () => {
-  const originalFetch = global.fetch;
-  try {
-    for (const seq of [
-      "-1", "1.5", "1e-1", "9007199254740991.1", "18446744073709551616",
-      "1.8446744073709551616e19", "18446744073709551616.0",
-      "1e9999999999999999999999999", "1e-9999999999999999999999999",
-    ]) {
-      assert.throws(() => parseMessage(Buffer.from(envelope(seq))));
-      global.fetch = async (url) => new Response(
-        !new URL(url).pathname.endsWith("/feed")
-          ? `${envelope(seq)}\n`
-          : `{"message":${envelope(seq)}}`,
-      );
-      const pool = new RemotePool(new RemoteClient("http://localhost:9700"), "invalid");
-      await assert.rejects(pool.feed({}));
-      await assert.rejects(async () => (await pool.fetch({ since: 1 })).next());
-      await assert.rejects(async () => {
-        for await (const message of await pool.follow()) {
-          assert.fail(`invalid message ${message.seq} was accepted`);
-        }
-      });
-    }
-  } finally {
-    global.fetch = originalFetch;
+test("raw message sequences reject invalid uint64 boundaries", () => {
+  for (const seq of [
+    "-1", "1.5", "1e-1", "9007199254740991.1", "18446744073709551616",
+    "1.8446744073709551616e19", "18446744073709551616.0",
+    "1e9999999999999999999999999", "1e-9999999999999999999999999",
+  ]) {
+    assert.throws(() => parseMessage(Buffer.from(envelope(seq))));
   }
 });

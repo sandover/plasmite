@@ -99,7 +99,7 @@ mkdir -p "$WORKDIR/app"
   npm install "$TARBALL" >/dev/null
   node <<'JS'
 const assert = require("node:assert/strict");
-const { Client, RemoteClient } = require("plasmite");
+const { Client, Message, RemoteClient, toNative } = require("plasmite");
 const { mkdtempSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -121,15 +121,11 @@ const dir = mkdtempSync(join(tmpdir(), "plasmite-node-pack-"));
           assert.equal(typeof stored.time, "bigint");
           assert.equal(pool.info().bounds.oldest, stored.seq);
           const fetch = await pool.fetch({ since: stored.seq });
-          assert.deepEqual((await fetch.next()).value.data, { event: "smoke" });
+          const fetched = (await fetch.next()).value;
+          assert.ok(fetched instanceof Message);
+          assert.deepEqual(toNative(fetched.data), { event: "smoke" });
+          assert.deepEqual(fetched.raw, stored.raw);
           assert.equal((await fetch.next()).done, true);
-          for (const open of [pool.fetchView, pool.fetchLite3]) {
-            const history = await open.call(pool, { since: stored.seq });
-            const { value } = await history.next();
-            assert.equal(value.time, stored.time);
-            assert.equal("timestampNs" in value, false);
-            assert.equal((await history.next()).done, true);
-          }
         } finally {
           await reader.return();
         }

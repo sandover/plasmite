@@ -6,7 +6,7 @@
 use super::message::ReadStart;
 use super::{Message, PoolRef, Read, Since};
 use crate::core::error::{Error, ErrorKind};
-use crate::core::lite3::{encode_message, validate_bytes};
+use crate::core::lite3::validate_bytes;
 use crate::pool_paths::{PoolNameResolveError, resolve_named_pool_path};
 use crate::udp_wire as wire;
 use serde::Deserialize;
@@ -53,29 +53,6 @@ pub struct UdpFrame {
     pub payload: Vec<u8>,
 }
 
-impl UdpFrame {
-    pub fn message(&self) -> Result<Message, Error> {
-        super::message::message_from_udp_payload(self.seq, self.time, &self.payload)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum UdpEvent {
-    Frame(UdpFrame),
-    /// A range the server explicitly skipped.
-    Skip {
-        first: u64,
-        last: u64,
-        reason: UdpSkipReason,
-    },
-    Progress {
-        start_seq: u64,
-        next_seq: u64,
-        end_seq: Option<u64>,
-        terminal: bool,
-    },
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UdpStreamEvent<F> {
     Frame(F),
@@ -96,35 +73,11 @@ pub enum UdpStreamEvent<F> {
 /// View DATA retains a validated immutable snapshot.
 pub type UdpViewEvent = UdpStreamEvent<crate::view::MessageView>;
 
-impl From<UdpStreamEvent<UdpFrame>> for UdpEvent {
-    fn from(event: UdpStreamEvent<UdpFrame>) -> Self {
-        match event {
-            UdpStreamEvent::Frame(frame) => Self::Frame(frame),
-            UdpStreamEvent::Skip {
-                first,
-                last,
-                reason,
-            } => Self::Skip {
-                first,
-                last,
-                reason,
-            },
-            UdpStreamEvent::Progress {
-                start_seq,
-                next_seq,
-                end_seq,
-                terminal,
-            } => Self::Progress {
-                start_seq,
-                next_seq,
-                end_seq,
-                terminal,
-            },
-        }
-    }
-}
+pub type UdpEvent = UdpStreamEvent<Message>;
+pub type UdpRawEvent = UdpStreamEvent<UdpFrame>;
 
-pub struct UdpFollow(FollowReader<UdpFrame>);
+pub struct UdpFollow(FollowReader<Message>);
+pub struct UdpRawFollow(FollowReader<UdpFrame>);
 pub struct UdpViewFollow(FollowReader<crate::view::MessageView>);
 
 struct FollowReader<F> {
@@ -197,6 +150,29 @@ impl UdpClient {
     }
 }
 
+pub trait UdpPoolTransport {
+    fn feed_lite3(&self, bytes: &[u8], options: super::Feed) -> Result<(), Error>;
+
+    fn follow_view(&self, read: Read) -> Result<UdpViewFollow, Error>;
+
+    fn fetch_view(&self, read: Read) -> Result<UdpViewFollow, Error>;
+}
+
+impl UdpPoolTransport for UdpPool {
+    fn feed_lite3(&self, bytes: &[u8], options: super::Feed) -> Result<(), Error> {
+        check_udp_durability(options.encoded_durability()?)?;
+        self.send_lite3(bytes)
+    }
+
+    fn follow_view(&self, read: Read) -> Result<UdpViewFollow, Error> {
+        self.open_read(read, true, admit_view).map(UdpViewFollow)
+    }
+
+    fn fetch_view(&self, read: Read) -> Result<UdpViewFollow, Error> {
+        self.open_read(read, false, admit_view).map(UdpViewFollow)
+    }
+}
+
 impl UdpPool {
     /// Feed one datagram. Success only confirms that the socket accepted it.
     pub fn feed<'a>(
@@ -204,27 +180,23 @@ impl UdpPool {
         input: impl Into<super::FeedInput<'a>>,
         options: super::Feed,
     ) -> Result<(), Error> {
-        let (data, tags, durability) = options.resolve(input.into())?;
+        let (view, durability) = options.prepare(input.into())?;
         check_udp_durability(durability)?;
-        let document = encode_message(tags, data)?;
-        self.send_lite3(document.as_slice())
-    }
-
-    /// Forward a complete Lite3 envelope in one datagram.
-    pub fn feed_lite3(&self, bytes: &[u8], options: super::Feed) -> Result<(), Error> {
-        check_udp_durability(options.encoded_durability()?)?;
-        self.send_lite3(bytes)
+        self.send_payload(view.bytes())
     }
 
     /// Validate and send one complete Lite3 message without changing its bytes.
     fn send_lite3(&self, document: &[u8]) -> Result<(), Error> {
         check_datagram_sizes(self.name.as_bytes(), document.len())?;
-
         // Lite3's native reader needs aligned storage. A caller can pass a slice
         // starting at any byte, so validate a copy before forwarding the exact bytes.
         let aligned = document.to_vec();
         crate::core::lite3::validate_feed_bytes(&aligned)?;
+        self.send_payload(document)
+    }
 
+    fn send_payload(&self, document: &[u8]) -> Result<(), Error> {
+        check_datagram_sizes(self.name.as_bytes(), document.len())?;
         let mut packet = Vec::with_capacity(self.name.len() + 1 + document.len());
         packet.extend_from_slice(self.name.as_bytes());
         packet.push(0);
@@ -248,23 +220,34 @@ impl UdpPool {
 
     /// Open a live UDP reader using the shared read selection.
     pub fn follow(&self, read: Read) -> Result<UdpFollow, Error> {
-        self.open_read(read, true, admit_frame).map(UdpFollow)
+        self.open_read(read, true, admit_message).map(UdpFollow)
     }
 
     /// Open a finite UDP subscription over retained history.
     pub fn fetch(&self, read: Read) -> Result<UdpFollow, Error> {
-        self.open_read(read, false, admit_frame).map(UdpFollow)
+        self.open_read(read, false, admit_message).map(UdpFollow)
     }
 
-    pub fn follow_view(&self, read: Read) -> Result<UdpViewFollow, Error> {
-        self.open_read(read, true, admit_view).map(UdpViewFollow)
+    pub(crate) fn follow_raw(&self, read: Read) -> Result<UdpRawFollow, Error> {
+        self.open_read(read, true, admit_frame).map(UdpRawFollow)
     }
 
-    pub fn fetch_view(&self, read: Read) -> Result<UdpViewFollow, Error> {
-        self.open_read(read, false, admit_view).map(UdpViewFollow)
+    pub(crate) fn fetch_raw(&self, read: Read) -> Result<UdpRawFollow, Error> {
+        self.open_read(read, false, admit_frame).map(UdpRawFollow)
     }
 
     fn open_read<F>(
+        &self,
+        read: Read,
+        live: bool,
+        admit: fn(u64, u64, &[u8]) -> Result<F, Error>,
+    ) -> Result<FollowReader<F>, Error> {
+        let mut follow = self.reader(read, live, admit)?;
+        follow.open()?;
+        Ok(follow)
+    }
+
+    fn reader<F>(
         &self,
         read: Read,
         live: bool,
@@ -301,7 +284,7 @@ impl UdpPool {
             live,
         };
         let now = Instant::now();
-        let mut follow = FollowReader {
+        Ok(FollowReader {
             socket: Some(socket),
             id,
             selection,
@@ -313,9 +296,101 @@ impl UdpPool {
             last_activity: now,
             next_renewal: now + Duration::from_millis(wire::RENEW_MS),
             terminal_seen: false,
+        })
+    }
+}
+
+pub(crate) struct AsyncUdpRead {
+    follow: FollowReader<crate::view::MessageView>,
+    socket: tokio::net::UdpSocket,
+    buffer: Vec<u8>,
+}
+
+impl AsyncUdpRead {
+    pub(crate) async fn open(pool: &UdpPool, read: Read, live: bool) -> Result<Self, Error> {
+        let follow = pool.reader(read, live, admit_view)?;
+        let socket = follow
+            .socket_ref()?
+            .try_clone()
+            .and_then(|socket| {
+                socket.set_nonblocking(true)?;
+                tokio::net::UdpSocket::from_std(socket)
+            })
+            .map_err(|error| socket_error("UDP socket setup failed", error))?;
+        let mut reader = Self {
+            follow,
+            socket,
+            buffer: vec![0; 65_536],
         };
-        follow.open()?;
-        Ok(follow)
+        reader.subscribe().await?;
+        Ok(reader)
+    }
+
+    async fn receive(&mut self, deadline: Instant) -> Result<Option<usize>, Error> {
+        loop {
+            match tokio::time::timeout_at(deadline.into(), self.socket.recv(&mut self.buffer)).await
+            {
+                Ok(Ok(length)) => return Ok(Some(length)),
+                Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Ok(Err(error)) => return Err(socket_error("UDP follow receive failed", error)),
+                Err(_) => return Ok(None),
+            }
+        }
+    }
+
+    async fn subscribe(&mut self) -> Result<(), Error> {
+        let deadline = Instant::now() + Duration::from_millis(wire::STARTUP_MS);
+        let mut request = self
+            .follow
+            .subscribe_packet(None, Some(self.follow.selection.clone()))?;
+        let mut answered = false;
+        let mut retry_at = Instant::now();
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(startup_timeout());
+            }
+            if now >= retry_at {
+                self.follow.send_control(&request)?;
+                retry_at = now + CONTROL_RETRY;
+            }
+            let Some(length) = self.receive(retry_at.min(deadline)).await? else {
+                continue;
+            };
+            let Some((op, body)) = self.follow.response(&self.buffer[..length]) else {
+                continue;
+            };
+            if op == wire::CHALLENGE && !answered {
+                request = self.follow.answer_challenge(body)?;
+                answered = true;
+                retry_at = Instant::now();
+            } else {
+                self.follow.accept_response(op, body)?;
+                if op == wire::PROGRESS || op == wire::DATA {
+                    self.follow.finish_open();
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn next(&mut self) -> Result<Option<crate::view::MessageView>, Error> {
+        loop {
+            while let Some(event) = self.follow.pending.pop_front() {
+                if let UdpStreamEvent::Frame(message) = event {
+                    return Ok(Some(message));
+                }
+            }
+            if self.follow.is_finished() {
+                return Ok(None);
+            }
+            let deadline = self.follow.renew_if_due()?;
+            if let Some(length) = self.receive(deadline).await?
+                && let Some((op, body)) = self.follow.response(&self.buffer[..length])
+            {
+                self.follow.accept_response(op, body)?;
+            }
+        }
     }
 }
 
@@ -403,12 +478,7 @@ impl<F> FollowReader<F> {
             };
             match op {
                 wire::CHALLENGE if !answered_challenge => {
-                    let challenge: wire::Challenge = decode_control(body, "UDP challenge")?;
-                    if challenge.cookie.mac.is_empty() || challenge.cookie.expires_ms == 0 {
-                        return Err(protocol_error("UDP server sent an invalid challenge"));
-                    }
-                    request = self
-                        .subscribe_packet(Some(challenge.cookie), Some(self.selection.clone()))?;
+                    request = self.answer_challenge(body)?;
                     self.send_control(&request)?;
                     answered_challenge = true;
                     retry_at = Instant::now() + CONTROL_RETRY;
@@ -420,9 +490,34 @@ impl<F> FollowReader<F> {
                 _ => self.accept_response(op, body)?,
             }
         }
+        self.finish_open();
+        Ok(())
+    }
+
+    fn answer_challenge(&self, body: &[u8]) -> Result<Vec<u8>, Error> {
+        let challenge: wire::Challenge = decode_control(body, "UDP challenge")?;
+        if challenge.cookie.mac.is_empty() || challenge.cookie.expires_ms == 0 {
+            return Err(protocol_error("UDP server sent an invalid challenge"));
+        }
+        self.subscribe_packet(Some(challenge.cookie), Some(self.selection.clone()))
+    }
+
+    fn finish_open(&mut self) {
         self.refresh_liveness();
         self.next_renewal = self.last_activity + Duration::from_millis(wire::RENEW_MS);
-        Ok(())
+    }
+
+    fn renew_if_due(&mut self) -> Result<Instant, Error> {
+        let now = Instant::now();
+        let liveness_deadline = self.last_activity + Duration::from_millis(wire::LEASE_MS);
+        if now >= liveness_deadline {
+            return Err(Error::new(ErrorKind::Io).with_message("UDP follow lost server liveness"));
+        }
+        if now >= self.next_renewal {
+            self.send_renewal()?;
+            self.next_renewal = now + Duration::from_millis(wire::RENEW_MS);
+        }
+        Ok(self.next_renewal.min(liveness_deadline))
     }
 
     fn next_event_until(
@@ -453,23 +548,11 @@ impl<F> FollowReader<F> {
             if self.is_finished() {
                 return Ok(None);
             }
-            let now = Instant::now();
-            let liveness_deadline = self.last_activity + Duration::from_millis(wire::LEASE_MS);
-            if now >= liveness_deadline {
-                return Err(
-                    Error::new(ErrorKind::Io).with_message("UDP follow lost server liveness")
-                );
-            }
-            if now >= self.next_renewal {
-                self.send_renewal()?;
-                self.next_renewal = now + Duration::from_millis(wire::RENEW_MS);
-            }
-
-            if !poll_once && deadline.is_some_and(|deadline| now >= deadline) {
+            let mut receive_until = self.renew_if_due()?;
+            if !poll_once && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 return Ok(None);
             }
 
-            let mut receive_until = self.next_renewal.min(liveness_deadline);
             if let Some(deadline) = deadline {
                 receive_until = receive_until.min(deadline);
             }
@@ -701,6 +784,10 @@ fn admit_frame(seq: u64, time: u64, bytes: &[u8]) -> Result<UdpFrame, Error> {
     Ok(UdpFrame { seq, time, payload })
 }
 
+fn admit_message(seq: u64, time: u64, bytes: &[u8]) -> Result<Message, Error> {
+    Message::from_lite3(seq, time, bytes)
+}
+
 fn admit_view(seq: u64, time: u64, bytes: &[u8]) -> Result<crate::view::MessageView, Error> {
     crate::view::MessageView::from_bytes(bytes, seq, time)
 }
@@ -710,16 +797,14 @@ macro_rules! follow_adapter {
         impl $follow {
             /// Wait for an event; None means this finite or closed follow drained.
             pub fn next_event(&mut self) -> Result<Option<$event>, Error> {
-                self.0.next_event().map(|event| event.map(Into::into))
+                self.0.next_event()
             }
             /// None can also mean the timeout expired; inspect is_finished().
             pub fn next_event_timeout(
                 &mut self,
                 timeout: Duration,
             ) -> Result<Option<$event>, Error> {
-                self.0
-                    .next_event_timeout(timeout)
-                    .map(|event| event.map(Into::into))
+                self.0.next_event_timeout(timeout)
             }
             pub fn is_finished(&self) -> bool {
                 self.0.is_finished()
@@ -732,7 +817,27 @@ macro_rules! follow_adapter {
     };
 }
 follow_adapter!(UdpFollow, UdpEvent);
+follow_adapter!(UdpRawFollow, UdpRawEvent);
 follow_adapter!(UdpViewFollow, UdpViewEvent);
+
+impl UdpFollow {
+    pub fn next_message(&mut self) -> Result<Option<Message>, Error> {
+        while let Some(event) = self.next_event()? {
+            if let UdpEvent::Frame(message) = event {
+                return Ok(Some(message));
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl Iterator for UdpFollow {
+    type Item = Result<Message, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_message().transpose()
+    }
+}
 
 fn parse_endpoint(endpoint: &str) -> Result<(String, u16, SocketAddr), Error> {
     let url = parse_udp_url(endpoint, false)?;

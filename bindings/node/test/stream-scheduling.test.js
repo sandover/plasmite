@@ -35,15 +35,15 @@ test('128 idle local reads leave libuv filesystem work available and close safel
 
 test('queued local waits keep an absolute budget and preserve their cursor', async () => {
   await fixture(async pool => {
-    const streams = (await Promise.all(Array.from({ length: 128 }, () => pool.followLite3()))).map(reader => reader._stream);
+    const streams = (await Promise.all(Array.from({ length: 128 }, () => pool.follow()))).map(reader => reader._stream);
     try {
-      const reads = streams.map(stream => stream.nextWait(15));
+      const reads = streams.map(stream => stream.nextJsonWait(15));
       assert.ok((await within(Promise.all(reads), 500)).every(read => read.status === 0));
       const message = await pool.feed({ value: 7 });
       for (const stream of streams) {
-        const read = await stream.nextWait(0);
+        const read = await stream.nextJsonWait(0);
         assert.equal(read.status, 1);
-        assert.equal(read.frame.seq, message.seq);
+        assert.equal(read.view.seq, message.seq);
       }
     } finally { streams.forEach(stream => stream.close()); }
   });
@@ -75,12 +75,12 @@ test('owned local tails filter before limiting and retain values after close and
   await fixture(async pool => {
     await pool.feed({ nested: { value: 1 } }, { tags: ['ignore'] });
     const kept = await pool.feed({ nested: { value: 2 }, values: [3, 4] }, { tags: ['keep'] });
-    const tail = await pool.fetchView({ since: 1n, tags: ['keep'] });
+    const tail = await pool.fetch({ since: 1n, tags: ['keep'] });
     const { value: message } = await tail.next();
     assert.equal(message.seq, kept.seq);
     assert.equal(message.data.nested.value, 2);
     assert.equal(message.data.values[1], 4);
-    const child = message.data.nested;
+    const child = message.field('nested');
     assert.deepEqual(await tail.next(), { done: true, value: undefined });
     for (let i = 0; i < 300; i++) await pool.feed({ fill: 'x'.repeat(4096) });
     pool.close();
@@ -91,14 +91,14 @@ test('owned local tails filter before limiting and retain values after close and
 
 test('owned local iterator return interrupts an idle read and keeps retained values valid', async () => {
   await fixture(async pool => {
-    const tail = await pool.followView();
+    const tail = await pool.follow();
     const pending = tail.next();
     await new Promise(resolve => setTimeout(resolve, 5));
     const returned = tail.return();
     assert.deepEqual(await within(pending, 500), { done: true, value: undefined });
     assert.deepEqual(await within(returned, 500), { done: true, value: undefined });
     const controller = new AbortController();
-    const aborting = await pool.followView({ since: 'oldest', signal: controller.signal });
+    const aborting = await pool.follow({ since: 'oldest', signal: controller.signal });
     const read = aborting.next(); controller.abort();
     assert.equal((await within(read, 500)).done, true);
   });
@@ -133,9 +133,9 @@ test('UDP loop exit and reader-level abort close the native subscription', async
       },
       isFinished: false,
       close() { closes++; },
-    }, false, stop === 'abort reader' ? controller.signal : undefined);
+    }, stop === 'abort reader' ? controller.signal : undefined);
     if (stop === 'break') {
-      for await (const event of follow) {
+      for await (const event of follow.events()) {
         assert.equal(event.kind, 'progress');
         break;
       }
@@ -177,7 +177,7 @@ test('async hooks can close a stream during channel or Promise creation', async 
       const hook = createHook({ init(id, type) {
         if (!closed && type === kind) { closed = true; stream.close(); }
       } }).enable();
-      try { assert.equal((await within(stream._inner.nextJsonWait(5000n), 500)).status, 3); assert.equal(closed, true); }
+      try { assert.equal((await within(stream.nextJsonWait(5000n), 500)).status, 3); assert.equal(closed, true); }
       finally { hook.disable(); stream.close(); }
     }
   });
@@ -207,7 +207,7 @@ test('owned tail progress extends past a single per-read timeout interval', asyn
     const second = setTimeout(() => pool.feed({ number: 2 }), 150);
     try {
       const values = [];
-      const reader = await pool.followView();
+      const reader = await pool.follow();
       try {
         for (let i = 0; i < 2; i++) values.push((await reader.next(0.12)).value.data.number);
       } finally { reader.close(); }
@@ -218,7 +218,7 @@ test('owned tail progress extends past a single per-read timeout interval', asyn
 
 test('an owned follow keeps the reader open after a per-read timeout', async () => {
   await fixture(async pool => {
-    const reader = await pool.followView();
+    const reader = await pool.follow();
     try {
       assert.deepEqual(await within(reader.next(0.01), 500), { done: false, value: undefined });
       await pool.feed({ n: 1 });
@@ -236,7 +236,7 @@ test('an unlimited owned tail keeps one native read across quiet intervals', asy
       stream.nextJsonWait = budget => { waits++; assert.equal(budget, 18446744073709551615n); return wait(budget); };
       return stream;
     };
-    const tail = await pool.followView();
+    const tail = await pool.follow();
     const next = tail.next();
     const timer = setTimeout(() => pool.feed({ value: 1 }), 25);
     try {

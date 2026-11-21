@@ -146,12 +146,13 @@
 
   // Pages decide which responses stop a stream and where the next request resumes.
   async function followEvents({
-    url, onEvent, onResponse = () => {}, onDrop = () => {}, signal, retryMs = 1000, read = readEvents,
+    url, onEvent, onResponse = () => {}, onDrop = () => {}, signal, retryMs = 1000, read = readEvents, accept,
   }) {
     while (!signal?.aborted) {
       let failure;
       try {
-        const response = await fetch(url(), { cache: "no-store", signal });
+        const headers = accept ? { Accept: accept } : undefined;
+        const response = await fetch(url(), { cache: "no-store", signal, headers });
         if (signal?.aborted || await onResponse(response) === false) {
           await response.body?.cancel();
           return;
@@ -319,7 +320,7 @@
     shade.addEventListener("click", (event) => { if (event.target === shade) closeJump(); });
     input.focus();
     try {
-      const response = await fetch("/v0/ui/pools", { cache: "no-store" });
+      const response = await fetch("/pools", { cache: "no-store" });
       if (response.ok) names = ((await response.json()).pools || []).map((pool) => pool.name).sort((a, b) => a.localeCompare(b));
     } catch (_) { /* The list stays empty; the dialog says so. */ }
     render();

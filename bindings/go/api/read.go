@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -18,6 +19,7 @@ func Create(create bool) OpenOption {
 }
 
 type PoolInfo struct {
+	PoolDescription
 	Name     string `json:"name"`
 	Path     string `json:"path"`
 	FileSize uint64 `json:"file_size"`
@@ -25,6 +27,12 @@ type PoolInfo struct {
 		Oldest *uint64 `json:"oldest"`
 		Newest *uint64 `json:"newest"`
 	} `json:"bounds"`
+}
+
+// PoolDescription tells readers what a pool carries. Example is a JSON object.
+type PoolDescription struct {
+	About   string          `json:"about,omitempty"`
+	Example json.RawMessage `json:"example,omitempty"`
 }
 
 type Reader interface {

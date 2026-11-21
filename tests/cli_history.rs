@@ -153,6 +153,88 @@ fn json_format_is_uncolored_and_pretty_is_readable() {
 }
 
 #[test]
+fn compact_output_is_explicit_on_pipes() {
+    let temp = tempfile::tempdir().unwrap();
+    seed(temp.path(), 1, 0);
+    let output = history(temp.path(), "history", &[]);
+    assert_success(&output);
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages[0]["data"], json!({"i": 1,"padding": ""}));
+    assert_eq!(messages[0]["meta"]["tags"], json!(["odd"]));
+
+    let output = history(temp.path(), "history", &["-o", "compact"]);
+    assert_success(&output);
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(text.lines().count(), 1);
+    assert!(text.contains("  #1  odd  {\"i\":1,\"padding\":\"\"}"));
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_reads_default_to_one_line_and_honor_width_and_no_color() {
+    use std::os::fd::FromRawFd;
+    use unicode_width::UnicodeWidthStr;
+
+    let temp = tempfile::tempdir().unwrap();
+    seed(temp.path(), 1, 80);
+    let width = 42;
+    let mut size = libc::winsize {
+        ws_row: 24,
+        ws_col: width,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    for args in [
+        &["fetch", "history"][..],
+        &["follow", "history", "--last", "1", "--one"],
+        &["duplex", "history", "--last", "1"],
+    ] {
+        let (mut master, mut slave) = (-1, -1);
+        // SAFETY: openpty writes two owned file descriptors on success.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    &raw mut size,
+                )
+            },
+            0
+        );
+        let master = unsafe { File::from_raw_fd(master) };
+        let slave = unsafe { File::from_raw_fd(slave) };
+        let mut child = KillOnDrop(
+            cmd()
+                .arg("--dir")
+                .arg(temp.path())
+                .args(args)
+                .env("NO_COLOR", "1")
+                .env("TZ", "EST5")
+                .stdin(Stdio::null())
+                .stdout(Stdio::from(slave))
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let output = read_message_lines(master, 1, Duration::from_secs(5));
+        if args[0] != "duplex" {
+            assert!(wait_within(&mut child.0, Duration::from_secs(5), "terminal read").success());
+        }
+        let output = sanitize_tty_text(&output);
+        let line = output.trim_end();
+        assert!(
+            line.starts_with("2020-09-13 07:26:40  #1  odd  {\"i\":1"),
+            "{line:?}"
+        );
+        assert!(line.ends_with('…'), "{line:?}");
+        assert_eq!(line.width(), usize::from(width));
+        assert!(!line.contains('\x1b'));
+    }
+}
+
+#[test]
 fn local_and_remote_finite_reads_share_selection_rules() {
     let temp = tempfile::tempdir().expect("tempdir");
     seed(temp.path(), 5, 0);

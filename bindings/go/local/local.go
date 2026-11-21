@@ -1,6 +1,6 @@
 /*
 Purpose: Go bindings for the libplasmite C ABI (major 2).
-Key Exports: Client, Pool, Stream, Durability, Error.
+Key Exports: Client, Pool, stream, Durability, Error.
 Role: Minimal, ergonomic wrapper around include/plasmite.h for Go users.
 Invariants: Caller must Close resources; JSON bytes in/out; errors returned as Go error.
 Notes: Uses cgo and links to -lplasmite; caller configures library search path.
@@ -13,6 +13,7 @@ package local
 #cgo darwin LDFLAGS: -lplasmite.2
 #cgo linux LDFLAGS: -l:libplasmite.so.2
 #cgo windows LDFLAGS: -lplasmite2
+#define PLSM_INTERNAL_ABI
 #include "plasmite.h"
 #include <stdlib.h>
 */
@@ -20,6 +21,7 @@ import "C"
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -63,18 +65,18 @@ type Pool struct {
 	ptr *C.plsm_pool_t
 }
 
-// Stream serializes native reads and Close. A Stream must not be copied.
+// stream serializes native reads and Close. A stream must not be copied.
 // Pass a context to Next to bound its wait. Close interrupts an idle read and stops subsequent reads.
-type Stream struct {
+type stream struct {
 	closeMu sync.Mutex
 	mu      sync.Mutex
 	reading chan struct{}
 	ptr     *C.plsm_stream_t
 }
 
-// Lite3Stream serializes native reads and Close. A Lite3Stream must not be copied.
+// lite3Stream serializes native reads and Close. A lite3Stream must not be copied.
 // Pass a context to Next to bound its wait. Close interrupts an idle read and stops subsequent reads.
-type Lite3Stream struct {
+type lite3Stream struct {
 	closeMu sync.Mutex
 	mu      sync.Mutex
 	reading chan struct{}
@@ -96,7 +98,16 @@ func PoolRefPath(path string) PoolRef { return api.PoolRefPath(path) }
 
 func PoolRefURI(uri string) PoolRef { return api.PoolRefURI(uri) }
 
-type Lite3Frame = api.Lite3Frame
+type Message = api.Message
+type JSON = api.JSON
+type Lite3 = api.Lite3
+type PoolDescription = api.PoolDescription
+
+type lite3Frame struct {
+	Seq, Time uint64
+	Flags     uint32
+	Payload   []byte
+}
 
 type FeedOption = api.FeedOption
 
@@ -169,13 +180,15 @@ func (c *Client) Close() {
 	c.ptr = nil
 }
 
-func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
+type CreateOption func(*PoolDescription)
+
+// WithDescription sets the description and example shown when people inspect a pool.
+func WithDescription(description PoolDescription) CreateOption {
+	return func(target *PoolDescription) { *target = description }
+}
+
+func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64, options ...CreateOption) (*Pool, error) {
 	if c == nil {
-		return nil, closedError("client")
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.ptr == nil {
 		return nil, closedError("client")
 	}
 	if ref == "" || strings.ContainsRune(string(ref), 0) {
@@ -187,13 +200,58 @@ func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
 	cRef := C.CString(string(ref))
 	defer C.free(unsafe.Pointer(cRef))
 
+	var description PoolDescription
+	for _, option := range options {
+		option(&description)
+	}
+	raw, err := descriptionJSON(description)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ptr == nil {
+		return nil, closedError("client")
+	}
 	var cPool *C.plsm_pool_t
 	var cErr *C.plsm_error_t
-	rc := C.plsm_pool_create(c.ptr, cRef, C.uint64_t(sizeBytes), &cPool, &cErr)
+	rc := C.plsm_pool_create_described(c.ptr, cRef, C.uint64_t(sizeBytes),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(raw))), C.size_t(len(raw)), &cPool, &cErr)
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
 	return &Pool{ptr: cPool}, nil
+}
+
+func descriptionJSON(description PoolDescription) ([]byte, error) {
+	raw, err := json.Marshal(description)
+	if err != nil {
+		return nil, invalidArgumentError(err.Error())
+	}
+	return raw, nil
+}
+
+// SetDescription replaces both fields. Use a zero value to clear them.
+func (p *Pool) SetDescription(description PoolDescription) error {
+	if p == nil {
+		return closedError("pool")
+	}
+	raw, err := descriptionJSON(description)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
+		return closedError("pool")
+	}
+	var nativeErr *C.plsm_error_t
+	if C.plsm_pool_set_description(p.ptr, (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(raw))),
+		C.size_t(len(raw)), &nativeErr) != 0 {
+		return fromCError(nativeErr)
+	}
+	return nil
 }
 
 func (c *Client) OpenPool(ref PoolRef, opts ...api.OpenOption) (*Pool, error) {
@@ -254,11 +312,11 @@ func (p *Pool) getJSON(seq uint64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return message.Raw, nil
+	return json.Marshal(message)
 }
 
-func (p *Pool) getLite3(seq uint64) (*Lite3Frame, error) {
-	stream, err := p.FetchLite3(Since(seq))
+func (p *Pool) getLite3(seq uint64) (*lite3Frame, error) {
+	stream, err := p.fetchLite3(Since(seq))
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +328,7 @@ func (p *Pool) getLite3(seq uint64) (*Lite3Frame, error) {
 	return frame, err
 }
 
-func (s *Stream) Close() {
+func (s *stream) Close() {
 	if s == nil {
 		return
 	}
@@ -287,7 +345,7 @@ func (s *Stream) Close() {
 	s.ptr = nil
 }
 
-func (s *Lite3Stream) Close() {
+func (s *lite3Stream) Close() {
 	if s == nil {
 		return
 	}
@@ -304,7 +362,7 @@ func (s *Lite3Stream) Close() {
 	s.ptr = nil
 }
 
-func (s *Stream) nextWait(wait uint64) ([]byte, int, error) {
+func (s *stream) nextWait(wait uint64) ([]byte, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ptr == nil {
@@ -322,7 +380,7 @@ func (s *Stream) nextWait(wait uint64) ([]byte, int, error) {
 	return nil, status, nil
 }
 
-func (s *Lite3Stream) nextWait(wait uint64) (*Lite3Frame, int, error) {
+func (s *lite3Stream) nextWait(wait uint64) (*lite3Frame, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ptr == nil {
@@ -352,7 +410,7 @@ func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {
 	return data
 }
 
-func copyAndFreeLite3Frame(frame *C.plsm_lite3_frame_t) *Lite3Frame {
+func copyAndFreeLite3Frame(frame *C.plsm_lite3_frame_t) *lite3Frame {
 	if frame == nil {
 		return nil
 	}
@@ -360,7 +418,7 @@ func copyAndFreeLite3Frame(frame *C.plsm_lite3_frame_t) *Lite3Frame {
 	if frame.payload.data != nil && frame.payload.len != 0 {
 		payload = C.GoBytes(unsafe.Pointer(frame.payload.data), C.int(frame.payload.len))
 	}
-	out := &Lite3Frame{
+	out := &lite3Frame{
 		Seq:     uint64(frame.seq),
 		Time:    uint64(frame.time),
 		Flags:   uint32(frame.flags),

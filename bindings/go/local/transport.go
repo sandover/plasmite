@@ -6,14 +6,21 @@ package local
 import "C"
 
 import (
+	"github.com/sandover/plasmite/bindings/go/v2/api"
 	"github.com/sandover/plasmite/bindings/go/v2/internal/nativeview"
 	"runtime"
 	"unsafe"
 )
 
+// AdoptMessage transfers a checked snapshot from a sibling Go transport. The
+// parameter type is internal to the Go binding.
+func AdoptMessage(snapshot nativeview.Snapshot) *api.Message {
+	return adoptSnapshot(snapshot).message()
+}
+
 // AdoptSnapshot is transport glue. Its internal parameter type prevents external
 // callers from claiming that arbitrary mutable bytes have a validation proof.
-func AdoptSnapshot(snapshot nativeview.Snapshot) *MessageView {
+func adoptSnapshot(snapshot nativeview.Snapshot) *messageView {
 	proof := snapshot.Duplicates()
 	var duplicates []C.size_t
 	if len(proof) > 0 {
@@ -21,11 +28,11 @@ func AdoptSnapshot(snapshot nativeview.Snapshot) *MessageView {
 	}
 	data, meta := snapshot.Offsets()
 	seq, timestamp := snapshot.Identity()
-	return &MessageView{seq: seq, timeNS: timestamp, valueSnapshot: valueSnapshot{encoded: snapshot.Bytes(), duplicates: duplicates}, dataNode: C.size_t(data), metaNode: C.size_t(meta)}
+	return &messageView{seq: seq, timeNS: timestamp, valueSnapshot: valueSnapshot{encoded: snapshot.Bytes(), duplicates: duplicates}, dataNode: C.size_t(data), metaNode: C.size_t(meta)}
 }
 
 // forwardView shares immutable Go storage/proof and assigns destination identity.
-func (p *Pool) forwardView(source *MessageView, durability Durability) (*MessageView, error) {
+func (p *Pool) forwardView(source *messageView, durability Durability) (*messageView, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.ptr == nil {

@@ -13,7 +13,8 @@ fn top_level_help_orients_and_routes_readers() {
     assert!(stdout.contains("FIRST LOCAL WORKFLOW"));
     assert!(stdout.contains("plasmite pool create chat"));
     assert!(stdout.contains("--format <FORMAT>"));
-    assert!(stdout.contains("pretty in a terminal, json in a pipe"));
+    assert!(stdout.contains("readable in a terminal, json in a pipe"));
+    assert!(stdout.contains("follow, fetch, and duplex show one line per message in a terminal"));
     assert!(stdout.contains("Global options work before or after commands"));
     assert!(stdout.contains("plasmite <command> --help"));
     assert!(stdout.contains("/blob/main/docs/cli.md"));

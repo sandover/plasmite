@@ -1,3 +1,4 @@
+use plasmite::api::internal::LocalPoolTransport;
 use plasmite::api::{ErrorKind, Feed, Pool, PoolOptions, Read, Since};
 use plasmite::view::MessageView;
 use serde::Deserialize;

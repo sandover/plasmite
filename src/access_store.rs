@@ -54,6 +54,16 @@ struct AccessRecord {
     revoked: bool,
     #[serde(default)]
     created_at: Option<u64>,
+    #[serde(default)]
+    mode: AccessMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum AccessMode {
+    #[default]
+    Full,
+    ReadOnly,
 }
 
 struct AccessState {
@@ -90,9 +100,19 @@ impl Revocation {
 #[derive(Clone, Debug)]
 pub(crate) struct AccessGrant {
     revoked: Arc<Revocation>,
+    mode: AccessMode,
+    sender: String,
 }
 
 impl AccessGrant {
+    pub(crate) fn read_only(&self) -> bool {
+        self.mode == AccessMode::ReadOnly
+    }
+
+    pub(crate) fn sender(&self) -> &str {
+        &self.sender
+    }
+
     pub(crate) fn is_revoked(&self) -> bool {
         self.revoked.flag.load(Ordering::Acquire)
     }
@@ -116,6 +136,7 @@ pub(crate) struct AccessKeySummary {
     id: String,
     name: String,
     revoked: bool,
+    mode: AccessMode,
     created_at: Option<u64>,
     last_used_at: Option<u64>,
 }
@@ -385,7 +406,7 @@ impl AccessStore {
         cert_fingerprint(&certificate)
     }
 
-    pub(crate) fn issue(&self, name: &str) -> Result<String, Error> {
+    pub(crate) fn issue(&self, name: &str, mode: AccessMode) -> Result<String, Error> {
         let name = name.trim();
         if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
             return Err(Error::new(ErrorKind::Usage)
@@ -406,6 +427,7 @@ impl AccessStore {
             verifier,
             revoked: false,
             created_at: unix_seconds(),
+            mode,
         });
         if let Err(err) = write_atomic_json(&self.dir.join("keys.json"), &records.records) {
             // A failed directory sync may follow a successful rename. Match the
@@ -431,13 +453,7 @@ impl AccessStore {
             .records
             .iter()
             .position(|record| constant_time_eq(record.verifier.as_bytes(), verifier.as_bytes()))?;
-        if state.records[index].revoked {
-            return None;
-        }
-        state.runtime[index].last_used_at = unix_seconds();
-        Some(AccessGrant {
-            revoked: state.runtime[index].revoked.clone(),
-        })
+        state.grant(index)
     }
 
     pub(crate) fn authorize_id(&self, id: &str) -> Option<AccessGrant> {
@@ -446,13 +462,7 @@ impl AccessStore {
             .records
             .iter()
             .position(|record| key_id(&record.verifier) == id)?;
-        if state.records[index].revoked {
-            return None;
-        }
-        state.runtime[index].last_used_at = unix_seconds();
-        Some(AccessGrant {
-            revoked: state.runtime[index].revoked.clone(),
-        })
+        state.grant(index)
     }
 
     pub(crate) fn authorize_key(&self, key: &str) -> Option<(String, AccessGrant)> {
@@ -484,6 +494,7 @@ impl AccessStore {
                 id: key_id(&record.verifier),
                 name: record.name.clone(),
                 revoked: record.revoked,
+                mode: record.mode,
                 created_at: record.created_at,
                 last_used_at: runtime.last_used_at,
             })
@@ -516,6 +527,20 @@ impl AccessStore {
 }
 
 impl AccessState {
+    fn grant(&mut self, index: usize) -> Option<AccessGrant> {
+        let record = &self.records[index];
+        if record.revoked {
+            return None;
+        }
+        let runtime = &mut self.runtime[index];
+        runtime.last_used_at = unix_seconds();
+        Some(AccessGrant {
+            revoked: runtime.revoked.clone(),
+            mode: record.mode,
+            sender: record.name.clone(),
+        })
+    }
+
     fn sync_runtime(&mut self) {
         for runtime in self.runtime.iter().skip(self.records.len()) {
             runtime.revoked.set(true);
@@ -929,7 +954,7 @@ pub(crate) fn ensure_private(path: &Path) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessStore, certificate_params};
+    use super::{AccessMode, AccessStore, certificate_params, read_json, write_atomic_json};
     use plasmite::api::ErrorKind;
     use rcgen::{Certificate, CertificateParams};
 
@@ -992,7 +1017,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let first = AccessStore::open(temp.path(), Some("https://127.0.0.1"), None, None)
             .expect("first owner");
-        let key = first.issue("laptop").expect("key");
+        let key = first.issue("laptop", AccessMode::Full).expect("key");
         let secret = key.rsplit('.').next().expect("secret");
         assert!(first.authorize_secret(secret).is_some());
         let second = AccessStore::open(temp.path(), Some("https://127.0.0.1"), None, None);
@@ -1007,6 +1032,26 @@ mod tests {
             .expect("same-key certificate renewal");
         assert_eq!(moved.fingerprint(), fingerprint);
         assert!(moved.authorize_secret(secret).is_some());
+    }
+
+    #[test]
+    fn old_key_files_default_to_full_access_and_read_only_mode_survives_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = AccessStore::open(temp.path(), None, None, None).unwrap();
+        let old_key = first.issue("before modes", AccessMode::Full).unwrap();
+        let read_key = first.issue("reader", AccessMode::ReadOnly).unwrap();
+        let keys_path = first.state_dir().join("keys.json");
+        drop(first);
+
+        let mut keys: Vec<serde_json::Value> = read_json(&keys_path).unwrap();
+        keys[0].as_object_mut().unwrap().remove("mode");
+        write_atomic_json(&keys_path, &keys).unwrap();
+
+        let reopened = AccessStore::open(temp.path(), None, None, None).unwrap();
+        let (_, old_grant) = reopened.authorize_key(&old_key).unwrap();
+        let (_, read_grant) = reopened.authorize_key(&read_key).unwrap();
+        assert!(!old_grant.read_only());
+        assert!(read_grant.read_only());
     }
 
     #[test]

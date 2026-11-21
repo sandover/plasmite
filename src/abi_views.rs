@@ -1,6 +1,7 @@
 //! C ownership and borrowed access for immutable Lite3 snapshots.
 #![allow(clippy::result_large_err)]
 use crate::abi::{borrow_pool, fail, plsm_buf, plsm_error, plsm_pool, write_json_buf};
+use crate::api::TailOutcome;
 use crate::core::error::{Error, ErrorKind};
 use crate::view::{MessageView, ValueRef};
 use std::sync::Arc;
@@ -379,8 +380,155 @@ pub extern "C" fn plsm_view_select(
     )
 }
 
-/// Parse once, commit the checked encoding, and retain it as an owned view.
 #[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_feed(
+    pool: *mut plsm_pool,
+    kind: u32,
+    input: *const std::ffi::c_void,
+    len: usize,
+    options: *const crate::abi::plsm_feed_options,
+    out: *mut *const plsm_message_view,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    if input.is_null() || out.is_null() || len > isize::MAX as usize {
+        return fail(err, usage());
+    }
+    match kind {
+        1 => plsm_pool_feed_json_view(pool, input.cast(), len, options, out, err),
+        2 => {
+            let pool = match borrow_pool(pool, err) {
+                Ok(pool) => pool,
+                Err(code) => return code,
+            };
+            finish(
+                (|| {
+                    let feed = crate::abi::parse_feed(options)?;
+                    let bytes = unsafe { std::slice::from_raw_parts(input.cast(), len) };
+                    let view = MessageView::from_feed_bytes(bytes)?;
+                    publish(pool.pool.feed_view(&view, feed)?, out)
+                })(),
+                err,
+            )
+        }
+        3 if len == 0 => plsm_pool_feed_view(pool, input.cast(), options, out, err),
+        4 if len == 0 => crate::abi_builder::plsm_pool_feed_builder_view(
+            pool,
+            input.cast_mut().cast(),
+            options,
+            out,
+            err,
+        ),
+        _ => fail(
+            err,
+            Error::new(ErrorKind::Usage).with_message("invalid feed input kind or length"),
+        ),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_feed(
+    pool: *mut crate::abi::plsm_udp_pool,
+    kind: u32,
+    input: *const std::ffi::c_void,
+    len: usize,
+    options: *const crate::abi::plsm_feed_options,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    use crate::api::{FeedInput, Message};
+    if pool.is_null() || input.is_null() || len > isize::MAX as usize {
+        return fail(err, usage());
+    }
+    let pool = unsafe { &*pool };
+    finish(
+        (|| {
+            let options = crate::abi::parse_feed(options)?;
+            match kind {
+                1 | 2 => {
+                    let bytes = unsafe { std::slice::from_raw_parts(input.cast(), len) };
+                    let source = if kind == 1 {
+                        FeedInput::Json(bytes)
+                    } else {
+                        FeedInput::Lite3(bytes)
+                    };
+                    pool.pool.feed(source, options)
+                }
+                3 if len == 0 => {
+                    let source = unsafe { &*input.cast::<plsm_message_view>() };
+                    let message = Message::from_view(source.view.clone());
+                    pool.pool.feed(&message, options)
+                }
+                _ => {
+                    Err(Error::new(ErrorKind::Usage)
+                        .with_message("invalid feed input kind or length"))
+                }
+            }
+        })(),
+        err,
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_stream_next_message(
+    stream: *mut crate::abi::plsm_stream,
+    timeout_ms: u64,
+    out: *mut *const plsm_message_view,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    if out.is_null() {
+        return fail(error, usage());
+    }
+    let stream = match crate::abi::borrow_stream(stream, error) {
+        Ok(stream) => stream,
+        Err(code) => return code,
+    };
+    match crate::abi::read_stream(
+        stream,
+        crate::abi::stream_wait(timeout_ms),
+        crate::api::select_view,
+    ) {
+        Ok(TailOutcome::Item(message)) => match publish(message, out) {
+            Ok(()) => 1,
+            Err(err) => fail(error, err),
+        },
+        Ok(TailOutcome::WaitExpired) => 0,
+        Ok(TailOutcome::Finished) => 2,
+        Ok(TailOutcome::Cancelled) => 3,
+        Err(err) => fail(error, err),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_message_tags(owner: *const plsm_message_view) -> plsm_value_ref {
+    let Some(message) = (unsafe { owner.as_ref() }) else {
+        return plsm_value_ref::default();
+    };
+    message
+        .view
+        .root()
+        .get("meta")
+        .ok()
+        .flatten()
+        .and_then(|meta| meta.get("tags").ok().flatten())
+        .map_or_else(plsm_value_ref::default, |tags| reference(owner, tags))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_message_sender(
+    owner: *const plsm_message_view,
+    len: *mut usize,
+) -> *const u8 {
+    if len.is_null() {
+        return std::ptr::null();
+    }
+    let sender = unsafe { owner.as_ref() }.and_then(|owner| owner.view.sender());
+    unsafe {
+        *len = sender.map_or(0, str::len);
+    }
+    sender.map_or(std::ptr::null(), str::as_ptr)
+}
+
+/// Parse once, commit the checked encoding, and retain it as an owned view.
+#[unsafe(export_name = "plsm_internal_pool_feed_json_view")]
 pub extern "C" fn plsm_pool_feed_json_view(
     pool: *mut plsm_pool,
     bytes: *const u8,
@@ -493,7 +641,7 @@ mod tests {
 }
 
 /// Forward immutable bytes with a fresh destination identity and no payload copy.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_feed_view")]
 pub extern "C" fn plsm_pool_feed_view(
     pool: *mut plsm_pool,
     source: *const plsm_message_view,

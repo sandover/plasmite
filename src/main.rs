@@ -124,19 +124,27 @@ fn run() -> Result<RunOutcome, (Error, ColorMode, OutputMode)> {
     };
 
     let color_mode = cli.color;
-    let output_mode = cli.format.unwrap_or_else(default_output_mode);
-    if output_mode.is_binary()
-        && !matches!(
-            cli.command,
-            cli::args::Command::Feed { .. }
-                | cli::args::Command::Fetch { .. }
-                | cli::args::Command::Follow { .. }
-                | cli::args::Command::Duplex { .. }
-        )
+    let reading_messages = matches!(
+        cli.command,
+        cli::args::Command::Fetch { .. }
+            | cli::args::Command::Follow { .. }
+            | cli::args::Command::Duplex { .. }
+    );
+    let output_mode = cli.format.unwrap_or_else(|| match default_output_mode() {
+        OutputMode::Human if reading_messages => OutputMode::Compact,
+        mode => mode,
+    });
+    if (output_mode.is_binary() || output_mode == OutputMode::Compact)
+        && !reading_messages
+        && !matches!(cli.command, cli::args::Command::Feed { .. })
     {
         return Err((
             Error::new(ErrorKind::Usage)
-                .with_message("binary output requires a message command")
+                .with_message(if output_mode.is_binary() {
+                    "binary output requires a message command"
+                } else {
+                    "compact output requires a message command"
+                })
                 .with_hint("Use --format json or yaml for reports."),
             color_mode,
             OutputMode::Human,
@@ -199,15 +207,18 @@ fn default_output_mode() -> OutputMode {
 fn requests_output(args: &[OsString]) -> OutputMode {
     let mut args = args.iter().skip(1).take_while(|arg| *arg != "--");
     while let Some(arg) = args.next() {
-        let value = if arg == "--format" {
+        let value = if arg == "--format" || arg == "-o" {
             args.next().and_then(|v| v.to_str())
         } else {
-            arg.to_str().and_then(|v| v.strip_prefix("--format="))
+            arg.to_str().and_then(|v| {
+                v.strip_prefix("--format=")
+                    .or_else(|| v.strip_prefix("-o=").or_else(|| v.strip_prefix("-o")))
+            })
         };
         match value {
             Some("yaml") => return OutputMode::Yaml,
             Some("json") => return OutputMode::Json,
-            Some("pretty" | "lite3" | "lite3-raw") => return OutputMode::Human,
+            Some("compact" | "pretty" | "lite3" | "lite3-raw") => return OutputMode::Human,
             _ => {}
         }
     }
@@ -304,7 +315,10 @@ mod tests {
             ("plasmite access", vec!["format", "help"]),
             ("plasmite access connect", vec!["format", "help"]),
             ("plasmite access disconnect", vec!["format", "help"]),
-            ("plasmite access invite", vec!["format", "help"]),
+            (
+                "plasmite access invite",
+                vec!["format", "help", "read-only"],
+            ),
             ("plasmite access keys", vec!["format", "help"]),
             ("plasmite access list", vec!["format", "help"]),
             ("plasmite access revoke", vec!["format", "help"]),
@@ -340,9 +354,20 @@ mod tests {
             ("plasmite pool", vec!["format", "help"]),
             (
                 "plasmite pool create",
-                vec!["format", "help", "index-capacity", "size"],
+                vec![
+                    "about",
+                    "example",
+                    "format",
+                    "help",
+                    "index-capacity",
+                    "size",
+                ],
             ),
             ("plasmite pool delete", vec!["format", "help"]),
+            (
+                "plasmite pool describe",
+                vec!["about", "example", "format", "help"],
+            ),
             ("plasmite pool info", vec!["format", "help"]),
             ("plasmite pool list", vec!["format", "help"]),
             (

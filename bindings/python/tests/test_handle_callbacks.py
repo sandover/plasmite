@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import plasmite
+from plasmite import _views
 
 
 def closing_int(close):
@@ -76,72 +77,39 @@ class HandleCallbacks(unittest.TestCase):
         with plasmite.UdpClient("udp://127.0.0.1:9701") as client:
             with client.open_pool("callbacks") as pool:
                 self.assert_closed_before_native(
-                    "plsm_udp_pool_feed_lite3",
-                    lambda: pool.feed_lite3(b"unused", closing_int(pool.close)),
+                    "plsm_internal_udp_pool_feed_lite3",
+                    lambda: pool.feed(b"unused", durability=closing_int(pool.close), format="lite3"),
                 )
 
     def test_append_durability(self):
-        for method, symbol, payload in [
-            ("feed_json", "plsm_pool_feed_json", b"{}"),
-            ("feed_json_receipt", "plsm_pool_feed_json_receipt", b"{}"),
-            ("feed_lite3", "plsm_pool_feed_lite3", b"unused"),
-            ("feed_lite3_receipt", "plsm_pool_feed_lite3_receipt", b"unused"),
-        ]:
-            with self.subTest(method=method):
+        for format, payload in [("json", b"{}"), ("lite3", b"unused")]:
+            with self.subTest(format=format):
                 pool = self.fresh_pool()
                 self.assert_closed_before_native(
-                    symbol,
-                    lambda: getattr(pool, method)(
-                        payload,
-                        **({"tags": []} if "json" in method else {}),
-                        durability=closing_int(pool.close),
-                    ),
+                    "plsm_pool_feed",
+                    lambda: pool.feed(payload, format=format, durability=closing_int(pool.close)),
                 )
 
     def test_append_tags(self):
-        for method in ["feed_json", "feed_json_receipt"]:
-            with self.subTest(method=method):
-                pool = self.fresh_pool()
-                self.assert_closed_before_native(
-                    "plsm_pool_" + method,
-                    lambda: getattr(pool, method)(
-                        b"{}",
-                        tags=closing_tags(pool.close),
-                        durability=plasmite.Durability.FAST,
-                    ),
-                )
+        pool = self.fresh_pool()
+        self.assert_closed_before_native(
+            "plsm_pool_feed",
+            lambda: pool.feed(b"{}", format="json", tags=closing_tags(pool.close)),
+        )
 
-    def test_get_sequence_and_open_follow_options(self):
-        for method, symbol in [
-            ("_get_json", "plsm_pool_fetch"),
-            ("_get_lite3", "plsm_pool_fetch_lite3"),
-        ]:
-            with self.subTest(method=method):
-                pool = self.fresh_pool()
-                self.assert_closed_before_native(
-                    symbol, lambda: getattr(pool, method)(closing_int(pool.close))
-                )
-        for method, symbol in [
-            ("follow", "plsm_pool_follow"),
-            ("follow_lite3", "plsm_pool_follow_lite3"),
-        ]:
+    def test_open_read_options(self):
+        for method, symbol in [("fetch", "plsm_pool_fetch"), ("follow", "plsm_pool_follow")]:
             with self.subTest(method=method):
                 pool = self.fresh_pool()
                 self.assert_closed_before_native(
                     symbol, lambda: getattr(pool, method)(since=closing_int(pool.close))
                 )
 
-    def test_stream_timeout(self):
-        for method, symbol in [
-            ("follow", "plsm_stream_next_wait"),
-            ("follow_lite3", "plsm_lite3_stream_next_wait"),
-        ]:
-            with self.subTest(method=method):
-                with getattr(self.pool, method)() as reader:
-                    stream = reader._stream
-                    self.assert_closed_before_native(
-                        symbol, lambda: stream.next_wait(closing_int(stream.close))
-                    )
+    def test_stream_timeout_validation(self):
+        with self.pool.follow() as reader, patch.object(_views.backend, "next_message") as native:
+            with self.assertRaises(plasmite.UsageError):
+                reader.next(closing_int(reader.close))
+            native.assert_not_called()
 
     def test_client_reference(self):
         client = self.client
@@ -178,21 +146,21 @@ class HandleCallbacks(unittest.TestCase):
                 plasmite.UdpPool,
                 plasmite.plsm_udp_pool_t,
                 "feed",
-                "plsm_udp_pool_feed_json",
+                "plsm_internal_udp_pool_feed_json",
                 "tags",
             ),
             (
                 plasmite.UdpPool,
                 plasmite.plsm_udp_pool_t,
                 "follow",
-                "plsm_udp_pool_read",
+                "plsm_internal_udp_pool_read",
                 "read_tags",
             ),
             (
                 plasmite.UdpFollow,
                 plasmite.plsm_udp_follow_t,
                 "next_event",
-                "plsm_udp_follow_next",
+                "plsm_udp_follow_next_view",
                 "timeout",
             ),
         ]:
@@ -239,10 +207,9 @@ class HandleCallbacks(unittest.TestCase):
         value = plasmite._ensure_bytes(Payload(b"{}"), "payload")
         self.assertIs(type(value), bytes)
         self.assertEqual(value, b"{}")
-        self.assertEqual(
-            self.pool.feed_json(Payload(b"{}"), [], plasmite.Durability.FAST),
-            self.pool._get_json(1),
-        )
+        sent = self.pool.feed(Payload(b"{}"), format="json")
+        with self.pool.fetch(since=sent.seq) as reader:
+            self.assertEqual(next(reader).raw, sent.raw)
 
 
 if __name__ == "__main__":

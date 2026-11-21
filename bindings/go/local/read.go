@@ -1,6 +1,7 @@
 package local
 
 /*
+#define PLSM_INTERNAL_ABI
 #include "plasmite.h"
 #include <stdlib.h>
 */
@@ -41,31 +42,31 @@ func (p *Pool) Fetch(opts ...api.ReadOption) (api.Reader, error) {
 	return stream, nil
 }
 
-func (p *Pool) FollowView(opts ...api.ReadOption) (*ViewStream, error) {
+func (p *Pool) followView(opts ...api.ReadOption) (*viewStream, error) {
 	stream, err := p.openRead(false, opts)
 	if err != nil {
 		return nil, err
 	}
-	return &ViewStream{stream: stream}, nil
+	return &viewStream{stream: stream}, nil
 }
 
-func (p *Pool) FetchView(opts ...api.ReadOption) (*ViewStream, error) {
+func (p *Pool) fetchView(opts ...api.ReadOption) (*viewStream, error) {
 	stream, err := p.openRead(true, opts)
 	if err != nil {
 		return nil, err
 	}
-	return &ViewStream{stream: stream}, nil
+	return &viewStream{stream: stream}, nil
 }
 
-func (p *Pool) FollowLite3(opts ...api.ReadOption) (*Lite3Stream, error) {
+func (p *Pool) followLite3(opts ...api.ReadOption) (*lite3Stream, error) {
 	return p.openLite3Read(false, opts)
 }
 
-func (p *Pool) FetchLite3(opts ...api.ReadOption) (*Lite3Stream, error) {
+func (p *Pool) fetchLite3(opts ...api.ReadOption) (*lite3Stream, error) {
 	return p.openLite3Read(true, opts)
 }
 
-func (p *Pool) openLite3Read(finite bool, opts []api.ReadOption) (*Lite3Stream, error) {
+func (p *Pool) openLite3Read(finite bool, opts []api.ReadOption) (*lite3Stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -90,7 +91,7 @@ func (p *Pool) openLite3Read(finite bool, opts []api.ReadOption) (*Lite3Stream, 
 	if status != 0 {
 		return nil, fromCError(nativeErr)
 	}
-	return &Lite3Stream{ptr: stream, reading: make(chan struct{}, 1)}, nil
+	return &lite3Stream{ptr: stream, reading: make(chan struct{}, 1)}, nil
 }
 
 func nativeReadOptions(opts []api.ReadOption) (C.plsm_read_options_t, func(), error) {
@@ -110,7 +111,7 @@ func nativeReadOptions(opts []api.ReadOption) (C.plsm_read_options_t, func(), er
 	}, free, nil
 }
 
-func (p *Pool) openRead(finite bool, opts []api.ReadOption) (*Stream, error) {
+func (p *Pool) openRead(finite bool, opts []api.ReadOption) (*stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -124,35 +125,28 @@ func (p *Pool) openRead(finite bool, opts []api.ReadOption) (*Stream, error) {
 	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
-	var stream *C.plsm_stream_t
+	var reader *C.plsm_stream_t
 	var nativeErr *C.plsm_error_t
 	var status C.int
 	if finite {
-		status = C.plsm_pool_fetch(p.ptr, &options, &stream, &nativeErr)
+		status = C.plsm_pool_fetch(p.ptr, &options, &reader, &nativeErr)
 	} else {
-		status = C.plsm_pool_follow(p.ptr, &options, &stream, &nativeErr)
+		status = C.plsm_pool_follow(p.ptr, &options, &reader, &nativeErr)
 	}
 	if status != 0 {
 		return nil, fromCError(nativeErr)
 	}
-	return &Stream{ptr: stream, reading: make(chan struct{}, 1)}, nil
+	return &stream{ptr: reader, reading: make(chan struct{}, 1)}, nil
 }
 
-func (s *Stream) Next(ctx context.Context) (*api.Message, error) {
+func (s *stream) Next(ctx context.Context) (*api.Message, error) {
 	if s == nil {
 		return nil, closedError("stream")
 	}
-	return readStream(ctx, s.reading, func(wait uint64) (*api.Message, int, error) {
-		raw, status, err := s.nextWait(wait)
-		if err != nil || status != 1 {
-			return nil, status, err
-		}
-		message, err := api.DecodeOwnedMessage(raw)
-		return message, status, err
-	})
+	return readStream(ctx, s.reading, s.nextMessage)
 }
 
-func (s *Lite3Stream) Next(ctx context.Context) (*Lite3Frame, error) {
+func (s *lite3Stream) Next(ctx context.Context) (*lite3Frame, error) {
 	if s == nil {
 		return nil, closedError("stream")
 	}
@@ -272,58 +266,57 @@ func (c *Client) DeletePool(ref PoolRef) error {
 }
 
 func (p *Pool) Feed(value any, tags []string, opts ...FeedOption) (*api.Message, error) {
-	if view, ok := value.(MessageView); ok {
-		return p.Feed(&view, tags, opts...)
+	var view *messageView
+	var err error
+	switch input := value.(type) {
+	case api.Message:
+		return p.Feed(&input, tags, opts...)
+	case *api.Message:
+		view, err = p.feedMessage(input, tags, opts...)
+	case api.Lite3:
+		view, err = p.feedLite3View(input, tags, opts...)
+	case api.JSON:
+		view, err = p.feedEncodedView(C.PLSM_FEED_JSON, input, tags, opts...)
+	default:
+		view, err = p.feedView(value, tags, opts...)
 	}
-	if view, ok := value.(*MessageView); ok {
+	if err != nil {
+		return nil, err
+	}
+	return view.message(), nil
+}
+
+func (p *Pool) feedNativeReceipt(value any, tags []string, opts ...FeedOption) (*feedReceipt, error) {
+	if view, ok := value.(messageView); ok {
+		return p.feedNativeReceipt(&view, tags, opts...)
+	}
+	if view, ok := value.(*messageView); ok {
 		if view == nil || len(view.bytes()) == 0 {
 			return nil, invalidArgumentError("missing message view")
 		}
 		if tags != nil {
 			return nil, invalidArgumentError("cannot supply tags when forwarding a message")
 		}
-		return p.FeedLite3(view.bytes(), opts...)
+		return p.feedLite3Receipt(view.bytes(), opts...)
 	}
-	payload, tags, err := api.EncodeFeedJSON(value, tags)
+	payload, err := json.Marshal(value)
 	if err != nil {
-		return nil, err
+		return nil, invalidArgumentError(err.Error())
 	}
-	raw, err := p.FeedJSON(payload, tags, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return api.DecodeOwnedMessage(raw)
+	return p.feedJSONReceipt(payload, tags, opts...)
 }
 
-func (p *Pool) FeedReceipt(value any, tags []string, opts ...FeedOption) (*api.FeedReceipt, error) {
-	if view, ok := value.(MessageView); ok {
-		return p.FeedReceipt(&view, tags, opts...)
-	}
-	if view, ok := value.(*MessageView); ok {
-		if view == nil || len(view.bytes()) == 0 {
-			return nil, invalidArgumentError("missing message view")
-		}
-		if tags != nil {
-			return nil, invalidArgumentError("cannot supply tags when forwarding a message")
-		}
-		return p.FeedLite3Receipt(view.bytes(), opts...)
-	}
-	payload, tags, err := api.EncodeFeedJSON(value, tags)
-	if err != nil {
-		return nil, err
-	}
-	return p.FeedJSONReceipt(payload, tags, opts...)
-}
+type feedReceipt struct{ Seq, Time uint64 }
 
-func (p *Pool) FeedJSONReceipt(payload []byte, tags []string, opts ...FeedOption) (*api.FeedReceipt, error) {
+func (p *Pool) feedJSONReceipt(payload []byte, tags []string, opts ...FeedOption) (*feedReceipt, error) {
 	return p.feedEncodedReceipt(payload, tags, api.ApplyFeedOptions(opts...).Durability, false)
 }
 
-func (p *Pool) FeedLite3Receipt(payload []byte, opts ...FeedOption) (*api.FeedReceipt, error) {
+func (p *Pool) feedLite3Receipt(payload []byte, opts ...FeedOption) (*feedReceipt, error) {
 	return p.feedEncodedReceipt(payload, nil, api.ApplyFeedOptions(opts...).Durability, true)
 }
 
-func (p *Pool) feedEncodedReceipt(payload []byte, tags []string, durability Durability, lite3 bool) (*api.FeedReceipt, error) {
+func (p *Pool) feedEncodedReceipt(payload []byte, tags []string, durability Durability, lite3 bool) (*feedReceipt, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -355,19 +348,11 @@ func (p *Pool) feedEncodedReceipt(payload []byte, tags []string, durability Dura
 	if status != 0 {
 		return nil, fromCError(nativeErr)
 	}
-	return &api.FeedReceipt{Seq: uint64(receipt.seq), Time: uint64(receipt.time)}, nil
+	return &feedReceipt{Seq: uint64(receipt.seq), Time: uint64(receipt.time)}, nil
 }
 
-func (p *Pool) FeedJSON(payload []byte, tags []string, opts ...FeedOption) ([]byte, error) {
+func (p *Pool) feedJSON(payload []byte, tags []string, opts ...FeedOption) ([]byte, error) {
 	return p.feedEncoded(payload, tags, api.ApplyFeedOptions(opts...).Durability, false)
-}
-
-func (p *Pool) FeedLite3(payload []byte, opts ...FeedOption) (*api.Message, error) {
-	raw, err := p.feedEncoded(payload, nil, api.ApplyFeedOptions(opts...).Durability, true)
-	if err != nil {
-		return nil, err
-	}
-	return api.DecodeOwnedMessage(raw)
 }
 
 func (p *Pool) feedEncoded(payload []byte, tags []string, durability Durability, lite3 bool) ([]byte, error) {

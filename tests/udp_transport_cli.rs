@@ -150,7 +150,7 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     assert!(copied.stdout.is_empty());
     wait_for_seq(&pool_path, 3)?;
     let frame = Pool::open(&pool_path)?.get(3)?;
-    let stored = plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload)?;
+    let stored = plasmite::api::MessageEnvelope::from_lite3(frame.seq, frame.time, &frame.payload)?;
     assert_eq!(stored.data, source["data"]);
     assert_eq!(stored.meta.tags, vec!["alert"]);
 

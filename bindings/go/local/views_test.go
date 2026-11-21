@@ -11,7 +11,7 @@ import (
 func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "views")
-	original, err := pool.FeedJSON([]byte(`{"sensor":"north","metrics":{"power":7},"large":9223372036854775807,"zero":-0.0,"values":[1,null,"é"]}`), []string{"test"})
+	original, err := pool.feedJSON([]byte(`{"sensor":"north","metrics":{"power":7},"large":9223372036854775807,"zero":-0.0,"values":[1,null,"é"]}`), []string{"test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selector, err := Prepare("/sensor", "/metrics/power", "/large", "/values/2", "/missing")
+	selector, err := prepareSelector("/sensor", "/metrics/power", "/large", "/values/2", "/missing")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestManagedViewRetainsSnapshotAndCopiesExports(t *testing.T) {
 func TestManagedViewRetriesCapacityAndAllowsConcurrentReads(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "large-views")
 	text := strings.Repeat("é", 40_000)
-	receipt, err := pool.FeedReceipt(map[string]any{"text": text, "power": 7}, nil)
+	receipt, err := pool.feedNativeReceipt(map[string]any{"text": text, "power": 7}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestManagedViewRetriesCapacityAndAllowsConcurrentReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selector, err := Prepare("/text", "/power")
+	selector, err := prepareSelector("/text", "/power")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
 		`{"sensor":"north","metrics":{"power":1.5},"zero":1}`,
 		`{"sensor":"north","metrics":{"power":7},"zero":"bad"}`,
 	} {
-		receipt, err := pool.FeedJSONReceipt([]byte(text), nil)
+		receipt, err := pool.feedJSONReceipt([]byte(text), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,7 +187,7 @@ func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
 
 func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "duplicate-views")
-	receipt, err := pool.FeedReceipt(map[string]any{"ab": 1, "bA": 2}, nil)
+	receipt, err := pool.feedNativeReceipt(map[string]any{"ab": 1, "bA": 2}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	both, err := Prepare("/ab", "/bA")
+	both, err := prepareSelector("/ab", "/bA")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	last, err := Prepare("/ab")
+	last, err := prepareSelector("/ab")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
 
 func TestManagedViewPartialASCIIAndCaseInsensitiveFieldsStayNative(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "partial-ascii")
-	receipt, err := pool.FeedReceipt(map[string]any{"SENSOR": "north", "metrics": map[string]any{"POWER": 7, "unused": "ignore"}, "ignored": strings.Repeat("x", 64*1024)}, nil)
+	receipt, err := pool.feedNativeReceipt(map[string]any{"SENSOR": "north", "metrics": map[string]any{"POWER": 7, "unused": "ignore"}, "ignored": strings.Repeat("x", 64*1024)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

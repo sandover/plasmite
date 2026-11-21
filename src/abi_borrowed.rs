@@ -103,6 +103,37 @@ pub unsafe extern "C" fn plsm_go_append_sealed(
     )
 }
 
+// A local append can share the checked Go snapshot when forwarding does not
+// change the payload. Status 1 asks Go to use the canonical feed path instead.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_go_append_checked_view(
+    pool: *mut crate::abi::plsm_pool,
+    data: *const u8,
+    len: usize,
+    meta_node: usize,
+    durability: u32,
+    seq: *mut u64,
+    timestamp: *mut u64,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    let handle = match crate::abi::borrow_pool(pool, error) {
+        Ok(handle) => handle,
+        Err(code) => return code,
+    };
+    if matches!(handle.pool, crate::abi_remote::PoolHandle::Remote(_)) {
+        return 1;
+    }
+    let count =
+        unsafe { bytes(data, len) }.and_then(|data| Lite3DocRef::new(data).count_at(meta_node));
+    match count {
+        Ok(1) => unsafe {
+            plsm_go_append_sealed(pool, data, len, durability, seq, timestamp, error)
+        },
+        Ok(_) => 1,
+        Err(err) => fail(error, err),
+    }
+}
+
 fn corrupt() -> Error {
     Error::new(ErrorKind::Corrupt).with_message("invalid borrowed Lite3 view")
 }

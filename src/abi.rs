@@ -11,6 +11,7 @@
 #![allow(clippy::result_large_err)]
 
 use crate::abi_remote::{PoolHandle, RemoteFrames};
+use crate::api::internal::{RemotePoolTransport, UdpPoolTransport};
 use crate::api::{Feed, LocalClient, PoolOptions, PoolRef, Read, Since, TailOutcome, TailState};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::notify::CancelSignal;
@@ -24,6 +25,9 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+#[path = "abi_async.rs"]
+mod async_io;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_abi_major() -> u32 {
@@ -44,6 +48,7 @@ pub struct plsm_pool {
 pub struct plsm_stream {
     state: Mutex<StreamState>,
     cancel: Arc<CancelSignal>,
+    _subscription: Option<crate::api::notify::PoolSubscription>,
 }
 
 #[repr(C)]
@@ -53,7 +58,7 @@ pub struct plsm_lite3_stream {
 }
 
 enum StreamState {
-    Local { pool: Box<Pool>, state: TailState },
+    Local { pool: Arc<Pool>, state: TailState },
     Remote(RemoteFrames),
 }
 
@@ -77,7 +82,7 @@ pub struct plsm_udp_client {
 
 #[repr(C)]
 pub struct plsm_udp_pool {
-    pool: crate::api::UdpPool,
+    pub(crate) pool: crate::api::UdpPool,
 }
 
 #[repr(C)]
@@ -87,7 +92,7 @@ pub struct plsm_udp_follow {
 }
 
 enum UdpFollower {
-    Raw(crate::api::UdpFollow),
+    Raw(crate::api::UdpRawFollow),
     Views(crate::api::UdpViewFollow),
 }
 
@@ -192,6 +197,57 @@ pub extern "C" fn plsm_pool_create(
     out_pool: *mut *mut plsm_pool,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    create_described_pool(
+        client,
+        pool_ref,
+        size_bytes,
+        Default::default(),
+        out_pool,
+        out_err,
+    )
+}
+
+fn description_from_json(
+    data: *const u8,
+    len: usize,
+) -> Result<crate::api::PoolDescription, Error> {
+    if data.is_null() || len > isize::MAX as usize {
+        return Err(Error::new(ErrorKind::Usage).with_message("invalid pool description buffer"));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    serde_json::from_slice(bytes).map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid pool description JSON")
+            .with_source(err)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_create_described(
+    client: *mut plsm_client,
+    pool_ref: *const c_char,
+    size_bytes: u64,
+    description: *const u8,
+    description_len: usize,
+    out_pool: *mut *mut plsm_pool,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    match description_from_json(description, description_len) {
+        Ok(description) => {
+            create_described_pool(client, pool_ref, size_bytes, description, out_pool, out_err)
+        }
+        Err(err) => fail(out_err, err),
+    }
+}
+
+fn create_described_pool(
+    client: *mut plsm_client,
+    pool_ref: *const c_char,
+    size_bytes: u64,
+    description: crate::api::PoolDescription,
+    out_pool: *mut *mut plsm_pool,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
     if out_pool.is_null() {
         return fail(
             out_err,
@@ -211,7 +267,7 @@ pub extern "C" fn plsm_pool_create(
     } else {
         size_bytes
     };
-    let options = PoolOptions::new(size);
+    let options = PoolOptions::new(size).with_description(description);
     let result = match &pool_ref {
         PoolRef::Uri(uri) => crate::api::RemoteClient::for_pool_uri(uri)
             .and_then(|client| client.create_pool(&pool_ref, options))
@@ -283,19 +339,20 @@ pub extern "C" fn plsm_pool_free(pool: *mut plsm_pool) {
     }
 }
 
-fn stream_wait(timeout_ms: u64) -> Option<Duration> {
+pub(crate) fn stream_wait(timeout_ms: u64) -> Option<Duration> {
     (timeout_ms != u64::MAX).then(|| Duration::from_millis(timeout_ms))
 }
 
-fn read_stream(
+pub(crate) fn read_stream<T>(
     stream: &plsm_stream,
     wait: Option<Duration>,
-) -> Result<TailOutcome<Vec<u8>>, Error> {
+    select: impl Fn(crate::api::FrameRef, &[String]) -> Result<Option<T>, Error>,
+) -> Result<TailOutcome<T>, Error> {
     let mut state = stream
         .state
         .lock()
         .map_err(|_| Error::new(ErrorKind::Internal).with_message("stream state is unavailable"))?;
-    state.next(wait, crate::api::select_frame_json)
+    state.next(wait, select)
 }
 
 fn read_lite3_stream(
@@ -309,7 +366,7 @@ fn read_lite3_stream(
     state.next(wait, crate::api::select_lite3_frame)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_stream_next_wait")]
 pub extern "C" fn plsm_stream_next_wait(
     stream: *mut plsm_stream,
     timeout_ms: u64,
@@ -326,7 +383,11 @@ pub extern "C" fn plsm_stream_next_wait(
         Ok(stream) => stream,
         Err(code) => return code,
     };
-    match read_stream(stream, stream_wait(timeout_ms)) {
+    match read_stream(
+        stream,
+        stream_wait(timeout_ms),
+        crate::api::select_frame_json,
+    ) {
         Ok(TailOutcome::Item(message)) => match write_json_buf(out_message, message) {
             Ok(()) => 1,
             Err(err) => fail(out_err, err),
@@ -338,7 +399,7 @@ pub extern "C" fn plsm_stream_next_wait(
     }
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_lite3_stream_next_wait")]
 pub extern "C" fn plsm_lite3_stream_next_wait(
     stream: *mut plsm_lite3_stream,
     timeout_ms: u64,
@@ -374,7 +435,7 @@ pub extern "C" fn plsm_stream_cancel(stream: *mut plsm_stream) {
     }
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_lite3_stream_cancel")]
 pub extern "C" fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream) {
     if let Some(stream) = unsafe { stream.as_ref() } {
         stream.cancel.cancel();
@@ -459,7 +520,7 @@ pub extern "C" fn plsm_udp_pool_free(pool: *mut plsm_udp_pool) {
     }
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_udp_pool_feed_lite3")]
 pub extern "C" fn plsm_udp_pool_feed_lite3(
     pool: *mut plsm_udp_pool,
     payload: *const u8,
@@ -490,7 +551,7 @@ pub extern "C" fn plsm_udp_pool_feed_lite3(
 
 /// Returns 1 for an event, 0 when the wait expires, 2 when the stream ends,
 /// 3 when a concurrent caller cancels the wait, or -1 on error.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_udp_follow_next")]
 pub extern "C" fn plsm_udp_follow_next(
     follow: *mut plsm_udp_follow,
     timeout_ms: u64,
@@ -613,7 +674,7 @@ pub extern "C" fn plsm_udp_follow_next_view(
         Ok((reader.next_event_timeout(wait)?, reader.is_finished()))
     }) {
         Ok(TailOutcome::Item(event)) => {
-            use crate::api::{UdpEvent, UdpStreamEvent};
+            use crate::api::{UdpRawEvent as UdpEvent, UdpStreamEvent};
             let control = match event {
                 UdpStreamEvent::Frame(view) => {
                     let (seq, time) = (view.seq, view.time);
@@ -704,7 +765,7 @@ pub extern "C" fn plsm_udp_event_free(event: *mut plsm_udp_event) {
     }
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_udp_event_message")]
 pub extern "C" fn plsm_udp_event_message(
     event: *const plsm_udp_event,
     out_message: *mut plsm_buf,
@@ -748,7 +809,7 @@ pub extern "C" fn plsm_stream_free(stream: *mut plsm_stream) {
     }
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_lite3_stream_free")]
 pub extern "C" fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream) {
     if stream.is_null() {
         return;
@@ -773,7 +834,7 @@ pub extern "C" fn plsm_buf_free(buf: *mut plsm_buf) {
     }
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_lite3_frame_free")]
 pub extern "C" fn plsm_lite3_frame_free(frame: *mut plsm_lite3_frame) {
     if frame.is_null() {
         return;
@@ -829,7 +890,7 @@ pub(crate) fn borrow_pool<'a>(
     unsafe { Ok(&mut *pool) }
 }
 
-fn borrow_stream<'a>(
+pub(crate) fn borrow_stream<'a>(
     stream: *mut plsm_stream,
     out_err: *mut *mut plsm_error,
 ) -> Result<&'a plsm_stream, i32> {
@@ -926,20 +987,20 @@ fn parse_utf8_cstr(input: *const c_char, name: &str) -> Result<String, Error> {
         })
 }
 
-fn write_udp_event(out: *mut plsm_udp_event, event: crate::api::UdpEvent) -> Result<(), Error> {
+fn write_udp_event(out: *mut plsm_udp_event, event: crate::api::UdpRawEvent) -> Result<(), Error> {
     if out.is_null() {
         return Err(Error::new(ErrorKind::Usage).with_message("out_event is null"));
     }
     let out = unsafe { &mut *out };
     *out = plsm_udp_event::default();
     match event {
-        crate::api::UdpEvent::Frame(frame) => {
+        crate::api::UdpRawEvent::Frame(frame) => {
             out.kind = 1;
             out.seq = frame.seq;
             out.time = frame.time;
             out.payload = write_udp_payload(frame.payload);
         }
-        crate::api::UdpEvent::Skip {
+        crate::api::UdpRawEvent::Skip {
             first,
             last,
             reason,
@@ -954,7 +1015,7 @@ fn write_udp_event(out: *mut plsm_udp_event, event: crate::api::UdpEvent) -> Res
                 crate::api::UdpSkipReason::Pressure => 3,
             };
         }
-        crate::api::UdpEvent::Progress {
+        crate::api::UdpRawEvent::Progress {
             start_seq,
             next_seq,
             end_seq,
@@ -988,7 +1049,7 @@ fn write_udp_payload(payload: Vec<u8>) -> plsm_buf {
 
 fn write_message_buf(
     out_message: *mut plsm_buf,
-    message: crate::api::Message,
+    message: crate::api::MessageEnvelope,
 ) -> Result<(), Error> {
     if out_message.is_null() {
         return Err(Error::new(ErrorKind::Usage).with_message("out_message is null"));
@@ -998,7 +1059,8 @@ fn write_message_buf(
         message.time_rfc3339(),
         message.meta.tags,
         message.data,
-    );
+    )
+    .with_sender(message.meta.sender);
     let json_bytes = serde_json::to_vec(&wire).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("failed to serialize message")
@@ -1137,6 +1199,22 @@ pub extern "C" fn plsm_pool_info(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_set_description(
+    pool: *mut plsm_pool,
+    description: *const u8,
+    description_len: usize,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    let pool = match borrow_pool(pool, error) {
+        Ok(pool) => pool,
+        Err(code) => return code,
+    };
+    description_from_json(description, description_len)
+        .and_then(|description| pool.pool.set_description(description))
+        .map_or_else(|err| fail(error, err), |()| 0)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn plsm_pool_list(
     client: *mut plsm_client,
     out: *mut plsm_buf,
@@ -1188,7 +1266,7 @@ fn write_wire(out: *mut plsm_buf, value: &impl serde::Serialize) -> Result<(), E
     write_json_buf(out, bytes)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_feed_json")]
 pub extern "C" fn plsm_pool_feed_json(
     pool: *mut plsm_pool,
     bytes: *const u8,
@@ -1236,7 +1314,7 @@ pub extern "C" fn plsm_pool_feed_json(
     result.map_or_else(|err| fail(error, err), |()| 0)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_feed_lite3")]
 pub extern "C" fn plsm_pool_feed_lite3(
     pool: *mut plsm_pool,
     bytes: *const u8,
@@ -1265,7 +1343,7 @@ pub extern "C" fn plsm_pool_feed_lite3(
     result.map_or_else(|err| fail(error, err), |()| 0)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_feed_json_receipt")]
 pub extern "C" fn plsm_pool_feed_json_receipt(
     pool: *mut plsm_pool,
     bytes: *const u8,
@@ -1298,7 +1376,7 @@ pub extern "C" fn plsm_pool_feed_json_receipt(
     result.map_or_else(|err| fail(error, err), |()| 0)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_feed_lite3_receipt")]
 pub extern "C" fn plsm_pool_feed_lite3_receipt(
     pool: *mut plsm_pool,
     bytes: *const u8,
@@ -1402,7 +1480,7 @@ fn read_state(
     let options = parse_read(options).map_err(|err| fail(error, err))?;
     let state = (|| match &handle.pool {
         PoolHandle::Local(source) => {
-            let pool = Box::new(source.reopen()?);
+            let pool = Arc::new(source.reopen()?);
             #[cfg(not(any(target_os = "linux", windows)))]
             let options = options.cancel(cancel.flag());
             let state = pool.read_state(options, live)?;
@@ -1444,11 +1522,73 @@ fn open_text(
     let stream = Box::new(plsm_stream {
         state: Mutex::new(state),
         cancel,
+        _subscription: None,
     });
     unsafe {
         *out = Box::into_raw(stream);
     }
     0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_internal_local_async_read(
+    handle: *mut plsm_pool,
+    options: *const plsm_read_options,
+    live: bool,
+    wake: extern "C" fn(u64, bool),
+    token: u64,
+    out: *mut *mut plsm_stream,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    use crate::api::notify::SharedPoolWaiters;
+    use std::sync::OnceLock;
+
+    static WAITERS: OnceLock<SharedPoolWaiters> = OnceLock::new();
+    if out.is_null() {
+        return fail(
+            error,
+            Error::new(ErrorKind::Usage).with_message("out_stream is null"),
+        );
+    }
+    let handle = match borrow_pool(handle, error) {
+        Ok(handle) => handle,
+        Err(code) => return code,
+    };
+    let result = (|| {
+        let PoolHandle::Local(source) = &handle.pool else {
+            return Err(Error::new(ErrorKind::Usage).with_message("expected a local pool"));
+        };
+        let read = parse_read(options)?;
+        let (pool, subscription) = if live {
+            let (pool, sub) = WAITERS.get_or_init(SharedPoolWaiters::default).subscribe(
+                source,
+                || source.reopen().map(Arc::new),
+                move |removed| wake(token, removed),
+            )?;
+            (pool, Some(sub))
+        } else {
+            (Arc::new(source.reopen()?), None)
+        };
+        let cancel = Arc::new(CancelSignal::default());
+        let state = pool.shared_read_state(read.cancel(cancel.flag()), live)?;
+        Ok(Box::new(plsm_stream {
+            state: Mutex::new(StreamState::Local { pool, state }),
+            cancel,
+            _subscription: subscription,
+        }))
+    })();
+    match result {
+        Ok(stream) => {
+            unsafe { *out = Box::into_raw(stream) };
+            0
+        }
+        Err(err) => fail(error, err),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_internal_pool_is_remote(pool: *const plsm_pool) -> bool {
+    unsafe { pool.as_ref() }.is_some_and(|pool| matches!(pool.pool, PoolHandle::Remote(_)))
 }
 
 fn open_binary(
@@ -1498,7 +1638,7 @@ pub extern "C" fn plsm_pool_fetch(
     open_text(pool, options, false, out, error)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_follow_lite3")]
 pub extern "C" fn plsm_pool_follow_lite3(
     pool: *mut plsm_pool,
     options: *const plsm_read_options,
@@ -1508,7 +1648,7 @@ pub extern "C" fn plsm_pool_follow_lite3(
     open_binary(pool, options, true, out, error)
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_fetch_lite3")]
 pub extern "C" fn plsm_pool_fetch_lite3(
     pool: *mut plsm_pool,
     options: *const plsm_read_options,
@@ -1519,7 +1659,7 @@ pub extern "C" fn plsm_pool_fetch_lite3(
 }
 
 // A successful UDP feed only confirms local socket admission.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_udp_pool_feed_json")]
 pub extern "C" fn plsm_udp_pool_feed_json(
     pool: *mut plsm_udp_pool,
     bytes: *const u8,
@@ -1543,6 +1683,26 @@ pub extern "C" fn plsm_udp_pool_feed_json(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_follow(
+    pool: *mut plsm_udp_pool,
+    options: *const plsm_read_options,
+    out: *mut *mut plsm_udp_follow,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    plsm_udp_pool_read(pool, options, 1, 1, out, error)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_fetch(
+    pool: *mut plsm_udp_pool,
+    options: *const plsm_read_options,
+    out: *mut *mut plsm_udp_follow,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    plsm_udp_pool_read(pool, options, 0, 1, out, error)
+}
+
+#[unsafe(export_name = "plsm_internal_udp_pool_read")]
 pub extern "C" fn plsm_udp_pool_read(
     pool: *mut plsm_udp_pool,
     options: *const plsm_read_options,
@@ -1562,8 +1722,8 @@ pub extern "C" fn plsm_udp_pool_read(
             .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("UDP pool is null"))?;
         let read = parse_read(options)?;
         let follow = match (live == 1, views == 1) {
-            (true, false) => UdpFollower::Raw(handle.pool.follow(read)?),
-            (false, false) => UdpFollower::Raw(handle.pool.fetch(read)?),
+            (true, false) => UdpFollower::Raw(handle.pool.follow_raw(read)?),
+            (false, false) => UdpFollower::Raw(handle.pool.fetch_raw(read)?),
             (true, true) => UdpFollower::Views(handle.pool.follow_view(read)?),
             (false, true) => UdpFollower::Views(handle.pool.fetch_view(read)?),
         };
@@ -2424,4 +2584,4 @@ mod tests {
 }
 
 #[path = "abi_batches.rs"]
-mod batches;
+pub(crate) mod batches;

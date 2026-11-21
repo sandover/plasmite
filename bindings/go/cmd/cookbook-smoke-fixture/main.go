@@ -56,14 +56,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("feed: %w", err)
 	}
-	if msg.Seq < 1 {
+	if msg.Seq() < 1 {
 		return errors.New("expected positive seq")
 	}
-	if len(msg.Meta.Tags) != 1 || msg.Meta.Tags[0] != "cookbook" {
-		return fmt.Errorf("unexpected tags: %#v", msg.Meta.Tags)
+	if len(msg.Tags()) != 1 || msg.Tags()[0] != "cookbook" {
+		return fmt.Errorf("unexpected tags: %#v", msg.Tags())
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(msg.Data, &payload); err != nil {
+	if err := json.Unmarshal(msg.Data(), &payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
 	if payload["task"] != "resize" {
@@ -80,8 +80,8 @@ func run() error {
 	}
 
 	out, err := json.Marshal(map[string]any{
-		"seq":  msg.Seq,
-		"tags": msg.Meta.Tags,
+		"seq":  msg.Seq(),
+		"tags": msg.Tags(),
 		"data": payload,
 	})
 	if err != nil {

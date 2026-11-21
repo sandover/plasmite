@@ -2,6 +2,7 @@
  * Build against a fresh release library; run through bench_builder.py for repeats.
  */
 #define _POSIX_C_SOURCE 200809L
+#define PLSM_INTERNAL_ABI
 #include "plasmite.h"
 #include <inttypes.h>
 #include <stdio.h>

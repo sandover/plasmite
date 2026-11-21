@@ -3,9 +3,11 @@
 use super::message_stream::{InputFormat, InputRecord, read_records};
 use super::output::OutputMode;
 use super::output_support::{emit_lite3, emit_message};
-use super::support::message_to_json;
+use super::support::message_from_lite3;
 use crate::ColorMode;
-use plasmite::api::{Durability, Error, ErrorKind, Feed, Message, Pool, RemotePool, lite3};
+use plasmite::api::{
+    Durability, Error, ErrorKind, Feed, FeedInput, Message, Pool, RemotePool, lite3,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use std::io::Read;
@@ -21,7 +23,6 @@ struct MessageInput {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct MessageMeta {
     tags: Vec<String>,
 }
@@ -36,7 +37,7 @@ fn is_message_shape(value: &Value) -> bool {
                 .all(|key| object.contains_key(*key))
             && object["meta"]
                 .as_object()
-                .is_some_and(|meta| meta.len() == 1 && meta.contains_key("tags"))
+                .is_some_and(|meta| meta.contains_key("tags"))
     })
 }
 
@@ -138,15 +139,10 @@ struct IngestOptions<'a> {
     stop: Option<&'a AtomicBool>,
 }
 
-enum Receipt {
-    Text(Message),
-    Binary { seq: u64, timestamp_ns: u64 },
-}
-
 fn ingest_with_append(
     reader: impl Read,
     options: IngestOptions<'_>,
-    mut append: impl FnMut(&[u8]) -> Result<Receipt, Error>,
+    mut append: impl FnMut(&[u8]) -> Result<Message, Error>,
 ) -> Result<u64, Error> {
     let count = read_records(reader, options.input, |record| {
         let payload = record_payload(record, options.tags)?;
@@ -159,13 +155,14 @@ fn ingest_with_append(
         let receipt = append(&payload)?;
         // A stdout error stops ingestion after the append has succeeded.
         if options.emit {
-            match receipt {
-                Receipt::Text(message) => {
-                    emit_message(message_to_json(message), options.output, options.color)?;
-                }
-                Receipt::Binary { seq, timestamp_ns } => {
-                    emit_lite3(seq, timestamp_ns, &payload, options.output)?;
-                }
+            if options.output.is_binary() {
+                emit_lite3(receipt.seq, receipt.time, receipt.raw(), options.output)?;
+            } else {
+                emit_message(
+                    message_from_lite3(receipt.seq, receipt.time, receipt.raw())?,
+                    options.output,
+                    options.color,
+                )?;
             }
         }
         Ok(())
@@ -188,17 +185,8 @@ pub(crate) fn ingest_from_stdin(
     };
     let feed = Feed::new().durability(ctx.durability);
     ingest_with_append(reader, options, |payload| {
-        if options.output.is_binary() {
-            let receipt = ctx.pool_handle.feed_lite3_receipt(payload, feed.clone())?;
-            Ok(Receipt::Binary {
-                seq: receipt.seq,
-                timestamp_ns: receipt.time,
-            })
-        } else {
-            ctx.pool_handle
-                .feed_lite3(payload, feed.clone())
-                .map(Receipt::Text)
-        }
+        ctx.pool_handle
+            .feed(FeedInput::Lite3(payload), feed.clone())
     })
 }
 
@@ -217,17 +205,8 @@ pub(crate) fn ingest_from_stdin_remote(
     };
     let feed = Feed::new().durability(ctx.durability);
     ingest_with_append(reader, options, |payload| {
-        if options.output.is_binary() {
-            let receipt = ctx.remote_pool.feed_lite3_receipt(payload, feed.clone())?;
-            Ok(Receipt::Binary {
-                seq: receipt.seq,
-                timestamp_ns: receipt.time,
-            })
-        } else {
-            ctx.remote_pool
-                .feed_lite3(payload, feed.clone())
-                .map(Receipt::Text)
-        }
+        ctx.remote_pool
+            .feed(FeedInput::Lite3(payload), feed.clone())
     })
 }
 
@@ -243,7 +222,7 @@ pub(crate) fn ingest_from_stdin_udp(
         if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
             return Ok(());
         }
-        pool.feed_lite3(&payload, Feed::new())
+        pool.feed(FeedInput::Lite3(&payload), Feed::new())
     })
 }
 
@@ -296,11 +275,21 @@ mod tests {
             json!({"seq": null, "data": {}}),
             json!({"time": "bad", "data": {}}),
             json!({"seq": 7, "time": "bad", "meta": {}, "data": {}}),
-            json!({"seq": 7, "time": "bad", "meta": {"tags": [], "app": true}, "data": {}}),
         ] {
             assert!(!is_message_shape(&value));
             assert!(record_payload(InputRecord::Json(value), &[]).is_ok());
         }
+    }
+
+    #[test]
+    fn forwarding_ignores_other_metadata() {
+        let input = json!({"seq":7,"time":"2026-10-14T00:00:00Z",
+            "meta":{"tags":["keep"],"sender":"old","custom":true},"data":{"value":1}});
+        let bytes = record_payload(InputRecord::Json(input), &[]).unwrap();
+        let message = Message::from_lite3(1, 1, &bytes).unwrap();
+        assert_eq!(message.tags().unwrap(), ["keep"]);
+        assert_eq!(message.data().unwrap(), &json!({"value":1}));
+        assert_eq!(message.sender(), None);
     }
 
     #[test]

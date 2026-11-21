@@ -1,3 +1,4 @@
+#define PLSM_INTERNAL_ABI
 #include "plasmite.h"
 
 #include <stdint.h>

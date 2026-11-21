@@ -69,8 +69,9 @@ FIRST LOCAL WORKFLOW
   $ plasmite feed chat '{"from":"alice","msg":"hello"}'       # Terminal 2"#,
     after_help = r#"OUTPUT
   Readable in a terminal; compact JSON in a pipe or file.
-  Use --format pretty|json|yaml|lite3|lite3-raw to choose explicitly.
-  feed, fetch, follow, and duplex write complete messages. Pipes preserve data and tags.
+  follow, fetch, and duplex show one line per message in a terminal.
+  Use -o or --format to choose compact, pretty, json, yaml, lite3, or lite3-raw.
+  Pipes preserve complete messages, including data and tags.
   YAML marks each document with --- and ...; Lite3 marks each binary message with its length.
   Errors and notices go to stderr. Help and completion stay text.
 
@@ -102,15 +103,16 @@ pub(crate) struct Cli {
         default_value = "auto",
         value_enum,
         help_heading = "Global options",
-        help = "Colorize stderr diagnostics and pretty JSON output"
+        help = "Control colors in terminal output and diagnostics"
     )]
     pub(crate) color: ColorMode,
     #[arg(
         long,
+        short = 'o',
         global = true,
         value_enum,
         help_heading = "Global options",
-        help = "Output format (default: pretty in a terminal, json in a pipe)"
+        help = "Choose an output format (default: readable in a terminal, json in a pipe)"
     )]
     pub(crate) format: Option<super::output::OutputMode>,
 
@@ -130,7 +132,9 @@ pub(crate) use super::message_stream::InputFormat as InputMode;
 impl ColorMode {
     pub(crate) fn use_color(self, is_tty: bool) -> bool {
         match self {
-            ColorMode::Auto => is_tty,
+            ColorMode::Auto => {
+                is_tty && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty())
+            }
             ColorMode::Always => true,
             ColorMode::Never => false,
         }
@@ -288,7 +292,8 @@ Give a sequence as a positional argument to fetch exactly one message."#,
   $ plasmite fetch builds 7 --format lite3-raw > build.lite3
 
 OUTPUT
-  Writes complete messages; --format selects the same encoding as follow and feed.
+  Shows one line per message in a terminal or complete JSON messages in a pipe.
+  Use --format pretty to see the complete message as indented JSON.
   lite3 writes framed messages; lite3-raw requires an exact sequence.
   Local and remote reads share these formats. Errors go to stderr."#
     )]
@@ -515,6 +520,19 @@ NOTES
             help = "Inline index slots (default: auto; 0 disables; may use at most half the pool)"
         )]
         index_capacity: Option<u32>,
+        #[arg(long, help = "What the pool carries")]
+        about: Option<String>,
+        #[arg(long, help = "Example message data as a JSON object")]
+        example: Option<String>,
+    },
+    #[command(about = "Replace a pool's description and example")]
+    Describe {
+        #[arg(help = "Pool name, path or HTTPS URL")]
+        name: String,
+        #[arg(long, help = "What the pool carries")]
+        about: Option<String>,
+        #[arg(long, help = "Example message data as a JSON object")]
+        example: Option<String>,
     },
     #[command(
         arg_required_else_help = true,
@@ -584,7 +602,7 @@ pub(crate) enum AccessSubcommand {
     #[command(
         display_order = 0,
         about = "Create a named access key on the server machine",
-        after_help = "Keys grant full access to the selected pool directory. Readable in a terminal; compact JSON in a pipe; --format json emits JSON and --format yaml emits the same report, including the new key, as YAML."
+        after_help = "Keys grant full access by default. Use --read-only to allow reads and pool inspection. Readable in a terminal; compact JSON in a pipe; --format json emits JSON and --format yaml emits the same report, including the new key, as YAML."
     )]
     Invite {
         #[arg(
@@ -602,6 +620,8 @@ pub(crate) enum AccessSubcommand {
             hide = true
         )]
         legacy_name: Option<String>,
+        #[arg(long, help = "Allow reads and pool inspection only")]
+        read_only: bool,
     },
     #[command(
         display_order = 3,

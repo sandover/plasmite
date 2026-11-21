@@ -1,4 +1,5 @@
 //! Full UDP transport over actual server processes and deterministic packet loss.
+use plasmite::api::internal::UdpPoolTransport;
 use plasmite::api::{
     AppendOptions, Durability, ErrorKind, LocalClient, PoolOptions, PoolRef, Read, Since,
     UdpClient, UdpEvent, UdpFollow,
@@ -122,7 +123,7 @@ impl Drop for Server {
         let _ = self.child.wait();
     }
 }
-fn frame(stream: &mut UdpFollow) -> Result<plasmite::api::UdpFrame, Box<dyn std::error::Error>> {
+fn frame(stream: &mut UdpFollow) -> Result<plasmite::api::Message, Box<dyn std::error::Error>> {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(UdpEvent::Frame(frame)) =
@@ -143,8 +144,8 @@ fn send_live_follow_retains_original_attachment_and_real_identity() -> TestResul
     let received = frame(&mut stream)?;
     assert_eq!(received.seq, 1);
     assert!(received.time > 0);
-    assert_eq!(received.payload, payload.as_slice());
-    assert_eq!(received.message()?.data, json!({"sample":42}));
+    assert_eq!(received.raw(), payload.as_slice());
+    assert_eq!(*received.data()?, json!({"sample":42}));
     let stored = server
         .local()
         .open_pool(&PoolRef::name("events"), false)?
@@ -161,7 +162,7 @@ fn localhost_uses_ipv4_and_explicit_ipv6_supports_udp_feed_and_follow() -> TestR
     let mut stream = local.follow(Read::new())?;
     let ipv4_value = json!({"family":"ipv4"});
     local.feed(&ipv4_value, plasmite::api::Feed::new())?;
-    assert_eq!(frame(&mut stream)?.message()?.data, ipv4_value);
+    assert_eq!(*frame(&mut stream)?.data()?, ipv4_value);
 
     let bind = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 0));
     let ipv6 = match Server::start_on(true, 64, bind) {
@@ -183,7 +184,7 @@ fn localhost_uses_ipv4_and_explicit_ipv6_supports_udp_feed_and_follow() -> TestR
     let mut stream = local.follow(Read::new())?;
     let ipv6_value = json!({"family":"ipv6"});
     local.feed(&ipv6_value, plasmite::api::Feed::new())?;
-    assert_eq!(frame(&mut stream)?.message()?.data, ipv6_value);
+    assert_eq!(*frame(&mut stream)?.data()?, ipv6_value);
     Ok(())
 }
 #[test]
@@ -219,11 +220,8 @@ fn maximum_sized_lite3_message_is_stored_and_followed_byte_for_byte() -> TestRes
     udp.feed_lite3(payload.as_slice(), plasmite::api::Feed::new())?;
     let received = frame(&mut stream)?;
     assert_eq!(received.seq, 1);
-    assert_eq!(
-        wire::DATA_HEADER + received.payload.len(),
-        wire::MAX_DATAGRAM
-    );
-    assert_eq!(received.payload, payload.as_slice());
+    assert_eq!(wire::DATA_HEADER + received.raw().len(), wire::MAX_DATAGRAM);
+    assert_eq!(received.raw(), payload.as_slice());
     let stored = server
         .local()
         .open_pool(&PoolRef::name("events"), false)?
@@ -243,9 +241,9 @@ fn pool_created_after_server_start_accepts_udp_append_and_follow() -> TestResult
     udp.feed(&value, plasmite::api::Feed::new())?;
     let received = frame(&mut stream)?;
     assert_eq!(received.seq, 1);
-    assert_eq!(received.message()?.data, value);
+    assert_eq!(*received.data()?, value);
     let stored = local.open_pool(&PoolRef::name("later"), false)?.get(1)?;
-    assert_eq!(received.payload, stored.payload);
+    assert_eq!(received.raw(), stored.payload);
     Ok(())
 }
 #[test]

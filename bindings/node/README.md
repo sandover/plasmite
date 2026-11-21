@@ -22,17 +22,17 @@ const pool = client.openPool("sensors", { create: true });
 
 const live = await pool.follow({ tags: ["kitchen"] });
 await pool.feed({ temp_c: 21.4 }, { tags: ["kitchen"] });
-console.log((await live.next()).value.data);   // { temp_c: 21.4 }
+console.log((await live.next()).value.data.temp_c);   // 21.4
 await live.return();
 
 for await (const message of await pool.fetch({ last: 10 })) {
-  console.log(message.seq, message.tags, message.data);
+  console.log(message.seq, [...message.tags], message.data.temp_c);
 }
 pool.close();
 client.close();
 ```
 
-`follow` fixes its position before its promise resolves, so it sees the feed that comes after it. `fetch` stops at the last message present when it opened. `seq` and `time` are `bigint`s; `time` counts Unix nanoseconds. `pool.info().bounds` reports the oldest and newest retained sequence. The module functions `openPool`, `createPool`, `listPools` and `deletePool` use the default directory, `~/.plasmite/pools`. Use `createPool(ref, sizeBytes)` to choose a size; `create: true` makes a 1 MiB pool.
+`follow` fixes its position before its promise resolves, so it sees the feed that comes after it. `fetch` stops at the last message present when it opened. `seq` and `time` are `bigint`s; `time` counts Unix nanoseconds. `pool.info().bounds` reports the oldest and newest retained sequence. The module functions `openPool`, `createPool`, `listPools` and `deletePool` use the default directory, `~/.plasmite/pools`. Use `createPool(ref, { sizeBytes })` to choose a size; `create: true` makes a 1 MiB pool.
 
 ## Reading
 
@@ -63,7 +63,7 @@ let start = existsSync(checkpoint) ? BigInt(readFileSync(checkpoint, "utf8")) : 
 for (;;) {
   try {
     for await (const message of await pool.follow({ since: start })) {
-      console.log(message.data);
+      console.log(message.data.temp_c);
       writeFileSync(checkpoint, String(message.seq + 1n));
     }
   } catch (err) {
@@ -91,7 +91,7 @@ await pool.feed({ temp_c: 21.4 }, { tags: ["kitchen"] });
 pool.close();
 ```
 
-`RemoteClient` is a separate HTTP client written in JavaScript. Construct it with a base URL and optional `{ token }` bearer credentials. Its asynchronous `openPool` returns pools with `info`, `feed`, `fetch`, `follow` and the view and Lite3 methods. It uses Node's normal certificate checks. For the credentials and certificate pins saved by `plasmite access connect`, use the native `openPool` shown here. The HTTP client sends bearer tokens only over HTTPS or to loopback addresses.
+`RemoteClient` is a separate HTTP client written in JavaScript. Construct it with a base URL and optional `{ token }` bearer credentials. Its asynchronous `openPool` returns pools with the same `feed`, `follow`, `fetch`, `info` and `setDescription` calls. It uses Node's normal certificate checks. For the credentials and certificate pins saved by `plasmite access connect`, use the native `openPool` shown here. The HTTP client sends bearer tokens only over HTTPS or to loopback addresses.
 
 UDP trades delivery guarantees for low overhead. A send resolves once the operating system accepts the datagram. Reads deliver frames in arrival order, including duplicates and late arrivals. Before running this example, create `sensors` with `plasmite pool create sensors` and run `plasmite serve --udp-follow` in another terminal.
 
@@ -101,13 +101,12 @@ import { UdpClient } from "plasmite";
 const client = new UdpClient("udp://127.0.0.1:9701");
 const pool = client.openPool("sensors");
 await pool.feed({ temp_c: 21.4 }, { tags: ["kitchen"] });
-const events = await pool.follow({ since: "oldest" });
-for await (const event of events) {
-  if (event.kind === "frame") console.log(event.seq, event.message.data);
+for await (const message of await pool.follow({ since: "oldest" })) {
+  console.log(message.seq, message.data.temp_c);
 }
 ```
 
-A UDP read also yields `skip` (a range the server skipped) and `progress` events. `events.nextEvent(timeoutMs)` waits in milliseconds and resolves to `null` when the wait expires; `events.next(seconds)` matches local readers. Call `events.close()` when you finish. The [UDP spec](https://github.com/sandover/plasmite/blob/main/spec/udp/v1/SPEC.md) defines delivery and limits.
+Use `reader.events()` to see `skip` ranges and `progress` alongside received messages. `reader.nextEvent(timeoutMs)` waits in milliseconds and returns `null` when the wait expires. `reader.next(seconds)` yields messages and reports a retention skip as `RetentionGap`. Call `reader.close()` when you finish. The [UDP spec](https://github.com/sandover/plasmite/blob/main/spec/udp/v1/SPEC.md) defines delivery and limits.
 
 ## Errors and concurrency
 
@@ -115,29 +114,46 @@ Native calls throw `PlasmiteNativeError`; `RemoteClient` throws `RemoteError`, w
 
 Feeds and reads return promises. The native add-on runs pool writes and reader waits on worker threads. Open one reader per consumer. A second concurrent `next()` on the same native pool reader throws `Busy`. The HTTP-only reader reports `Io` in that case.
 
-## Advanced
+## Messages
 
-These methods avoid conversion work when you forward messages or read a few fields from large ones. The [language interface measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-interfaces.md) show when each one pays off.
+The local, HTTP and UDP readers yield the same immutable `Message`. Local and HTTP `feed` return the stored message. UDP `feed` returns once it sends the datagram.
 
-**Views.** `fetchView` and `followView` open readers that yield immutable message views. `feedView` resolves to the view for the message it wrote. A view keeps its own snapshot, so it stays valid after the pool closes or overwrites the message.
+Read `seq`, `time`, `tags` and the optional `sender` without decoding `data`. Use `message.field(name)` to read one payload field directly. It returns `undefined` if the key is missing. The message and every field you keep stay usable after the pool overwrites the record or the reader closes. Keyed server writes expose the access key name in `sender`.
 
 ```js
 import { toJson, toNative } from "plasmite";
 
-const reader = await pool.fetchView({ last: 1 });
-const { value: view } = await reader.next();
+const reader = await pool.fetch({ last: 1 });
+const { value: message } = await reader.next();
 await reader.return();
-console.log(view.seq, view.data.temp_c);
-const editable = toNative(view.data);  // ordinary objects and arrays
-const text = toJson(view);             // the full envelope, exact integers
-await pool.feedView(view);             // forward: new seq and time, same data and tags
+
+console.log(message.seq, message.field("temp_c"));
+const editable = toNative(message.data);
+console.log(toJson(message));
+await pool.feed(message);
+await pool.feed(message.raw, { format: "lite3" });
+await pool.feed(Buffer.from('{"temp_c":21.4}'), { format: "json", tags: ["kitchen"] });
 ```
 
-View properties read like plain objects, but views have no prototype methods (use `Object.hasOwn`) and throw `TypeError` on mutation. Integers within the safe range read as numbers and larger ones as `bigint`s, so use `toJson` instead of `JSON.stringify`. `feedView` also accepts plain objects with `Buffer` or `Uint8Array` byte values; pass `view.data` with new tags to retag a message. `toLite3(view)` copies the encoded bytes. In TypeScript, `fetchView<Reading>()` declares the data shape without checking it. `RemoteClient` pools offer the same view methods through a bundled WebAssembly decoder. See the [Node view measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-boundary-results/node-views/README.md).
+Forwarding a `Message` or its Lite3 bytes keeps the data and tags and assigns a fresh sequence and time. To change the tags, feed `message.data` with the new tags. Each access to `message.raw` copies the stored Lite3 bytes into a Buffer you can edit.
 
-**Receipts.** `feedReceipt`, `feedJsonReceipt` and `feedLite3Receipt` resolve to only `seq` and `time`, skipping the committed message.
+`message.data` decodes the payload once and caches an ordinary JavaScript object. Edits to that object leave the stored message, forwarded bytes and fields from `message.field` intact. Objects and arrays from `message.field` are read-only. `toNative` copies a message or field into ordinary mutable containers. Use `toJson` to format a message with exact integer digits. Plasmite reads larger stored integers as `bigint` and accepts `Buffer` or `Uint8Array` byte values inside input objects. In TypeScript, `fetch<Reading>()` specifies the expected payload shape.
 
-**Lite3.** `feedLite3`, `fetchLite3` and `followLite3` move the binary encoding Plasmite stores. Reads yield frames with `seq`, `time` and `payload`.
+## Pool descriptions
+
+Give a pool a short description and an example so readers can choose it and see what to write.
+
+```js
+const sensors = client.createPool("sensors", {
+  about: "Kitchen temperature readings",
+  example: { temp_c: 21.4 },
+});
+
+console.log(sensors.info().about);
+sensors.setDescription({ about: "Upstairs temperature readings", example: { temp_c: 20.1 } });
+```
+
+The HTTP client takes the same options. Its `createPool`, `info` and `setDescription` calls return promises. `setDescription` replaces both fields. Omit either field to clear it.
 
 ## Building from source
 

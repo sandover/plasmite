@@ -651,7 +651,8 @@ fn append_fixture(pool: &mut Pool) -> (Vec<u8>, String) {
         .expect("append fixture");
     assert_eq!(seq, 1);
     let bytes = pool.get(seq).expect("fixture Lite3").payload;
-    let message = plasmite::api::Message::from_lite3(seq, FIXTURE_TIMESTAMP_NS, &bytes).unwrap();
+    let message =
+        plasmite::api::MessageEnvelope::from_lite3(seq, FIXTURE_TIMESTAMP_NS, &bytes).unwrap();
     (bytes, message.time_rfc3339())
 }
 

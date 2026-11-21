@@ -157,6 +157,7 @@ class ViewStream:
     def __init__(self, stream, cancel=None):
         self._stream = stream
         self._cancel = cancel
+        self._address = ctypes.cast(stream._ptr, ctypes.c_void_p).value
 
     def __iter__(self):
         return self
@@ -165,8 +166,18 @@ class ViewStream:
         return self.next()
 
     def next(self, wait=None):
-        items = self.next_batch(1, sys.maxsize, wait)
-        return items[0] if items else None
+        deadline = _wait_deadline(wait)
+        stream, cancel = self._stream, self._cancel
+        while True:
+            if cancel is not None and cancel.is_set():
+                stream.cancel()
+                raise StopIteration
+            with stream._lock:
+                if not stream._ptr:
+                    raise StopIteration
+                view = backend.next_message(self._address, _wait_ms(deadline, cancel))
+            if view is not None or deadline is not None and time.monotonic_ns() >= deadline:
+                return view
 
     def next_batch(self, max_count, max_bytes, wait=None):
         # Normalize callbacks before borrowing a native handle.

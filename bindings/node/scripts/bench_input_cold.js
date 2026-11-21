@@ -24,8 +24,8 @@ async function main() {
   try {
     for (let call=0;call<2;call++) {
       const cpu=process.cpuUsage(), started=process.hrtime.bigint();
-      const message=await pool.feedView(input);
-      if (message.data.metrics.power!==42) throw new Error('payload mismatch');
+      const message=await (pool.feedView ?? pool.feed).call(pool, input);
+      if ((message.field ? message.field('metrics').power : message.data.metrics.power)!==42) throw new Error('payload mismatch');
       const elapsedUs=Number(process.hrtime.bigint()-started)/1000, used=process.cpuUsage(cpu);
       rows.push({call,elapsedUs,cpuUs:used.user+used.system,memory:process.memoryUsage()});
       messages.push(message);
@@ -33,7 +33,7 @@ async function main() {
     for (const message of messages) assert.deepEqual(toNative(message.data), input);
   } finally {pool.close();client.close();fs.rmSync(dir,{recursive:true,force:true});}
   const hashes={};
-  for (const name of ['index.js','input.js','portable.js','portable/plasmite_core.wasm','native/darwin-arm64/index.node','native/darwin-arm64/libplasmite.dylib']) {
+  for (const name of ['index.js','input.js','portable.js','portable/plasmite_core.wasm','native/darwin-arm64/index.node','native/darwin-arm64/libplasmite.2.dylib']) {
     hashes[name]=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex');
   }
   const diagnostics = require(path.join(root,'portable')).diagnostics();

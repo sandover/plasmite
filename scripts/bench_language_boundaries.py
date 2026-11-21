@@ -183,21 +183,24 @@ def cpu_seconds():
 
 
 def python_jobs(pool, sequences, items, shape, repeat):
-    # These are current-API baselines, not Lite3 view claims. Compare future
-    # selected access against cold_selected, not against the warm native dict.
-    import plasmite
+    from plasmite._views import to_json
 
     def get(seq):
-        return plasmite.parse_message(pool._get_json(seq))
+        with pool.fetch(since=seq) as reader:
+            message = next(reader)
+        assert message.seq == seq
+        return message
 
     held = [get(seq) for seq in sequences]
-    raw = [pool._get_lite3(seq).payload for seq in sequences]
+    raw = [message.raw for message in held]
+    for message in held:
+        message.data
     jobs = {
         'cold_selected': lambda i: get(sequences[i]).data['metrics']['power'],
         'warm_selected': lambda i: held[i].data['metrics']['power'],
         'array_scan': lambda i: sum(x['value'] for x in get(sequences[i]).data['samples']),
-        'json_export': lambda i: pool._get_json(sequences[i]),
-        'raw_forward': lambda i: pool.feed_lite3_receipt(pool._get_lite3(sequences[i]).payload),
+        'json_export': lambda i: to_json(get(sequences[i])._view),
+        'raw_forward': lambda i: pool.feed(get(sequences[i])),
     }
     rows = []
     for job, operation in jobs.items():
@@ -215,8 +218,8 @@ def python_jobs(pool, sequences, items, shape, repeat):
                 envelope = json.loads(value)
                 valid = envelope['data'] == item and envelope['seq'] == sequences[i]
             else:
-                forwarded = pool._get_lite3(value.seq)
-                valid = forwarded.seq == value.seq and forwarded.payload == raw[i]
+                forwarded = get(value.seq)
+                valid = forwarded.seq == value.seq and forwarded.raw == raw[i]
             if not valid:
                 raise RuntimeError(f'{job} verification failed at record {i}')
         rows.append(observation('python', shape, repeat, job, timings,

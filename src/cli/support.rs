@@ -245,13 +245,14 @@ pub(crate) fn now_ns() -> Result<u64, Error> {
     Ok(duration.as_nanos() as u64)
 }
 
-pub(crate) fn message_to_json(message: plasmite::api::Message) -> Value {
+pub(crate) fn message_to_json(message: plasmite::api::MessageEnvelope) -> Value {
     MessageWire::new(
         message.seq,
         message.time_rfc3339(),
         message.meta.tags,
         message.data,
     )
+    .with_sender(message.meta.sender)
     .into_json()
 }
 
@@ -264,5 +265,5 @@ pub(crate) fn message_from_lite3(
     timestamp_ns: u64,
     payload: &[u8],
 ) -> Result<Value, Error> {
-    plasmite::api::Message::from_lite3(seq, timestamp_ns, payload).map(message_to_json)
+    plasmite::api::MessageEnvelope::from_lite3(seq, timestamp_ns, payload).map(message_to_json)
 }

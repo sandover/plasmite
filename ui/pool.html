@@ -343,7 +343,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         </aside>
       </div>
 
-      <form class="append" id="append">
+      <form class="append" id="append" hidden>
         <input id="append-input" aria-label="Message to feed" autocomplete="off" spellcheck="false"
           placeholder='Feed a message: JSON, like {"text": "hello"}, or plain text' />
         <button type="submit">Feed</button>
@@ -364,6 +364,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
 
         const state = {
           local: false,
+          canWrite: false,
           info: null,
           generation: 0,
           reader: null,
@@ -911,7 +912,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (found) { select(found); return; }
           if (target > state.messages[state.messages.length - 1].seq) return;
           try {
-            const response = await fetch("/v2/pools/" + encodeURIComponent(poolName) + "/fetch?since=" + target, { cache: "no-store" });
+            const response = await fetch("/pools/" + encodeURIComponent(poolName) + "/fetch?since=" + target, { cache: "no-store" });
             if (response.ok) {
               const reader = response.body.getReader();
               try {
@@ -1033,7 +1034,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           state.info = info;
           $("live").hidden = false;
           $("log-head").hidden = false;
-          $("append").hidden = false;
+          $("append").hidden = !state.canWrite;
           if (replaced) {
             state.generation++;
             state.messages = [];
@@ -1057,7 +1058,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
 
         async function loadInfo(signal) {
           const request = ++state.infoRequest;
-          const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", { cache: "no-store", signal });
+          const response = await fetch("/pools/" + encodeURIComponent(poolName), { cache: "no-store", signal });
           if (request !== state.infoRequest) return false;
           if (response.status === 401) { toLogin(); return false; }
           if (response.status === 404) { showMissing(); return false; }
@@ -1123,7 +1124,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             let next = from;
             while (next != null) {
               const query = new URLSearchParams({ since: next, until: first.seq - 1n });
-              const response = await fetch("/v2/pools/" + encodeURIComponent(poolName) + "/fetch?" + query,
+              const response = await fetch("/pools/" + encodeURIComponent(poolName) + "/fetch?" + query,
                 { cache: "no-store", signal: controller.signal });
               if (response.status === 401) { toLogin(); return; }
               if (!response.ok || !response.body) throw new Error("Earlier messages failed (" + response.status + ")");
@@ -1177,7 +1178,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             url() {
               const query = new URLSearchParams();
               if (state.nextSeq != null) query.set("since", cursor(state.nextSeq));
-              return "/v2/pools/" + encodeURIComponent(poolName) + "/follow?" + query;
+              return "/pools/" + encodeURIComponent(poolName) + "/follow?" + query;
             },
             async onResponse(response) {
               generation = state.generation;
@@ -1280,7 +1281,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           let data;
           try { data = JSON.parse(input.value); } catch (_) { data = { text: input.value }; }
           try {
-            const response = await fetch("/v2/pools/" + encodeURIComponent(poolName) + "/feed", {
+            const response = await fetch("/pools/" + encodeURIComponent(poolName) + "/feed", {
               method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
             });
             if (response.status === 401) { toLogin(); return; }
@@ -1298,9 +1299,11 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             return;
           }
           try {
-            const session = await fetch("/v0/browser/session", { cache: "no-store" });
+            const session = await fetch("/browser/session", { cache: "no-store" });
             if (!session.ok) { toLogin(); return; }
-            state.local = Boolean((await session.json()).local);
+            const access = await session.json();
+            state.local = Boolean(access.local);
+            state.canWrite = !access.read_only;
           } catch (_) { setLive(false); showNotice("Could not check your session. Reload this page to retry.", true); return; }
           $("nav-access").hidden = !state.local;
           const where = span(state.local ? "where local" : "where", state.local ? "Local" : location.hostname);
@@ -1311,7 +1314,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             logout.type = "button";
             logout.textContent = "Log out";
             logout.addEventListener("click", async () => {
-              await fetch("/v0/browser/session", { method: "DELETE" });
+              await fetch("/browser/session", { method: "DELETE" });
               location.assign("/ui");
             });
             $("actions").append(logout);

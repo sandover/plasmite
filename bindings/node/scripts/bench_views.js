@@ -7,7 +7,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { performance } = require('node:perf_hooks');
 const bindingRoot = process.env.PLASMITE_BENCH_BINDING ? path.resolve(process.env.PLASMITE_BENCH_BINDING) : path.join(__dirname, '..');
-const { Client, parseMessage, toNative, toJson } = require(bindingRoot);
+const { Client, toNative, toJson } = require(bindingRoot);
+const { parseMessage } = require(require('node:path').join(bindingRoot, 'message'));
 const warmOnly = process.env.PLASMITE_BENCH_WARM_ONLY === '1';
 const assert = require('node:assert/strict');
 const iterations = Number(process.argv[2] || 100);
@@ -62,7 +63,7 @@ async function main() {
         const cold = [
           ['cold-identity/view', async () => Number((await pool._getView(seq)).seq)],
           ['cold-identity/current-json', async () => Number(parseMessage(pool._getJson(seq)).seq)],
-          ['cold-field/view', async () => (await pool._getView(seq)).data.metrics.power],
+          ['cold-field/message', async () => (await pool._getView(seq)).field('metrics').power],
           ['cold-field/current-json', async () => parseMessage(pool._getJson(seq)).data.metrics.power],
           ['cold-native/view', async () => toNative((await pool._getView(seq)).data).metrics.power],
           ['cold-native/current-json', async () => parseMessage(pool._getJson(seq)).data.metrics.power],
@@ -116,7 +117,7 @@ async function main() {
     // An unsafe integer keeps native materialization on the exact walker.
     // Its JSON representation would round through JSON.parse, so it has no
     // parse-based same-result control.
-    const exactSeq = pool.feedJsonReceipt(Buffer.from('{"metrics":{"power":42},"large":9223372036854775807}')).seq;
+    const exactSeq = (await pool.feed(Buffer.from('{"metrics":{"power":42},"large":9223372036854775807}'), { format: 'json' })).seq;
     const exactView = await pool._getView(exactSeq);
     assert.equal(toNative(exactView.data).large, 9223372036854775807n);
     const exactMaterialization = [];
@@ -125,7 +126,7 @@ async function main() {
     const result = { node: process.version, platform: process.platform, arch: process.arch,
       iterations, repeats, warmOnly, gcExposed: !!global.gc, sink, measurements, exactMaterialization,
       hashes: Object.fromEntries(['scripts/bench_views.js', 'index.js', 'views.js', `native/${process.platform}-${process.arch}/index.node`,
-        `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.dylib' : process.platform === 'win32' ? 'plasmite.dll' : 'libplasmite.so'}`]
+        `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.2.dylib' : process.platform === 'win32' ? 'plasmite2.dll' : 'libplasmite.so.2'}`]
         .map(file => [file, hash(file === 'scripts/bench_views.js' ? __filename : path.join(bindingRoot, file))])),
       limits: ['Warm native-object controls already own decoded data; they isolate view access overhead.',
         'Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.',

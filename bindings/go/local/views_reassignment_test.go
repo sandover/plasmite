@@ -10,7 +10,7 @@ import (
 
 func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "reassigned-wrapper")
-	message, err := pool.FeedView(map[string]any{"object": map[string]any{"power": 7, "label": "north"}, "text": "original text", "blob": []byte{0, 255, 7}, "array": []int{3, 5, 8}}, []string{"original"})
+	message, err := pool.feedView(map[string]any{"object": map[string]any{"power": 7, "label": "north"}, "text": "original text", "blob": []byte{0, 255, 7}, "array": []int{3, 5, 8}}, []string{"original"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 	data := message.Data()
 	meta := message.Meta()
 	aliasData := originalAlias.Data()
-	selector, err := Prepare("/object", "/text", "/blob", "/array", "/object/power")
+	selector, err := prepareSelector("/object", "/text", "/blob", "/array", "/object/power")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := pool.FeedView(map[string]any{"text": "tiny"}, nil)
+	replacement, err := pool.feedView(map[string]any{"text": "tiny"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,12 +41,12 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 	if err = originalAlias.Decode(&unchanged); err != nil || unchanged.Text != "original text" {
 		t.Fatalf("copied alias changed: %+v %v", unchanged, err)
 	}
-	*message = MessageView{}
-	originalAlias = MessageView{}
+	*message = messageView{}
+	originalAlias = messageView{}
 	replacement = nil
 	pool.Close()
 	runtime.GC()
-	for _, root := range []Value{data, aliasData} {
+	for _, root := range []viewValue{data, aliasData} {
 		var out struct{ Text string }
 		if err = root.Decode(&out); err != nil || out.Text != "original text" {
 			t.Fatalf("retained root: %+v %v", out, err)
@@ -79,7 +79,7 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 	}
 	// Source Value forwarding must use its captured bytes, too.
 	destination := newTestPool(t, newTestClient(t), "retained-forward")
-	forwarded, err := destination.FeedView(children[0], nil)
+	forwarded, err := destination.feedView(children[0], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestManagedChildrenKeepTheirSnapshotAfterWrapperReassignment(t *testing.T) 
 
 func TestManagedChildKeepsDuplicateProofAfterWrapperReassignment(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "reassigned-duplicate")
-	original, err := pool.FeedView(map[string]any{"ab": 1, "bA": 2}, nil)
+	original, err := pool.feedView(map[string]any{"ab": 1, "bA": 2}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,9 +110,9 @@ func TestManagedChildKeepsDuplicateProofAfterWrapperReassignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	child := message.Data()
-	*message = MessageView{}
+	*message = messageView{}
 	runtime.GC()
-	selector, err := Prepare("/ab")
+	selector, err := prepareSelector("/ab")
 	if err != nil {
 		t.Fatal(err)
 	}

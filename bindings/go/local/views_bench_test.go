@@ -12,13 +12,13 @@ import (
 )
 
 var benchmarkText string
-var benchmarkView *MessageView
+var benchmarkView *messageView
 var benchmarkReading typedReading
 var benchmarkSelectedReading struct {
 	Sensor  string
 	Metrics struct{ Power int64 }
 }
-var benchmarkValues []Value
+var benchmarkValues []viewValue
 var benchmarkBytes []byte
 var benchmarkNative map[string]any
 
@@ -64,7 +64,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 				}
 				input["samples"] = values
 			}
-			receipt, err := pool.FeedReceipt(input, nil)
+			receipt, err := pool.feedNativeReceipt(input, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -80,12 +80,12 @@ func BenchmarkOwnedViews(b *testing.B) {
 			if err = json.Unmarshal(raw, &native); err != nil {
 				b.Fatal(err)
 			}
-			selector, err := Prepare("/sensor", "/metrics/power")
+			selector, err := prepareSelector("/sensor", "/metrics/power")
 			if err != nil {
 				b.Fatal(err)
 			}
 			defer selector.Close()
-			// Prepare the type plan before warm and cold measurements alike.
+			// prepareSelector the type plan before warm and cold measurements alike.
 			var warm typedReading
 			if err = view.Decode(&warm); err != nil {
 				b.Fatal(err)
@@ -114,7 +114,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 							if e != nil {
 								b.Fatal(e)
 							}
-							v := &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timeNS: frame.Time}
+							v := &messageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timeNS: frame.Time}
 							if e = v.validate(); e != nil {
 								b.Fatal(e)
 							}
@@ -251,25 +251,25 @@ func TestOwnedViewRetentionDiagnostics(t *testing.T) {
 		t.Skip("separate retention diagnostic")
 	}
 	pool := newTestPool(t, newTestClient(t), "view-retention")
-	receipt, err := pool.FeedReceipt(map[string]any{"sensor": "north", "metrics": map[string]any{"power": 7}, "zero": 0}, nil)
+	receipt, err := pool.feedNativeReceipt(map[string]any{"sensor": "north", "metrics": map[string]any{"power": 7}, "zero": 0}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, lane := range []string{"fetch_view", "get_c_copy"} {
-		retained := make([]*MessageView, 10000)
+		retained := make([]*messageView, 10000)
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		for i := range retained {
-			var v *MessageView
+			var v *messageView
 			switch lane {
 			case "fetch_view":
 				v, err = pool.getView(receipt.Seq)
 			case "get_c_copy":
-				var frame *Lite3Frame
+				var frame *lite3Frame
 				frame, err = pool.getLite3(receipt.Seq)
 				if err == nil {
-					v = &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timeNS: frame.Time}
+					v = &messageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timeNS: frame.Time}
 					err = v.validate()
 				}
 			}

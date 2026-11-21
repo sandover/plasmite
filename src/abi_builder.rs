@@ -232,7 +232,7 @@ pub extern "C" fn plsm_builder_copy_value(
     )
 }
 #[cfg(not(target_arch = "wasm32"))]
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_pool_feed_builder_view")]
 pub extern "C" fn plsm_pool_feed_builder_view(
     pool: *mut plsm_pool,
     builder: *mut plsm_builder,
@@ -257,6 +257,24 @@ pub extern "C" fn plsm_pool_feed_builder_view(
         err,
     )
 }
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_internal_builder_finish(
+    builder: *mut plsm_builder,
+    out: *mut *const plsm_message_view,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    if out.is_null() || builder.is_null() {
+        return fail(err, usage("null builder finish argument"));
+    }
+    finish(
+        unsafe { &mut *builder }
+            .take_view()
+            .and_then(|view| publish(view, out)),
+        err,
+    )
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plsm_builder_free(builder: *mut plsm_builder) {
     if !builder.is_null() {

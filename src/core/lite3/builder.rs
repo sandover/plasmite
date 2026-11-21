@@ -19,6 +19,10 @@ impl Builder {
         Ok(b)
     }
     pub(crate) fn new_without_data(tags: &[&str]) -> Result<Self, Error> {
+        Self::new_with_sender(tags, None)
+    }
+
+    pub(crate) fn new_with_sender(tags: &[&str], sender: Option<&str>) -> Result<Self, Error> {
         let mut b = Self {
             words: vec![0; 64],
             len: 0,
@@ -32,6 +36,9 @@ impl Builder {
         let array = b.container(meta, Some("tags"), true)?;
         for tag in tags {
             b.string(array, None, tag)?;
+        }
+        if let Some(sender) = sender {
+            b.string(meta, Some("sender"), sender)?;
         }
         Ok(b)
     }

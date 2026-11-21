@@ -62,7 +62,8 @@ export declare class NativeAppendTarget {
   writeCopy(source: NativeView, node: number, key: string | undefined | null, root: boolean): void
   finish(ops: unknown, numbers: unknown, strings: Array<string>, count: number, tags?: Array<string> | undefined | null): Promise<unknown>
   copy(source: NativeView, node: number, tags: Array<string>): Promise<unknown>
-  json(value: unknown, tags: Array<string>): Promise<unknown>
+  json(value: string | Buffer, tags: Array<string>): Promise<unknown>
+  lite3(bytes: Buffer): Promise<unknown>
   forward(source: NativeView): Promise<unknown>
 }
 export declare class NativeView {
@@ -85,7 +86,7 @@ export declare class NativeCursor {
 }
 export declare class Client {
   constructor(poolDir: string)
-  createPool(poolRef: string, sizeBytes: number | bigint): Pool
+  createPool(poolRef: string, sizeBytes: number | bigint, description?: Buffer | undefined | null): Pool
   openPool(poolRef: string, create?: boolean | undefined | null): Pool
   listPoolsJson(): Buffer
   deletePool(poolRef: string): void
@@ -94,6 +95,7 @@ export declare class Client {
 export declare class Pool {
   prepareAppend(durability: Durability): NativeAppendTarget
   infoJson(): Buffer
+  setDescription(description: Buffer): void
   feedJson(payload: Buffer, tags: Array<string>, durability: Durability): Promise<unknown>
   openRead(finite: boolean, kind: number, value: bigint, tags: Array<string>, view?: boolean | undefined | null): Stream
   openLite3Read(finite: boolean, kind: number, value: bigint, tags: Array<string>): Lite3Stream

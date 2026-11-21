@@ -1014,9 +1014,11 @@ mod tests {
         listener: tokio::net::TcpListener,
         directory: &std::path::Path,
         bearer: &str,
+        read_only_bearer: &str,
     ) {
         use super::super::{ServeConfig, prepare_server_with_access, serve_tls};
         use rustls::pki_types::{CertificateDer, pem::PemObject};
+        use serde_json::Value;
         use tokio::sync::watch;
 
         let config = ServeConfig {
@@ -1054,6 +1056,7 @@ mod tests {
             .unwrap();
         let resource = oauth.resource.clone();
         let bearer = bearer.to_owned();
+        let read_only_bearer = read_only_bearer.to_owned();
         let result = tokio::task::spawn_blocking(move || {
             let mut roots = rustls::RootCertStore::empty();
             roots.add(cert).unwrap();
@@ -1088,7 +1091,8 @@ mod tests {
             let result: serde_json::Value = call(Some(&bearer), "server/discover", None, json!({})).unwrap().into_json().unwrap();
             assert!(result["result"]["supportedVersions"].as_array().unwrap().contains(&json!("2026-07-28")));
             let result: serde_json::Value = call(Some(&bearer), "tools/call", Some("plasmite_feed"), feed).unwrap().into_json().unwrap();
-            assert_eq!(result["result"]["structuredContent"]["message"]["seq"], 1);
+            assert_eq!(result["result"]["structuredContent"]["message"]["seq"], 1, "{result}");
+            assert_eq!(result["result"]["structuredContent"]["message"]["meta"]["sender"], "fixture A");
             let result: serde_json::Value = call(Some(&bearer), "tools/call", Some("plasmite_fetch"),
                 json!({"name":"plasmite_fetch","arguments":{"pool":"fixture","since":"oldest"}})).unwrap().into_json().unwrap();
             assert_eq!(result["result"]["structuredContent"]["messages"][0]["data"]["fixture"], 1);
@@ -1122,6 +1126,51 @@ mod tests {
                 .send_json(legacy_read).unwrap().into_json().unwrap();
             assert_eq!(result["result"]["contents"][0]["uri"], uri);
             assert!(result["result"].get("resultType").is_none());
+
+            let written: Value = legacy_request()
+                .set("Authorization", &format!("Bearer {bearer}"))
+                .send_json(json!({
+                    "jsonrpc":"2.0", "id":4, "method":"tools/call",
+                    "params":{"name":"plasmite_feed","arguments":{"pool":"fixture","data":{"legacy":true}}}
+                })).unwrap().into_json().unwrap();
+            assert_eq!(written["result"]["structuredContent"]["message"]["meta"]["sender"], "fixture A");
+
+            for modern in [true, false] {
+                let read_only_call = |method: &str, tool: Option<(&str, Value)>| -> Value {
+                    let name = tool.as_ref().map(|(name, _)| *name);
+                    let params = tool.map_or_else(
+                        || json!({}),
+                        |(name, arguments)| json!({"name": name, "arguments": arguments}),
+                    );
+                    if modern {
+                        call(Some(&read_only_bearer), method, name, params)
+                    } else {
+                        legacy_request()
+                            .set("Authorization", &format!("Bearer {read_only_bearer}"))
+                            .send_json(json!({"jsonrpc":"2.0","id":3,"method":method,"params":params}))
+                    }
+                    .unwrap()
+                    .into_json()
+                    .unwrap()
+                };
+                let tools = read_only_call("tools/list", None);
+                let tools = tools["result"]["tools"].as_array().unwrap();
+                assert!(tools.iter().any(|tool| tool["name"] == "plasmite_fetch"));
+                for (name, args) in [
+                    ("plasmite_feed", json!({"pool":"fixture","data":{"denied":true}})),
+                    ("plasmite_pool_create", json!({"name":"denied"})),
+                    ("plasmite_pool_delete", json!({"pool":"fixture"})),
+                ] {
+                    assert!(!tools.iter().any(|tool| tool["name"] == name));
+                    let denied = read_only_call("tools/call", Some((name, args)));
+                    assert_eq!(denied["result"]["isError"], true);
+                    assert_eq!(denied["result"]["structuredContent"]["error_kind"], "Permission");
+                }
+                let fetched = read_only_call("tools/call", Some(("plasmite_fetch",
+                    json!({"pool":"fixture","since":"oldest"})
+                )));
+                assert_eq!(fetched["result"]["structuredContent"]["messages"][0]["data"]["fixture"], 1);
+            }
         })
         .await;
         stop.send(true).unwrap();
@@ -1150,8 +1199,14 @@ mod tests {
 
         let (directory, mut oauth) = service();
         with_fixture_identity(&mut oauth, Default::default());
-        let first_key = oauth.access.issue("first reader").unwrap();
-        let second_key = oauth.access.issue("second reader").unwrap();
+        let first_key = oauth
+            .access
+            .issue("first reader", crate::access_store::AccessMode::Full)
+            .unwrap();
+        let second_key = oauth
+            .access
+            .issue("second reader", crate::access_store::AccessMode::Full)
+            .unwrap();
         let first_token = exchange_fixture(&oauth, &first_key).await;
         let second_token = exchange_fixture(&oauth, &second_key).await;
         let principal = |token: &serde_json::Value| {
@@ -1296,8 +1351,14 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
 
-        let key_a = oauth.access.issue("fixture A").unwrap();
-        let key_b = oauth.access.issue("fixture B").unwrap();
+        let key_a = oauth
+            .access
+            .issue("fixture A", crate::access_store::AccessMode::Full)
+            .unwrap();
+        let key_b = oauth
+            .access
+            .issue("fixture B", crate::access_store::AccessMode::ReadOnly)
+            .unwrap();
         assert_eq!(
             submit_fixture_approval(&oauth, &key_a, "approve", "https://other.example")
                 .await
@@ -1335,8 +1396,15 @@ mod tests {
         let first_bearer = first["access_token"].as_str().unwrap();
         let second_bearer = second["access_token"].as_str().unwrap();
         assert!(oauth.grant(first_bearer).is_some());
-        assert!(oauth.grant(second_bearer).is_some());
-        assert_pool_call_over_trusted_https(&oauth, listener, directory.path(), first_bearer).await;
+        assert!(oauth.grant(second_bearer).unwrap().read_only());
+        assert_pool_call_over_trusted_https(
+            &oauth,
+            listener,
+            directory.path(),
+            first_bearer,
+            second_bearer,
+        )
+        .await;
         assert!(
             oauth.state.lock().unwrap().legacy_clients.is_empty(),
             "CIMD does not perform DCR"
@@ -1559,7 +1627,10 @@ mod tests {
         let (_directory, oauth) = service();
         let client = "unused-old-client-id";
         let previous = json!({ "id": client, "name": "Historical test record", "redirect_uris": ["https://client.example/callback"], "expires_at": null });
-        let key = oauth.access.issue("historical key").unwrap();
+        let key = oauth
+            .access
+            .issue("historical key", crate::access_store::AccessMode::Full)
+            .unwrap();
         let (key_id, _) = oauth.access.authorize_key(&key).unwrap();
         let refresh_token = "rt1.test-grant.synthetic";
         oauth

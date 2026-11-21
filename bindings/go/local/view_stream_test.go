@@ -14,15 +14,15 @@ import (
 func TestViewStreamsFilterMatchingLimitsAndKeepOwners(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "stream-views")
 	for _, tag := range []string{"skip", "α\x00β", "skip", "α\x00β"} {
-		if _, err := pool.FeedView(map[string]any{"exact": int64(math.MaxInt64), "negative": math.Copysign(0, -1), "blob": []byte{0, 255}}, []string{tag}); err != nil {
+		if _, err := pool.feedView(map[string]any{"exact": int64(math.MaxInt64), "negative": math.Copysign(0, -1), "blob": []byte{0, 255}}, []string{tag}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stream, err := pool.FetchView(Tags("α\x00β"))
+	stream, err := pool.fetchView(Tags("α\x00β"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var retained []*MessageView
+	var retained []*messageView
 	for {
 		view, err := stream.Next(context.Background())
 		if errors.Is(err, io.EOF) {
@@ -53,7 +53,7 @@ func TestViewStreamsFilterMatchingLimitsAndKeepOwners(t *testing.T) {
 
 func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "duplicate-stream")
-	original, err := pool.FeedView(map[string]any{"ab": 1, "bA": 2}, nil)
+	original, err := pool.feedView(map[string]any{"ab": 1, "bA": 2}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := pool.FetchView(Since(seq))
+	stream, err := pool.fetchView(Since(seq))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestViewStreamsTransferDuplicateProofAndDetachedBytes(t *testing.T) {
 
 func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "idle-views")
-	stream, err := pool.FollowView()
+	stream, err := pool.followView()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,11 +122,11 @@ func TestViewStreamsCancellationCloseAndGapPolicy(t *testing.T) {
 		t.Fatal("close blocked")
 	}
 	for i := 0; i < 800; i++ {
-		if _, err := pool.FeedView(map[string]any{"padding": string(bytes.Repeat([]byte{'x'}, 2048))}, nil); err != nil {
+		if _, err := pool.feedView(map[string]any{"padding": string(bytes.Repeat([]byte{'x'}, 2048))}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, err = pool.FollowView(Since(uint64(1)))
+	_, err = pool.followView(Since(uint64(1)))
 	var native *Error
 	if !errors.As(err, &native) || native.Kind != ErrorRetentionGap {
 		t.Fatalf("wrong gap: %v", err)
@@ -138,22 +138,22 @@ func TestWholeViewForwardingSharesProofAndRetagsExplicitly(t *testing.T) {
 	client := newTestClient(t)
 	sourcePool := newTestPool(t, client, "forward-source")
 	destination := newTestPool(t, client, "forward-target")
-	source, err := sourcePool.FeedView(map[string]any{"value": int64(math.MaxInt64), "blob": []byte{0, 255}}, []string{"keep"})
+	source, err := sourcePool.feedView(map[string]any{"value": int64(math.MaxInt64), "blob": []byte{0, 255}}, []string{"keep"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = destination.FeedView(map[string]any{}, nil); err != nil {
+	if _, err = destination.feedView(map[string]any{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	expected := source.Lite3()
-	forwarded, err := destination.FeedView(source, nil)
+	forwarded, err := destination.feedView(source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if forwarded.Seq() != 2 || !bytes.Equal(forwarded.Lite3(), expected) || &forwarded.encoded[0] != &source.encoded[0] {
 		t.Fatal("whole forwarding copied/changed the sealed payload or identity")
 	}
-	cleared, err := destination.FeedView(source.Data(), []string{})
+	cleared, err := destination.feedView(source.Data(), []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestWholeViewForwardingSharesProofAndRetagsExplicitly(t *testing.T) {
 		t.Fatalf("explicit empty tags retained %v", metadata.Tags)
 	}
 	// Apply options after the source snapshot, outside the destination mutex.
-	moved, err := destination.FeedView(source, nil, func(config *api.FeedConfig) { *source = MessageView{} })
+	moved, err := destination.feedView(source, nil, func(config *api.FeedConfig) { *source = messageView{} })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestWholeViewForwardingSharesProofAndRetagsExplicitly(t *testing.T) {
 		t.Fatal("option reassignment changed the earlier source")
 	}
 	closing := newTestPool(t, client, "forward-close")
-	if _, err = closing.FeedView(forwarded, nil, func(*api.FeedConfig) { closing.Close() }); !isUsage(err) {
+	if _, err = closing.feedView(forwarded, nil, func(*api.FeedConfig) { closing.Close() }); !isUsage(err) {
 		t.Fatalf("reentrant forward close: %v", err)
 	}
 	sourcePool.Close()

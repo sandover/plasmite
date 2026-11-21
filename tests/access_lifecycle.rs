@@ -256,6 +256,7 @@ fn revoke_stops_streams_denies_new_requests_and_survives_restart() -> TestResult
     let first_pool = first_client.open_pool(&pool_ref, false)?;
     let second_pool = second_client.open_pool(&pool_ref, false)?;
     let initial = first_pool.feed(&json!({"n": 1}), Feed::default())?;
+    assert_eq!(initial.sender(), Some("integration-test"));
 
     // One stream has already delivered data; the other waits at the current end.
     let mut active = first_pool.follow(Read::since(Since::Seq(initial.seq)))?;
@@ -319,5 +320,20 @@ fn revoke_stops_streams_denies_new_requests_and_survives_restart() -> TestResult
         )?,
         "unrevoked key stopped working after restart"
     );
+    let replacement = invite(&pool_dir, "replacement writer")?;
+    let replacement = RemoteClient::with_access_key(&restarted.remote_url, &replacement)?
+        .open_pool(&pool_ref, false)?;
+    let written = replacement.feed(&json!({"write": "replacement key"}), Feed::new())?;
+    assert_eq!(written.sender(), Some("replacement writer"));
+    let read_back = replacement
+        .fetch(Read::since(Since::Seq(written.seq)))?
+        .next_message()?
+        .expect("replacement write");
+    assert_eq!(read_back.sender(), Some("replacement writer"));
+
+    let local: Value = ureq::post(&format!("{}/pools/lifecycle/feed", restarted.local_url))
+        .send_json(json!({"data":{"write":"local listener"}}))?
+        .into_json()?;
+    assert!(local["message"]["meta"].get("sender").is_none());
     Ok(())
 }

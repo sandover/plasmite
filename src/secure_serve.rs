@@ -1,6 +1,6 @@
 //! Start the trusted local listener and authenticated HTTPS listener together.
 
-use crate::access_store::AccessStore;
+use crate::access_store::{AccessMode, AccessStore};
 use crate::cli::args::ServeRunArgs;
 use crate::interface_wire::{HttpErrorEnvelope, error_kind_from_status};
 use crate::serve::{self, ServeConfig};
@@ -79,9 +79,17 @@ struct InviteReply {
     access_key: String,
 }
 
-pub(crate) fn invite(pool_dir: &Path, name: &str) -> Result<String, Error> {
-    let (url, fingerprint) = local_admin_endpoint(pool_dir, "invite")?;
-    let body = serde_json::json!({"name": name, "server_fingerprint": fingerprint}).to_string();
+pub(crate) fn invite(pool_dir: &Path, name: &str, mode: AccessMode) -> Result<String, Error> {
+    let (url, fingerprint, read_only_keys) = local_admin_endpoint(pool_dir, "invite")?;
+    if mode == AccessMode::ReadOnly && !read_only_keys {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("the running server does not support read-only keys")
+            .with_hint("Restart the server with a version that supports read-only keys."));
+    }
+    let body = serde_json::json!({
+        "name": name, "server_fingerprint": fingerprint, "mode": mode
+    })
+    .to_string();
     let response = local_agent()
         .post(&url)
         .set("content-type", "application/json")
@@ -99,7 +107,7 @@ pub(crate) fn invite(pool_dir: &Path, name: &str) -> Result<String, Error> {
 }
 
 pub(crate) fn keys(pool_dir: &Path) -> Result<serde_json::Value, Error> {
-    let (url, fingerprint) = local_admin_endpoint(pool_dir, "keys")?;
+    let (url, fingerprint, _) = local_admin_endpoint(pool_dir, "keys")?;
     let response = local_agent()
         .get(&url)
         .set("x-plasmite-server-fingerprint", &fingerprint)
@@ -132,7 +140,7 @@ fn local_admin_error(err: ureq::Error, transport_message: &str) -> Error {
 }
 
 pub(crate) fn revoke(pool_dir: &Path, id: &str) -> Result<(), Error> {
-    let (url, fingerprint) = local_admin_endpoint(pool_dir, "revoke")?;
+    let (url, fingerprint, _) = local_admin_endpoint(pool_dir, "revoke")?;
     let body = serde_json::json!({"id": id, "server_fingerprint": fingerprint}).to_string();
     let result = local_agent()
         .post(&url)
@@ -153,7 +161,7 @@ pub(crate) fn revoke(pool_dir: &Path, id: &str) -> Result<(), Error> {
     }
 }
 
-fn local_admin_endpoint(pool_dir: &Path, operation: &str) -> Result<(String, String), Error> {
+fn local_admin_endpoint(pool_dir: &Path, operation: &str) -> Result<(String, String, bool), Error> {
     let bind = AccessStore::local_bind(pool_dir)?;
     let fingerprint = AccessStore::saved_fingerprint(pool_dir)?;
     if !bind.ip().is_loopback() {
@@ -173,18 +181,25 @@ fn local_admin_endpoint(pool_dir: &Path, operation: &str) -> Result<(String, Str
                 .with_source(err)
         })?;
     let selected = crate::serve_registry::directory_identity(pool_dir)?;
+    let read_only_keys = status.read_only_keys;
     let serving = status.directory_identity()?;
     if selected != serving {
         return Err(Error::new(ErrorKind::Permission)
             .with_message("local server does not own the selected pool directory"));
     }
-    Ok((format!("http://{bind}/v0/access/{operation}"), fingerprint))
+    Ok((
+        format!("http://{bind}/v0/access/{operation}"),
+        fingerprint,
+        read_only_keys,
+    ))
 }
 
 #[derive(Deserialize)]
 struct LocalAccessStatus {
     pool_dir: PathBuf,
     pool_dir_identity: Option<Vec<u8>>,
+    #[serde(default)]
+    read_only_keys: bool,
 }
 
 impl LocalAccessStatus {
@@ -222,6 +237,7 @@ mod admin_error_tests {
         let status = LocalAccessStatus {
             pool_dir: path.clone(),
             pool_dir_identity: None,
+            read_only_keys: false,
         };
         assert_eq!(
             status
@@ -234,11 +250,13 @@ mod admin_error_tests {
         let status = LocalAccessStatus {
             pool_dir: path,
             pool_dir_identity: Some(exact.clone()),
+            read_only_keys: true,
         };
         assert_eq!(status.directory_identity().expect("current server"), exact);
         let legacy = LocalAccessStatus {
             pool_dir: temp.path().to_owned(),
             pool_dir_identity: None,
+            read_only_keys: false,
         };
         assert_eq!(
             legacy.directory_identity().expect("ordinary legacy path"),

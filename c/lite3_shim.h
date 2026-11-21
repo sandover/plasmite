@@ -93,6 +93,8 @@ int plasmite_lite3_get_val_ofs(
         const char *key,
         size_t *out_ofs);
 
+int plasmite_lite3_get_str(const unsigned char *buf, size_t len, size_t ofs,
+        const char *key, const char **out_ptr, size_t *out_len);
 int plasmite_lite3_get_bool(
         const unsigned char *buf,
         size_t buf_len,

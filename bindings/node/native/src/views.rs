@@ -141,8 +141,14 @@ impl NativeView {
         self.owner.0
     }
     pub(super) fn forwarded(&self, pointer: *const Owner) -> Owned {
-        // Every forwarded owner points straight to the original charge, so
-        // forwarding a forwarded message never retains a wrapper chain.
+        // Replacing sender metadata can produce a different encoding.
+        let mut len = 0;
+        let source = unsafe { plsm_view_bytes(self.owner.0, &mut len) };
+        let destination = unsafe { plsm_view_bytes(pointer, &mut len) };
+        if source != destination {
+            return Owned::new(pointer);
+        }
+        // Shared bytes point straight to the original allocation's charge.
         let allocation = self.owner.1.as_ref().unwrap_or(&self.owner).clone();
         Owned(pointer, Some(allocation))
     }

@@ -207,7 +207,7 @@ Invariants: Key names and other server data enter the DOM as text.
             <input id="name" name="name" maxlength="128" required autocomplete="off" aria-label="Name" placeholder="Name, like Alex's laptop">
             <button class="button" type="submit">Create key</button>
           </form>
-          <p class="muted small" style="margin-top: 8px">A key can read, write, create, and delete every pool in this directory. Make one per person or device, so you can revoke one without the others.</p>
+          <p class="muted small" style="margin-top: 8px">Keys created here can read, write, create, and delete every pool in this directory. For read-only access, use <code>plasmite access invite NAME --read-only</code>. Make one key per person or device.</p>
           <p class="notice" id="invite-notice" role="status"></p>
         </section>
 
@@ -329,11 +329,12 @@ Invariants: Key names and other server data enter the DOM as text.
             holder.append(empty);
           } else {
             const table = document.createElement("table");
-            table.innerHTML = "<thead><tr><th>Name</th><th>Last used</th><th>Created</th><th></th></tr></thead>";
+            table.innerHTML = "<thead><tr><th>Name</th><th>Mode</th><th>Last used</th><th>Created</th><th></th></tr></thead>";
             const rows = document.createElement("tbody");
             for (const key of active) {
               const row = document.createElement("tr");
               cell(row, key.name);
+              cell(row, key.mode === "read-only" ? "Read-only" : "Full");
               cell(row, when(key.last_used_at), "when");
               cell(row, when(key.created_at), "when");
               revokeCell(cell(row, "", "act"), key);

@@ -87,6 +87,19 @@ function bytesOf(value) {
   if (!types.isUint8Array(value)) throw new TypeError('encoded input must be a Uint8Array or Buffer');
   return new Bytes(getBuffer.call(value), getOffset.call(value), getLength.call(value));
 }
+function feedBytes(value, format) {
+  if (!types.isUint8Array(value)) {
+    if (format !== undefined) throw new TypeError('format applies only to encoded feed input');
+    return;
+  }
+  if (format !== 'json' && format !== 'lite3') {
+    throw new TypeError("encoded feed input requires format 'json' or 'lite3'");
+  }
+  const bytes = bytesOf(value);
+  const buffer = getBuffer.call(bytes);
+  if (types.isSharedArrayBuffer(buffer)) throw new TypeError('shared-backed bytes require an ordinary buffer copy');
+  return Buffer.from(buffer, getOffset.call(bytes), getLength.call(bytes));
+}
 function normalize(walker, value, key) {
   let type = typeof value;
   let kind = value !== null && type === 'object' ? inputHelpers.classify(value) : 0;
@@ -103,6 +116,8 @@ function normalize(walker, value, key) {
   walker.normalKind = kind;
   return value;
 }
+class InputShapeError extends TypeError {}
+
 class InputWalker {
   normalKind = 0;
   stack = privateArray();
@@ -163,7 +178,7 @@ class InputWalker {
       const kind = this.normalKind;
       if (kind === 13) this.copy(-1, null, valueReference(value));
       else {
-        if (value === null || typeof value !== 'object' || kind !== 7) throw new TypeError('message data must be an object');
+        if (value === null || typeof value !== 'object' || kind !== 7) throw new InputShapeError('message data must be an object');
         this.members(this.data, value, kind);
       }
     }
@@ -171,7 +186,9 @@ class InputWalker {
   endContainer() {}
 }
 module.exports.InputWalker = InputWalker;
+module.exports.InputShapeError = InputShapeError;
 module.exports.bytesOf = bytesOf;
+module.exports.feedBytes = feedBytes;
 
 // Private bounded marshalling storage, not a serialized message format. Native
 // writes consume it synchronously; reentrant captures get separate storage.

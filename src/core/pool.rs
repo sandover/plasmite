@@ -28,6 +28,10 @@ const MAGIC: [u8; 4] = *b"PLSM";
 const ENDIANNESS_LE: u8 = 1;
 const HEADER_SIZE: usize = 4096;
 const NEWEST_SEQ_OFFSET: usize = 96;
+// Pool descriptions use reserved bytes beyond the append header and wake word.
+const DESCRIPTION_OFFSET: usize = 112;
+const DESCRIPTION_LIMIT: usize = 1024;
+const DESCRIPTION_SIZE: usize = 4 + 2 * DESCRIPTION_LIMIT;
 // Native waiters use a reserved word as a disposable wake-up hint.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 const NOTIFY_OFFSET: usize = 104;
@@ -256,10 +260,72 @@ fn write_u32(buf: &mut [u8], offset: usize, value: u32) {
     buf[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
-#[derive(Clone, Copy, Debug)]
+/// Optional text and example that explain how to use a pool.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PoolDescription {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub example: Option<serde_json::Value>,
+}
+
+impl PoolDescription {
+    fn encode(&self) -> Result<[u8; DESCRIPTION_SIZE], Error> {
+        let about = self.about.as_deref().unwrap_or_default().as_bytes();
+        let example = match &self.example {
+            Some(example) if example.is_object() => example.to_string(),
+            Some(_) => {
+                return Err(
+                    Error::new(ErrorKind::Usage).with_message("pool example must be a JSON object")
+                );
+            }
+            None => String::new(),
+        };
+        if about.len() > DESCRIPTION_LIMIT || example.len() > DESCRIPTION_LIMIT {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("pool description and example can each hold up to 1024 bytes"));
+        }
+        let mut bytes = [0; DESCRIPTION_SIZE];
+        bytes[..2].copy_from_slice(&(about.len() as u16).to_le_bytes());
+        bytes[2..4].copy_from_slice(&(example.len() as u16).to_le_bytes());
+        bytes[4..4 + about.len()].copy_from_slice(about);
+        bytes[4 + DESCRIPTION_LIMIT..4 + DESCRIPTION_LIMIT + example.len()]
+            .copy_from_slice(example.as_bytes());
+        Ok(bytes)
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self, Error> {
+        let invalid = || Error::new(ErrorKind::Corrupt).with_message("invalid pool description");
+        let about_len = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+        let example_len = u16::from_le_bytes([bytes[2], bytes[3]]) as usize;
+        if about_len > DESCRIPTION_LIMIT || example_len > DESCRIPTION_LIMIT {
+            return Err(invalid());
+        }
+        let about = (about_len != 0)
+            .then(|| {
+                std::str::from_utf8(&bytes[4..4 + about_len])
+                    .map(str::to_owned)
+                    .map_err(|_| invalid())
+            })
+            .transpose()?;
+        let start = 4 + DESCRIPTION_LIMIT;
+        let example: Option<serde_json::Value> = (example_len != 0)
+            .then(|| {
+                serde_json::from_slice(&bytes[start..start + example_len]).map_err(|_| invalid())
+            })
+            .transpose()?;
+        if example.as_ref().is_some_and(|value| !value.is_object()) {
+            return Err(invalid());
+        }
+        Ok(Self { about, example })
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct PoolOptions {
     pub file_size: u64,
     pub index_capacity: Option<u32>,
+    pub description: PoolDescription,
 }
 
 impl PoolOptions {
@@ -267,11 +333,17 @@ impl PoolOptions {
         Self {
             file_size,
             index_capacity: None,
+            description: PoolDescription::default(),
         }
     }
 
     pub fn with_index_capacity(mut self, index_capacity: u32) -> Self {
         self.index_capacity = Some(index_capacity);
+        self
+    }
+
+    pub fn with_description(mut self, description: PoolDescription) -> Self {
+        self.description = description;
         self
     }
 
@@ -417,6 +489,7 @@ pub struct PoolInfo {
     pub ring_size: u64,
     pub bounds: Bounds,
     pub metrics: Option<PoolMetrics>,
+    pub description: PoolDescription,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -479,6 +552,7 @@ impl Pool {
         validate_mapped_size(options.file_size).map_err(|err| err.with_path(&path))?;
         let index_capacity = options.resolved_index_capacity();
         let header = PoolHeader::new(options.file_size, index_capacity)?;
+        let description = options.description.encode()?;
 
         // Creating a pool is a mutating operation; ensure the parent directory exists so
         // API/binding users don't need to `mkdir -p` for common first-run flows.
@@ -531,7 +605,7 @@ impl Pool {
                 .with_source(err)
         })?;
 
-        write_header(&mut file, &header, &path)?;
+        write_header(&mut file, &header, &description, &path)?;
 
         let mmap = unsafe {
             MmapMut::map_mut(&file).map_err(|err| {
@@ -747,8 +821,30 @@ impl Pool {
         Ok(bounds_from_header(header))
     }
 
+    pub fn set_description(&mut self, description: PoolDescription) -> Result<(), Error> {
+        let encoded = description.encode()?;
+        let _lock = self.append_lock()?;
+        self.mmap[DESCRIPTION_OFFSET..DESCRIPTION_OFFSET + DESCRIPTION_SIZE]
+            .copy_from_slice(&encoded);
+        flush_mmap_range(
+            &self.mmap,
+            DESCRIPTION_OFFSET,
+            DESCRIPTION_SIZE,
+            &self.path,
+            "failed to flush pool description",
+        )
+    }
+
     pub fn info(&self) -> Result<PoolInfo, Error> {
-        let header = self.header_from_mmap()?;
+        let (header, description) = {
+            let _lock = self.read_lock()?;
+            let header = self.header_locked()?;
+            let description = PoolDescription::decode(
+                &self.mmap[DESCRIPTION_OFFSET..DESCRIPTION_OFFSET + DESCRIPTION_SIZE],
+            )
+            .map_err(|err| err.with_path(&self.path))?;
+            (header, description)
+        };
         let bounds = bounds_from_header(header);
         Ok(PoolInfo {
             path: self.path.clone(),
@@ -760,6 +856,7 @@ impl Pool {
             ring_size: header.ring_size,
             bounds,
             metrics: Some(self.metrics_from_header(header, bounds)),
+            description,
         })
     }
 
@@ -1474,8 +1571,14 @@ fn read_header(file: &mut File, path: &Path) -> Result<PoolHeader, Error> {
     PoolHeader::decode(&buf)
 }
 
-fn write_header(file: &mut File, header: &PoolHeader, path: &Path) -> Result<(), Error> {
-    let buf = header.encode();
+fn write_header(
+    file: &mut File,
+    header: &PoolHeader,
+    description: &[u8; DESCRIPTION_SIZE],
+    path: &Path,
+) -> Result<(), Error> {
+    let mut buf = header.encode();
+    buf[DESCRIPTION_OFFSET..DESCRIPTION_OFFSET + DESCRIPTION_SIZE].copy_from_slice(description);
     file.seek(SeekFrom::Start(0))
         .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))?;
     file.write_all(&buf)
@@ -1692,6 +1795,7 @@ mod tests {
         AppendOptions, Durability, HEADER_SIZE, Pool, PoolHeader, PoolOptions, SeqOffsetCache,
         append_locked_with_flush, apply_append,
     };
+    use crate::api::internal::LocalPoolTransport;
     use crate::core::error::{Error, ErrorKind};
     use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
     use crate::core::lite3;
@@ -2640,7 +2744,7 @@ mod tests {
         for expected in 1..=128 {
             let message = tail.next_message().expect("tail").expect("message");
             assert_eq!(message.seq, expected);
-            assert_eq!(message.data["n"].as_u64(), Some(expected));
+            assert_eq!(message.data().unwrap()["n"].as_u64(), Some(expected));
         }
         fs::write(marker("received"), b"received").expect("received");
         let cancel_path = marker("cancel");

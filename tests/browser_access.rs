@@ -50,7 +50,7 @@ async fn browser_writes_accept_http2_authority() -> Result<(), Box<dyn std::erro
 
     let login = Request::builder()
         .method("POST")
-        .uri(format!("{origin}/v0/browser/session"))
+        .uri(format!("{origin}/browser/session"))
         .header(ORIGIN, origin.as_str())
         .header(CONTENT_TYPE, "application/json")
         .body(Body::from(
@@ -70,7 +70,7 @@ async fn browser_writes_accept_http2_authority() -> Result<(), Box<dyn std::erro
 
     let create = Request::builder()
         .method("POST")
-        .uri(format!("{origin}/v2/pools"))
+        .uri(format!("{origin}/pools"))
         .header(ORIGIN, origin.as_str())
         .header(COOKIE, &cookie)
         .header(CONTENT_TYPE, "application/json")
@@ -79,7 +79,7 @@ async fn browser_writes_accept_http2_authority() -> Result<(), Box<dyn std::erro
 
     let conflicting_host = Request::builder()
         .method("POST")
-        .uri(format!("{origin}/v2/pools/http2-browser/feed"))
+        .uri(format!("{origin}/pools/http2-browser/feed"))
         .header(ORIGIN, origin.as_str())
         .header(HOST, "evil.example")
         .header(COOKIE, &cookie)
@@ -118,7 +118,7 @@ fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dy
     let agent = ureq::AgentBuilder::new().tls_config(Arc::new(tls)).build();
     let origin = &server.remote_url;
 
-    let login_url = format!("{origin}/v0/browser/session");
+    let login_url = format!("{origin}/browser/session");
     let forged_login = agent
         .post(&login_url)
         .set("Origin", "https://evil.example")
@@ -130,14 +130,14 @@ fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dy
         .set("Origin", origin)
         .send_json(json!({"access_key": server.access_key()}))?;
     let cookie_header = login.header("set-cookie").ok_or("missing session cookie")?;
-    for flag in ["Secure", "HttpOnly", "SameSite=Strict", "Path=/v0"] {
+    for flag in ["Secure", "HttpOnly", "SameSite=Strict", "Path=/;"] {
         assert!(cookie_header.contains(flag), "missing {flag}");
     }
     let cookie = cookie_header
         .split(';')
         .next()
         .ok_or("missing cookie value")?;
-    let pools_url = format!("{origin}/v2/pools");
+    let pools_url = format!("{origin}/pools");
     assert!(agent.get(&pools_url).set("Cookie", cookie).call().is_ok());
     let forged_write = agent
         .post(&pools_url)
@@ -150,29 +150,32 @@ fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dy
         .set("Cookie", cookie)
         .set("Origin", origin)
         .send_json(json!({"pool":"browser"}))?;
-    let append_url = format!("{origin}/v2/pools/browser/feed");
+    let append_url = format!("{origin}/pools/browser/feed");
     let appended: Value = agent
         .post(&append_url)
         .set("Cookie", cookie)
         .set("Origin", origin)
         .send_json(json!({"data":{"text":"<img src=x onerror=alert(1)>"}}))?
         .into_json()?;
+    assert_eq!(appended["message"]["meta"]["sender"], "integration-test");
     let seq = appended["message"]["seq"]
         .as_u64()
         .ok_or("missing sequence")?;
     let read_body = agent
-        .get(&format!("{origin}/v2/pools/browser/fetch?since={seq}"))
+        .get(&format!("{origin}/pools/browser/fetch?since={seq}"))
         .set("Cookie", cookie)
         .call()?
         .into_string()?;
     let read: Value = serde_json::from_str(read_body.lines().next().ok_or("missing message")?)?;
     assert_eq!(read["data"]["text"], "<img src=x onerror=alert(1)>");
 
+    assert_read_only_access(&agent, &server, temp.path(), seq)?;
+
     drop(server);
     let server = TestServer::try_start(temp.path())?;
     let origin = &server.remote_url;
-    let pools_url = format!("{origin}/v2/pools");
-    let login_url = format!("{origin}/v0/browser/session");
+    let pools_url = format!("{origin}/pools");
+    let login_url = format!("{origin}/browser/session");
     assert!(
         agent.get(&pools_url).set("Cookie", cookie).call().is_ok(),
         "browser session should survive a server restart"
@@ -253,5 +256,121 @@ fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dy
         agent.get(&format!("{origin}/access")).call(),
         Err(ureq::Error::Status(404, _))
     ));
+    Ok(())
+}
+
+fn assert_read_only_access(
+    agent: &ureq::Agent,
+    server: &TestServer,
+    pool_dir: &std::path::Path,
+    seq: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{BufRead, BufReader};
+    use std::process::Command;
+
+    let access_cli = |args: &[&str]| -> Result<Value, Box<dyn std::error::Error>> {
+        let output = Command::new(env!("CARGO_BIN_EXE_plasmite"))
+            .arg("--dir")
+            .arg(pool_dir)
+            .arg("access")
+            .args(args)
+            .args(["--format", "json"])
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    };
+    let invite = access_cli(&["invite", "read-only browser", "--read-only"])?;
+    assert_eq!(invite["mode"], "read-only");
+    let keys = access_cli(&["keys"])?;
+    let listed = keys["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|key| key["name"] == "read-only browser")
+        .unwrap();
+    assert_eq!(listed["mode"], "read-only");
+
+    let key = invite["access_key"]
+        .as_str()
+        .ok_or("missing read-only key")?;
+    let bearer = format!("Bearer {}", key.rsplit('.').next().unwrap());
+    let origin = &server.remote_url;
+    let session_url = format!("{origin}/browser/session");
+    let login = agent
+        .post(&session_url)
+        .set("Origin", origin)
+        .send_json(json!({"access_key": key}))?;
+    let cookie = login
+        .header("set-cookie")
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    let session: Value = agent
+        .get(&session_url)
+        .set("Cookie", cookie)
+        .call()?
+        .into_json()?;
+    assert_eq!(session["read_only"], true);
+    let page = agent
+        .get(&format!("{origin}/ui/pools/browser"))
+        .call()?
+        .into_string()?;
+    assert!(page.contains("id=\"append\" hidden"));
+
+    for (header, credential) in [("Authorization", bearer.as_str()), ("Cookie", cookie)] {
+        let request = |method: &str, path: &str| {
+            agent
+                .request(method, &format!("{origin}/pools{path}"))
+                .set(header, credential)
+                .set("Origin", origin)
+        };
+        for (operation, result) in [
+            (
+                "create",
+                request("POST", "").send_json(json!({"pool":"denied"})),
+            ),
+            (
+                "open or create",
+                request("POST", "/denied/open").send_json(json!({"create":true})),
+            ),
+            (
+                "set description",
+                request("PUT", "/browser/description").send_json(json!({"about":"denied"})),
+            ),
+            ("delete", request("DELETE", "/browser").call()),
+            (
+                "feed JSON",
+                request("POST", "/browser/feed").send_json(json!({"data":{"denied":false}})),
+            ),
+            (
+                "feed Lite3",
+                request("POST", "/browser/feed")
+                    .set("Content-Type", "application/x-plasmite-lite3")
+                    .send_bytes(b"not parsed for a read-only key"),
+            ),
+        ] {
+            let Err(ureq::Error::Status(401, response)) = result else {
+                return Err(
+                    format!("expected {operation} to fail with Permission using {header}").into(),
+                );
+            };
+            let error: Value = response.into_json()?;
+            assert_eq!(error["error"]["kind"], "Permission");
+            assert_eq!(error["error"]["message"], "access key is read-only");
+        }
+        request("POST", "/browser/open").send_json(json!({"create":false}))?;
+        for operation in ["fetch", "follow"] {
+            let response = request("GET", &format!("/browser/{operation}?since={seq}")).call()?;
+            let mut line = String::new();
+            BufReader::new(response.into_reader()).read_line(&mut line)?;
+            let message: Value = serde_json::from_str(&line)?;
+            assert_eq!(message["seq"], seq);
+        }
+    }
     Ok(())
 }

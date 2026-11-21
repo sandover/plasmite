@@ -118,22 +118,22 @@ func TestAppendGetLargePayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	decoded, err := decodeObject(msg.Data)
+	decoded, err := decodeObject(msg.Data())
 	if err != nil {
 		t.Fatalf("decode append: %v", err)
 	}
 	if decoded["blob"] != payload {
 		t.Fatalf("append payload mismatch")
 	}
-	if len(msg.Meta.Tags) != len(tags) {
+	if len(msg.Tags()) != len(tags) {
 		t.Fatalf("tags mismatch")
 	}
 
-	getMsg, err := getTestMessage(pool, msg.Seq)
+	getMsg, err := getTestMessage(pool, msg.Seq())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	decodedGet, err := decodeObject(getMsg.Data)
+	decodedGet, err := decodeObject(getMsg.Data())
 	if err != nil {
 		t.Fatalf("decode get: %v", err)
 	}
@@ -162,11 +162,11 @@ func TestClientPoolCreateThenReopen(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	getMsg, err := getTestMessage(second, msg.Seq)
+	getMsg, err := getTestMessage(second, msg.Seq())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	decoded, err := decodeObject(getMsg.Data)
+	decoded, err := decodeObject(getMsg.Data())
 	if err != nil {
 		t.Fatalf("decode get: %v", err)
 	}
@@ -182,15 +182,15 @@ func TestFollowLite3RetentionGapPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append first: %v", err)
 	}
-	fillPast(t, pool, first.Seq)
+	fillPast(t, pool, first.Seq())
 
-	_, err = pool.FollowLite3(Since(first.Seq), Tags("never"))
+	_, err = pool.followLite3(Since(first.Seq()), Tags("never"))
 	var plasmiteErr *Error
 	if !errors.As(err, &plasmiteErr) || plasmiteErr.Kind != ErrorRetentionGap {
 		t.Fatalf("expected retention gap, got %T: %v", err, err)
 	}
-	if plasmiteErr.Missing != first.Seq || plasmiteErr.NextSeq <= first.Seq {
-		t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr)
+	if plasmiteErr.Missing != first.Seq() || plasmiteErr.NextSeq <= first.Seq() {
+		t.Fatalf("expected gap sequence %d, got %#v", first.Seq(), plasmiteErr)
 	}
 }
 
@@ -201,7 +201,7 @@ func TestOpenFollowReportsFirstMissingSequenceAfterOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := pool.Follow(Since(seed.Seq))
+	stream, err := pool.Follow(Since(seed.Seq()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,11 +209,11 @@ func TestOpenFollowReportsFirstMissingSequenceAfterOverwrite(t *testing.T) {
 	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stop()
 	message, err := stream.Next(ctx)
-	if err != nil || message.Seq != seed.Seq {
+	if err != nil || message.Seq() != seed.Seq() {
 		t.Fatalf("read seed: %v (%v)", message, err)
 	}
 
-	firstMissing := seed.Seq + 1
+	firstMissing := seed.Seq() + 1
 	if _, err := pool.Feed(map[string]any{"kind": "lost"}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestArgumentErrorsUseSentinel(t *testing.T) {
 
 	pool := newTestPool(t, client, "args")
 
-	if _, err := pool.FeedJSON(nil, nil); !isUsage(err) {
+	if _, err := pool.Feed(JSON(nil), nil); !isUsage(err) {
 		t.Fatalf("expected ErrInvalidArgument for empty payload, got %v", err)
 	}
 }
@@ -280,7 +280,7 @@ func TestLite3AppendGetTail(t *testing.T) {
 		t.Fatalf("append json: %v", err)
 	}
 
-	seedFrame, err := pool.getLite3(msg.Seq)
+	seedFrame, err := pool.getLite3(msg.Seq())
 	if err != nil {
 		t.Fatalf("get lite3: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestLite3AppendGetTail(t *testing.T) {
 		t.Fatalf("lite3 payload mismatch")
 	}
 
-	stream, err := pool.FetchLite3(Since(seq2))
+	stream, err := pool.fetchLite3(Since(seq2))
 	if err != nil {
 		t.Fatalf("open lite3 stream: %v", err)
 	}
@@ -343,7 +343,7 @@ func uint64Ptr(val uint64) *uint64 {
 }
 
 func feedLite3Sequence(pool *Pool, payload []byte, durability Durability) (uint64, error) {
-	receipt, err := pool.FeedLite3Receipt(payload, WithDurability(durability))
+	receipt, err := pool.feedLite3Receipt(payload, WithDurability(durability))
 	if err != nil {
 		return 0, err
 	}
@@ -351,11 +351,16 @@ func feedLite3Sequence(pool *Pool, payload []byte, durability Durability) (uint6
 }
 
 func getTestMessage(pool *Pool, seq uint64) (*api.Message, error) {
-	raw, err := pool.getJSON(seq)
+	reader, err := pool.Fetch(Since(seq))
 	if err != nil {
 		return nil, err
 	}
-	return api.DecodeOwnedMessage(raw)
+	defer reader.Close()
+	message, err := reader.Next(context.Background())
+	if err == io.EOF {
+		return nil, &Error{Kind: ErrorNotFound, Message: "message not found", Seq: &seq}
+	}
+	return message, err
 }
 
 func decodeObject(raw json.RawMessage) (map[string]any, error) {
@@ -394,7 +399,7 @@ func TestDefaultPoolDirectory(t *testing.T) {
 func TestNumericFeedReceipts(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "identities")
 	value := map[string]any{"text": "hello"}
-	first, err := pool.FeedReceipt(value, []string{"tag"}, api.WithDurability(api.DurabilityFlush))
+	first, err := pool.feedNativeReceipt(value, []string{"tag"}, api.WithDurability(api.DurabilityFlush))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,10 +415,10 @@ func TestNumericFeedReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(message.Data) != `{"text":"hello"}` {
-		t.Fatalf("stored data: %s", message.Data)
+	if string(message.Data()) != `{"text":"hello"}` {
+		t.Fatalf("stored data: %s", message.Data())
 	}
-	second, err := pool.FeedLite3Receipt(stored.Payload)
+	second, err := pool.feedLite3Receipt(stored.Payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,13 +429,13 @@ func TestNumericFeedReceipts(t *testing.T) {
 	if second.Seq != 2 || second.Time != frame.Time {
 		t.Fatalf("binary identity: %+v", second)
 	}
-	if _, err := pool.FeedJSONReceipt([]byte("bad"), nil); err == nil {
+	if _, err := pool.feedJSONReceipt([]byte("bad"), nil); err == nil {
 		t.Fatal("accepted bad JSON")
 	}
-	if _, err := pool.FeedLite3Receipt([]byte("bad")); err == nil {
+	if _, err := pool.feedLite3Receipt([]byte("bad")); err == nil {
 		t.Fatal("accepted bad binary")
 	}
-	third, err := pool.FeedReceipt(map[string]any{}, nil)
+	third, err := pool.feedNativeReceipt(map[string]any{}, nil)
 	if err != nil || third.Seq != 3 {
 		t.Fatalf("advanced on rejected append: %+v / %v", third, err)
 	}
@@ -463,23 +468,23 @@ func TestV2Listener(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	got, err := reader.Next(ctx)
-	if err != nil || got.Seq != newest.Seq || got.Time != newest.Time {
+	if err != nil || got.Seq() != newest.Seq() || got.Time() != newest.Time() {
 		t.Fatalf("live read: %v, %v", got, err)
 	}
 	if tags := got.Tags(); len(tags) != 1 || tags[0] != "keep\x00canvas" {
 		t.Fatalf("read changed tag bytes: %q", tags)
 	}
 	info, err := pool.Info()
-	if err != nil || info.Bounds.Oldest == nil || *info.Bounds.Oldest != old.Seq {
+	if err != nil || info.Bounds.Oldest == nil || *info.Bounds.Oldest != old.Seq() {
 		t.Fatalf("info: %v, %v", info, err)
 	}
-	fetch, err := pool.Fetch(Since(newest.Seq), Tags("keep\x00canvas"))
+	fetch, err := pool.Fetch(Since(newest.Seq()), Tags("keep\x00canvas"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer fetch.Close()
 	got, err = fetch.Next(ctx)
-	if err != nil || got.Seq != newest.Seq {
+	if err != nil || got.Seq() != newest.Seq() {
 		t.Fatalf("resume: %v, %v", got, err)
 	}
 	if _, err = fetch.Next(ctx); !errors.Is(err, io.EOF) {
@@ -572,7 +577,7 @@ func TestSharedV2ReadCases(t *testing.T) {
 				defer cancel()
 				for _, want := range example.Expect {
 					got, err := reader.Next(ctx)
-					if err != nil || got.Seq != want {
+					if err != nil || got.Seq() != want {
 						t.Fatalf("wanted sequence %d, got %v and %v", want, got, err)
 					}
 				}
@@ -589,17 +594,13 @@ func TestSharedV2ReadCases(t *testing.T) {
 
 func TestFeedForwardsAllMessageRepresentations(t *testing.T) {
 	pool := newTestPool(t, newTestClient(t), "forward")
-	view, err := pool.FeedView(map[string]any{"n": 1}, []string{"tag"})
+	original, err := pool.Feed(JSON(`{"n":1}`), []string{"tag"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := pool.Feed(view, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, source := range []any{view, *original, original} {
+	for _, source := range []any{Lite3(original.Raw()), *original, original} {
 		forwarded, err := pool.Feed(source, nil)
-		if err != nil || string(forwarded.Data) != string(original.Data) || !reflect.DeepEqual(forwarded.Tags(), []string{"tag"}) {
+		if err != nil || string(forwarded.Data()) != string(original.Data()) || !reflect.DeepEqual(forwarded.Tags(), []string{"tag"}) {
 			t.Fatalf("forward %T: %#v, %v", source, forwarded, err)
 		}
 		if _, err := pool.Feed(source, []string{}); !isUsage(err) {
@@ -613,6 +614,35 @@ func isUsage(err error) bool {
 	return errors.As(err, &typed) && typed.Kind == api.ErrorUsage
 }
 
+func TestPoolDescriptionCanBeSetReadAndCleared(t *testing.T) {
+	client := newTestClient(t)
+	created, err := client.CreatePool("description", 65536, WithDescription(PoolDescription{
+		About: "Room readings", Example: JSON(`{"temp_c":22}`),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer created.Close()
+	info, err := created.Info()
+	if err != nil || info.About != "Room readings" || string(info.Example) != `{"temp_c":22}` {
+		t.Fatalf("description: %+v, %v", info, err)
+	}
+	if _, err := created.Feed(map[string]any{"temp_c": 23}, nil); err != nil {
+		t.Fatal(err)
+	}
+	list, err := client.ListPools()
+	if err != nil || len(list) != 1 || list[0].About != info.About {
+		t.Fatalf("list description: %+v, %v", list, err)
+	}
+	if err := created.SetDescription(PoolDescription{}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = created.Info()
+	if err != nil || info.About != "" || info.Example != nil {
+		t.Fatalf("description after clear: %+v, %v", info, err)
+	}
+}
+
 func TestHTTPSPoolReference(t *testing.T) {
 	origin := os.Getenv("PLASMITE_TEST_HTTPS_ORIGIN")
 	if origin == "" {
@@ -620,7 +650,9 @@ func TestHTTPSPoolReference(t *testing.T) {
 	}
 	client := newTestClient(t)
 	ref := PoolRefURI(origin + "/go")
-	created, err := client.CreatePool(ref, 65536)
+	created, err := client.CreatePool(ref, 65536, WithDescription(PoolDescription{
+		About: "HTTPS test messages", Example: JSON(`{"from":"go"}`),
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,6 +662,17 @@ func TestHTTPSPoolReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	info, err := pool.Info()
+	if err != nil || info.About != "HTTPS test messages" || string(info.Example) != `{"from":"go"}` {
+		t.Fatalf("HTTPS description: %+v, %v", info, err)
+	}
+	if err := pool.SetDescription(PoolDescription{About: "Updated remotely"}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = pool.Info()
+	if err != nil || info.About != "Updated remotely" || info.Example != nil {
+		t.Fatalf("updated HTTPS description: %+v, %v", info, err)
+	}
 	live, err := pool.Follow(Tags("test"))
 	if err != nil {
 		t.Fatal(err)
@@ -644,11 +687,17 @@ func TestHTTPSPoolReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if first.Sender() == "" {
+		t.Fatal("HTTPS feed returned a message without its authenticated sender")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	message, err := live.Next(ctx)
-	if err != nil || message.Seq != first.Seq {
+	if err != nil || message.Seq() != first.Seq() {
 		t.Fatalf("follow: %#v, %v", message, err)
+	}
+	if first.Sender() != message.Sender() || !bytes.Equal(first.Raw(), message.Raw()) {
+		t.Fatal("HTTPS feed and follow returned different message encodings")
 	}
 	reader, err := pool.Fetch(Last(1))
 	if err != nil {
@@ -656,11 +705,19 @@ func TestHTTPSPoolReference(t *testing.T) {
 	}
 	defer reader.Close()
 	message, err = reader.Next(ctx)
-	if err != nil || string(message.Data) != `{"from":"go"}` {
+	if err != nil || string(message.Data()) != `{"from":"go"}` {
 		t.Fatalf("fetch: %#v, %v", message, err)
 	}
 	if _, err := reader.Next(ctx); err != io.EOF {
 		t.Fatalf("finished fetch returned %v", err)
+	}
+	destination := newTestPool(t, client, "forwarded")
+	local, err := destination.Feed(message, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.Sender() != "" || !reflect.DeepEqual(local.Tags(), message.Tags()) || !bytes.Equal(local.Data(), message.Data()) {
+		t.Fatalf("local forward returned sender %q, tags %v, data %s", local.Sender(), local.Tags(), local.Data())
 	}
 }
 

@@ -128,7 +128,7 @@ pub(super) fn open(
 
 // The synchronous reader may run inside any caller runtime. A dedicated
 // worker drives the outstanding HTTP bodies without a thread per reader.
-fn stream_runtime() -> ApiResult<&'static Runtime> {
+pub(crate) fn stream_runtime() -> ApiResult<&'static Runtime> {
     static RUNTIME: OnceLock<Result<Runtime, io::Error>> = OnceLock::new();
     RUNTIME
         .get_or_init(|| {
@@ -145,11 +145,21 @@ fn stream_runtime() -> ApiResult<&'static Runtime> {
         })
 }
 
-async fn connect(
+pub(super) async fn connect(
     url: Url,
     accept: &'static str,
     key: Option<AccessKey>,
 ) -> ApiResult<(Option<header::HeaderValue>, Body)> {
+    let (headers, body) = request(url, accept, key, None).await?;
+    Ok((headers.get("plasmite-incarnation").cloned(), body))
+}
+
+pub(super) async fn request(
+    url: Url,
+    accept: &'static str,
+    key: Option<AccessKey>,
+    payload: Option<Bytes>,
+) -> ApiResult<(hyper::HeaderMap, Body)> {
     if key.is_some() && url.scheme() != "https" {
         return Err(
             Error::new(ErrorKind::Corrupt).with_message("saved native connections must use HTTPS")
@@ -167,7 +177,13 @@ async fn connect(
     let socket = tokio::net::TcpStream::connect(address)
         .await
         .map_err(|error| transport_error("could not connect to stream server", error))?;
-    let mut request = Request::get(&url[Position::BeforePath..Position::AfterQuery])
+    let target = &url[Position::BeforePath..Position::AfterQuery];
+    let mut request = if payload.is_some() {
+        Request::post(target).header(header::CONTENT_TYPE, "application/x-plasmite-lite3")
+    } else {
+        Request::get(target)
+    };
+    request = request
         .header(
             header::HOST,
             &url[Position::BeforeHost..Position::AfterPort],
@@ -189,19 +205,29 @@ async fn connect(
             .connect(name, socket)
             .await
             .map_err(|error| transport_error("could not verify the stream server", error))?;
-        send(socket, request).await?
+        send(
+            socket,
+            request,
+            payload.map_or_else(Body::empty, Body::from),
+        )
+        .await?
     } else {
-        send(socket, request).await?
+        send(
+            socket,
+            request,
+            payload.map_or_else(Body::empty, Body::from),
+        )
+        .await?
     };
     let status = response.status();
     let version_is_2 = response
         .headers()
         .get("plasmite-version")
         .is_some_and(|value| value == "2");
-    let incarnation = response.headers().get("plasmite-incarnation").cloned();
-    let body = Body::new(response.into_body());
+    let (parts, incoming) = response.into_parts();
+    let body = Body::new(incoming);
     if status.is_success() {
-        return Ok((incarnation, body));
+        return Ok((parts.headers, body));
     }
     if status.as_u16() == 404 && !version_is_2 {
         return Err(Error::new(ErrorKind::Io)
@@ -215,13 +241,14 @@ async fn connect(
 async fn send(
     socket: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
     request: axum::http::request::Builder,
+    body: Body,
 ) -> ApiResult<hyper::Response<hyper::body::Incoming>> {
     let (mut sender, connection) = http1::handshake(TokioIo::new(socket))
         .await
         .map_err(|error| transport_error("could not open HTTP stream", error))?;
     tokio::spawn(connection);
     let request = request
-        .body(Body::empty())
+        .body(body)
         .map_err(|error| transport_error("could not construct stream request", error))?;
     sender
         .send_request(request)

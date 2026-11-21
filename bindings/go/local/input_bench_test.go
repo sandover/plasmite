@@ -12,6 +12,8 @@ import (
 	"testing"
 )
 
+var benchmarkMessage *Message
+
 func BenchmarkNativeInput(b *testing.B) {
 	fixtures := []string{"small_map", "small_struct", "wide", "long_string", "bytes", "array"}
 	if reverse := os.Getenv("PLASMITE_GO_REVERSE") == "1"; reverse {
@@ -65,11 +67,11 @@ func BenchmarkNativeInput(b *testing.B) {
 			if err = json.Unmarshal(expected, &canonical); err != nil {
 				b.Fatal(err)
 			}
-			source, err := pool.FeedView(value, nil)
+			source, err := pool.feedView(value, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
-			lanes := []string{"append_native_view", "append_json_view", "forward_native_view", "forward_json_view", "pipeline_native", "pipeline_json"}
+			lanes := []string{"append_native_view", "append_message", "append_json_view", "forward_native_view", "forward_json_view", "pipeline_native", "pipeline_json"}
 			if os.Getenv("PLASMITE_GO_REVERSE") == "1" {
 				for i, j := 0, len(lanes)-1; i < j; i, j = i+1, j-1 {
 					lanes[i], lanes[j] = lanes[j], lanes[i]
@@ -81,24 +83,26 @@ func BenchmarkNativeInput(b *testing.B) {
 					before := runtime.NumCgoCall()
 					b.ResetTimer()
 					for i := 0; i < b.N; i++ {
-						var view *MessageView
+						var view *messageView
 						var err error
 						switch lane {
+						case "append_message":
+							benchmarkMessage, err = pool.Feed(value, nil)
 						case "append_native_view", "pipeline_native":
-							view, err = pool.FeedView(value, nil)
+							view, err = pool.feedView(value, nil)
 						case "append_json_view", "pipeline_json":
 							var raw []byte
 							raw, err = json.Marshal(value)
 							if err == nil {
-								view, err = pool.FeedJSONView(raw, nil)
+								view, err = pool.feedJSONView(raw, nil)
 							}
 						case "forward_native_view":
-							view, err = pool.FeedView(source.Data(), nil)
+							view, err = pool.feedView(source.Data(), nil)
 						case "forward_json_view":
 							var raw []byte
 							raw, err = source.DataJSON()
 							if err == nil {
-								view, err = pool.FeedJSONView(raw, nil)
+								view, err = pool.feedJSONView(raw, nil)
 							}
 						}
 						if err != nil {
@@ -131,9 +135,14 @@ func BenchmarkNativeInput(b *testing.B) {
 					}
 					b.StopTimer()
 					b.ReportMetric(float64(runtime.NumCgoCall()-before)/float64(b.N), "cgo/op")
-					raw, err := benchmarkView.DataJSON()
-					if err != nil {
-						b.Fatal(err)
+					var raw []byte
+					if lane == "append_message" {
+						raw = benchmarkMessage.Data()
+					} else {
+						raw, err = benchmarkView.DataJSON()
+						if err != nil {
+							b.Fatal(err)
+						}
 					}
 					var actual any
 					if err = json.Unmarshal(raw, &actual); err != nil {

@@ -56,7 +56,7 @@ def _configure_unlocked():
             [c.c_char_p, c.c_size_t, c.c_uint64, c.c_uint64, owner, err],
             c.c_int,
         ),
-        "plsm_view_stream_next": (
+        "plsm_internal_view_stream_next": (
             [
                 c.POINTER(plsm_stream_t),
                 c.c_uint64,
@@ -68,7 +68,8 @@ def _configure_unlocked():
             ],
             c.c_int,
         ),
-        "plsm_pool_feed_view": (
+        "plsm_stream_next_message": ([c.POINTER(plsm_stream_t), c.c_uint64, owner, err], c.c_int),
+        "plsm_internal_pool_feed_view": (
             [c.POINTER(plsm_pool_t), c.c_void_p, c.POINTER(plsm_feed_options_t), owner, err],
             c.c_int,
         ),
@@ -96,7 +97,7 @@ def _configure_unlocked():
     }
     signatures.update(
         {
-            "plsm_pool_feed_json_view": (
+            "plsm_internal_pool_feed_json_view": (
                 [
                     c.POINTER(plsm_pool_t),
                     c.c_char_p,
@@ -123,11 +124,12 @@ def _configure_unlocked():
                 ],
                 c.c_int,
             ),
-            "plsm_pool_feed_builder_view": (
+            "plsm_internal_pool_feed_builder_view": (
                 [c.POINTER(plsm_pool_t), c.c_void_p, c.POINTER(plsm_feed_options_t), owner, err],
                 c.c_int,
             ),
             "plsm_builder_free": ([c.c_void_p], None),
+            "plsm_internal_builder_finish": ([c.c_void_p, owner, err], c.c_int),
         }
     )
     try:
@@ -399,7 +401,9 @@ def append(address, data, tags, durability):
     pool = c.cast(address, c.POINTER(plsm_pool_t))
     out = c.c_void_p()
     if type(data) is MessageView and tags is None:
-        _call(lib.plsm_pool_feed_view, pool, data._ptr, c.byref(plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability)), c.byref(out))
+        if address is None:
+            return data
+        _call(lib.plsm_internal_pool_feed_view, pool, data._ptr, c.byref(plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability)), c.byref(out))
         return MessageView(out)
     if type(data) is MessageView:
         data = data.data
@@ -416,7 +420,7 @@ def append(address, data, tags, durability):
     _configure()
     pool = c.cast(address, c.POINTER(plsm_pool_t))
     out = c.c_void_p()
-    if not binary[0]:
+    if not binary[0] and address is not None:
         # Bulk JSON avoids one ctypes call per field on compatibility runtimes.
         import json
 
@@ -426,7 +430,7 @@ def append(address, data, tags, durability):
         tag_array, encoded = _tag_array(tags)
         options = plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability, tag_array, len(encoded))
         _call(
-            lib.plsm_pool_feed_json_view,
+            lib.plsm_internal_pool_feed_json_view,
             pool,
             payload,
             len(payload),
@@ -446,7 +450,10 @@ def append(address, data, tags, durability):
             )
         else:
             _write_container(builder, root.value, data)
-        _call(lib.plsm_pool_feed_builder_view, pool, builder, c.byref(plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability)), c.byref(out))
+        if address is None:
+            _call(lib.plsm_internal_builder_finish, builder, c.byref(out))
+        else:
+            _call(lib.plsm_internal_pool_feed_builder_view, pool, builder, c.byref(plsm_feed_options_t(c.sizeof(plsm_feed_options_t), durability)), c.byref(out))
         return MessageView(out)
     finally:
         lib.plsm_builder_free(builder)
@@ -527,12 +534,25 @@ def adopt_owner(address):
     return MessageView(address)
 
 
+def next_message(address, timeout_ms):
+    _configure()
+    message, error = c.c_void_p(), c.POINTER(plsm_error_t)()
+    status = lib.plsm_stream_next_message(
+        c.cast(address, c.POINTER(plsm_stream_t)), timeout_ms, c.byref(message), c.byref(error)
+    )
+    if status < 0:
+        raise _take_error(error)
+    if status in (2, 3):
+        raise StopIteration
+    return MessageView(message) if status == 1 else None
+
+
 def next_batch(address, max_count, max_bytes, timeout_ms):
     _configure()
     owners = (c.c_void_p * max_count)()
     count = c.c_size_t()
     error = c.POINTER(plsm_error_t)()
-    status = lib.plsm_view_stream_next(
+    status = lib.plsm_internal_view_stream_next(
         c.cast(address, c.POINTER(plsm_stream_t)),
         timeout_ms,
         max_count,

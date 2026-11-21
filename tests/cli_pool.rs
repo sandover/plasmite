@@ -4,6 +4,54 @@ pub mod support;
 use support::cli::*;
 
 #[test]
+fn descriptions_survive_appends_and_can_be_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |arguments: &[&str]| {
+        cmd()
+            .arg("--dir")
+            .arg(dir.path())
+            .args(arguments)
+            .args(["--format", "json"])
+            .output()
+            .unwrap()
+    };
+    let parse = |output: std::process::Output| {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        parse_json(std::str::from_utf8(&output.stdout).unwrap())
+    };
+    let created = parse(run(&[
+        "pool",
+        "create",
+        "notes",
+        "--about",
+        "Build reports",
+        "--example",
+        r#"{"result":"ok"}"#,
+    ]));
+    assert_eq!(created["created"][0]["about"], "Build reports");
+    for _ in 0..3 {
+        parse(run(&["feed", "notes", r#"{"status":"new"}"#]));
+    }
+    let info = parse(run(&["pool", "info", "notes"]));
+    assert_eq!(info["about"], "Build reports");
+    assert_eq!(info["example"]["result"], "ok");
+    let listed = parse(run(&["pool", "list"]));
+    assert_eq!(listed["pools"][0]["about"], "Build reports");
+    let updated = parse(run(&["pool", "describe", "notes", "--about", "Handoffs"]));
+    assert_eq!(updated["about"], "Handoffs");
+    assert!(updated.get("example").is_none());
+    let cleared = parse(run(&["pool", "describe", "notes"]));
+    assert!(cleared.get("about").is_none());
+    let invalid = run(&["pool", "create", "invalid", "--example", "[1]"]);
+    assert!(!invalid.status.success());
+    assert!(!dir.path().join("invalid.plasmite").exists());
+}
+
+#[test]
 fn small_pool_wrap_keeps_reported_oldest_readable() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

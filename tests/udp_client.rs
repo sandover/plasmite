@@ -1,3 +1,4 @@
+use plasmite::api::internal::UdpPoolTransport;
 use plasmite::api::{
     ErrorKind, Feed, PoolRef, Read, Since, UdpClient, UdpEvent, UdpSkipReason, lite3,
 };
@@ -192,11 +193,9 @@ fn follows_arrival_order_across_progress_skips_duplicates_and_clock_steps() {
                         timestamp
                     }
                 );
-                assert_eq!(frame.payload, original);
-                let message = frame.message().unwrap();
-                assert_eq!(message.seq, frame.seq);
-                assert_eq!(message.meta.tags, ["lab"]);
-                assert_eq!(message.data, json!({"temperature": 23}));
+                assert_eq!(frame.raw(), original);
+                assert_eq!(frame.tags().unwrap(), ["lab"]);
+                assert_eq!(frame.data().unwrap(), &json!({"temperature": 23}));
             }
             UdpEvent::Skip {
                 first,

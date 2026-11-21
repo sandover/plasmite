@@ -68,14 +68,14 @@ class CWorker(Worker):
 class HttpPool:
     def __init__(self, origin, pool, key, ca, browser=False):
         parts = urlsplit(origin)
-        self.path = f"/v2/pools/{quote(pool, safe='')}"
+        self.path = f"/pools/{quote(pool, safe='')}"
         self.origin = origin
         self.headers = {}
         if parts.scheme == "https":
             self.connection = http.client.HTTPSConnection(parts.hostname, parts.port,
                 context=ssl.create_default_context(cafile=ca), timeout=60)
             if browser:
-                _, headers = self.request("POST", "/v0/browser/session", {"access_key": key},
+                _, headers = self.request("POST", "/browser/session", {"access_key": key},
                                                 {"Origin": origin})
                 self.headers = {"Cookie": headers["set-cookie"].split(";", 1)[0], "Origin": origin}
             else:
@@ -114,7 +114,7 @@ class HttpPool:
 
     def close(self):
         if "Cookie" in self.headers:
-            self.request("DELETE", "/v0/browser/session")
+            self.request("DELETE", "/browser/session")
         self.connection.close()
 
 
@@ -219,11 +219,14 @@ class PythonPool:
         self.pool = self.client.open_pool(pool)
 
     def append(self, item):
-        import plasmite
-        return json.loads(self.pool.feed_json(json.dumps(item, separators=(",", ":")).encode(), [], plasmite.Durability.FAST))
+        from plasmite._views import to_json
+        encoded = json.dumps(item, separators=(",", ":")).encode()
+        return json.loads(to_json(self.pool.feed(encoded, format="json")._view))
 
     def get(self, seq):
-        return json.loads(self.pool._get_json(seq))
+        from plasmite._views import to_json
+        with self.pool.fetch(since=seq) as reader:
+            return json.loads(to_json(next(reader)._view))
 
     def close(self):
         self.pool.close()

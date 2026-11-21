@@ -26,7 +26,7 @@ const inputSource = 10
 
 var marshalType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 var textMarshalType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
-var sourceValueType = reflect.TypeOf(Value{})
+var sourceValueType = reflect.TypeOf(viewValue{})
 var stringAnyMapType = reflect.TypeOf(map[string]any(nil))
 
 type inputPointer struct {
@@ -132,8 +132,8 @@ func (in *nativeInput) collect(value reflect.Value, parent uintptr, key string, 
 		return nil
 	}
 	if value.Type() == sourceValueType {
-		source := value.Interface().(Value)
-		if len(source.owner.encoded) == 0 || source.kind == KindMissing {
+		source := value.Interface().(viewValue)
+		if len(source.owner.encoded) == 0 || source.kind == kindMissing {
 			return invalidArgumentError("cannot append a missing value")
 		}
 		index := in.add(parent, key, hasKey, depth, inputSource)

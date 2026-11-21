@@ -3,6 +3,7 @@
 use crate::pool_wait::{PoolChange, PoolWaiters};
 use crate::udp_wire as wire;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use plasmite::api::internal::LocalPoolTransport;
 use plasmite::api::{Cursor, CursorResult, FrameRef, Pool, PoolPathGuard};
 use plasmite::api::{Error, ErrorKind, Feed, LocalClient, PoolRef};
 use ring::hmac;

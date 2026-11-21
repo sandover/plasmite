@@ -6,10 +6,11 @@
 //! Invariants: Follow streams are JSONL (messages) or framed Lite3 bytes (fast path).
 #![allow(clippy::result_large_err)]
 
-use super::{Message, Meta, PoolRef};
+use super::{Message, MessageEnvelope as DecodedMessage, Meta, PoolRef};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::{
-    Bounds, Durability, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions, PoolUtilization,
+    Bounds, Durability, PoolAgeMetrics, PoolDescription, PoolInfo, PoolMetrics, PoolOptions,
+    PoolUtilization,
 };
 use crate::interface_wire::{
     HttpErrorEnvelope, HttpErrorWire, MessageWire, PoolInfoWire, PoolMetricsWire,
@@ -17,7 +18,6 @@ use crate::interface_wire::{
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -25,7 +25,9 @@ use std::time::Duration;
 
 mod cancellable_read;
 mod read_v2;
-pub use read_v2::{RemoteLite3Read, RemoteRead};
+pub(crate) use cancellable_read::stream_runtime;
+pub(crate) use read_v2::AsyncRead;
+pub use read_v2::{RemoteLite3Read, RemotePoolTransport, RemoteRead};
 
 /// How long a one-shot request may take, start to finish. Streams have no deadline: a
 /// follower on a quiet pool waits as long as the pool stays quiet.
@@ -94,18 +96,13 @@ struct MessageEnvelope {
 struct CreatePoolRequest<'a> {
     pool: &'a str,
     size_bytes: u64,
+    #[serde(flatten)]
+    description: &'a PoolDescription,
 }
 
 #[derive(Serialize)]
 struct OpenPoolRequest {
     create: bool,
-}
-
-#[derive(Serialize)]
-struct AppendRequest<'a> {
-    data: &'a Value,
-    tags: &'a [String],
-    durability: &'a str,
 }
 
 impl RemoteClient {
@@ -200,8 +197,9 @@ impl RemoteClient {
         let payload = CreatePoolRequest {
             pool: &resolved.pool,
             size_bytes: options.file_size,
+            description: &options.description,
         };
-        let url = build_url(&resolved.base_url, &["v2", "pools"])?;
+        let url = build_url(&resolved.base_url, &["pools"])?;
         let _: PoolEnvelope = self
             .request_json("POST", &url, &payload)
             .map_err(|err| err.with_path(resolved.pool.clone()))?;
@@ -211,7 +209,7 @@ impl RemoteClient {
     pub fn open_pool(&self, pool_ref: &PoolRef, create: bool) -> ApiResult<RemotePool> {
         let resolved = self.resolve_pool_ref(pool_ref)?;
         let payload = OpenPoolRequest { create };
-        let url = build_url(&resolved.base_url, &["v2", "pools", &resolved.pool, "open"])?;
+        let url = build_url(&resolved.base_url, &["pools", &resolved.pool, "open"])?;
         let _envelope: PoolEnvelope = self
             .request_json("POST", &url, &payload)
             .map_err(|err| err.with_path(resolved.pool.clone()))?;
@@ -229,15 +227,31 @@ impl RemoteClient {
 
     pub fn pool_info(&self, pool_ref: &PoolRef) -> ApiResult<PoolInfo> {
         let resolved = self.resolve_pool_ref(pool_ref)?;
-        let url = build_url(&resolved.base_url, &["v2", "pools", &resolved.pool])?;
+        let url = build_url(&resolved.base_url, &["pools", &resolved.pool])?;
         let envelope: PoolEnvelope = self
             .request_json::<(), _>("GET", &url, &())
             .map_err(|err| err.with_path(resolved.pool.clone()))?;
         Ok(pool_info_from_remote(&resolved.pool, envelope.pool))
     }
 
+    pub fn set_pool_description(
+        &self,
+        pool_ref: &PoolRef,
+        description: PoolDescription,
+    ) -> ApiResult<PoolInfo> {
+        let resolved = self.resolve_pool_ref(pool_ref)?;
+        let url = build_url(
+            &resolved.base_url,
+            &["pools", &resolved.pool, "description"],
+        )?;
+        let envelope: PoolEnvelope = self
+            .request_json("PUT", &url, &description)
+            .map_err(|err| err.with_path(resolved.pool.clone()))?;
+        Ok(pool_info_from_remote(&resolved.pool, envelope.pool))
+    }
+
     pub fn list_pools(&self) -> ApiResult<Vec<PoolInfo>> {
-        let url = build_url(&self.inner.base_url, &["v2", "pools"])?;
+        let url = build_url(&self.inner.base_url, &["pools"])?;
         let envelope: PoolsEnvelope = self.request_json("GET", &url, &())?;
         Ok(envelope
             .pools
@@ -251,7 +265,7 @@ impl RemoteClient {
 
     pub fn delete_pool(&self, pool_ref: &PoolRef) -> ApiResult<()> {
         let resolved = self.resolve_pool_ref(pool_ref)?;
-        let url = build_url(&resolved.base_url, &["v2", "pools", &resolved.pool])?;
+        let url = build_url(&resolved.base_url, &["pools", &resolved.pool])?;
         let _value: serde_json::Value = self
             .request_json::<(), _>("DELETE", &url, &())
             .map_err(|err| err.with_path(resolved.pool.clone()))?;
@@ -303,11 +317,7 @@ impl RemoteClient {
                 .send_string(&payload)
         };
 
-        let response = if url.path().starts_with("/v2/pools") {
-            read_v2::request_result_v2(response)?
-        } else {
-            request_result(response)?
-        };
+        let response = read_v2::request_result_v2(response)?;
         read_json_response(response)
     }
 
@@ -389,12 +399,54 @@ impl RemotePool {
     }
 
     pub fn info(&self) -> ApiResult<PoolInfo> {
-        let url = build_url(&self.base_url, &["v2", "pools", &self.pool])?;
+        let url = build_url(&self.base_url, &["pools", &self.pool])?;
         let envelope: PoolEnvelope = self
             .client
             .request_json::<(), _>("GET", &url, &())
             .map_err(|err| err.with_path(self.pool.clone()))?;
         Ok(pool_info_from_remote(&self.pool, envelope.pool))
+    }
+
+    pub fn set_description(&self, description: PoolDescription) -> ApiResult<()> {
+        self.client
+            .set_pool_description(&self.pool_ref, description)
+            .map(|_| ())
+    }
+
+    pub(crate) fn feed_committed_view(
+        &self,
+        payload: &[u8],
+        durability: Durability,
+    ) -> ApiResult<crate::view::MessageView> {
+        let response =
+            self.request_lite3_feed(payload, durability, "application/x-plasmite-lite3")?;
+        let identity = |name| {
+            response
+                .header(name)
+                .and_then(|value| value.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::Io)
+                        .with_message(format!("missing feed response header {name}"))
+                })
+        };
+        let seq = identity("plasmite-seq")?;
+        let time = identity("plasmite-timestamp-ns")?;
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .take(MAX_REMOTE_RESPONSE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("could not read stored message")
+                    .with_source(err)
+            })?;
+        if bytes.len() > MAX_REMOTE_RESPONSE_BYTES {
+            return Err(
+                Error::new(ErrorKind::Io).with_message("stored message response is too large")
+            );
+        }
+        crate::view::MessageView::from_owned(bytes, seq, time, 0)
     }
 
     fn request_lite3_feed(
@@ -403,11 +455,7 @@ impl RemotePool {
         durability: Durability,
         accept: &str,
     ) -> ApiResult<ureq::Response> {
-        let mut url = build_url(&self.base_url, &["v2", "pools", &self.pool, "feed"])?;
-        if durability == Durability::Flush {
-            url.query_pairs_mut()
-                .append_pair("durability", durability_to_str(durability));
-        }
+        let url = self.feed_url(durability)?;
         let response = self
             .client
             .request("POST", &url)?
@@ -416,6 +464,62 @@ impl RemotePool {
             .send_bytes(payload);
 
         read_v2::request_result_v2(response)
+    }
+
+    fn feed_url(&self, durability: Durability) -> ApiResult<Url> {
+        let mut url = build_url(&self.base_url, &["pools", &self.pool, "feed"])?;
+        if durability == Durability::Flush {
+            url.query_pairs_mut()
+                .append_pair("durability", durability_to_str(durability));
+        }
+        Ok(url)
+    }
+
+    pub(crate) async fn feed_view_async(
+        &self,
+        view: crate::view::MessageView,
+        durability: Durability,
+    ) -> ApiResult<crate::view::MessageView> {
+        let url = self.feed_url(durability)?;
+        let key = self
+            .client
+            .key_for_request(&url)?
+            .map(std::borrow::Cow::into_owned);
+        tokio::time::timeout(REQUEST_TIMEOUT, async {
+            let (headers, body) = cancellable_read::request(
+                url,
+                "application/x-plasmite-lite3",
+                key,
+                Some(bytes::Bytes::copy_from_slice(view.bytes())),
+            )
+            .await?;
+            let identity = |name| {
+                headers
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .ok_or_else(|| {
+                        Error::new(ErrorKind::Io)
+                            .with_message(format!("missing feed response header {name}"))
+                    })
+            };
+            let seq = identity("plasmite-seq")?;
+            let time = identity("plasmite-timestamp-ns")?;
+            let payload = axum::body::to_bytes(body, MAX_REMOTE_RESPONSE_BYTES)
+                .await
+                .map_err(|err| {
+                    Error::new(ErrorKind::Io)
+                        .with_message("could not read stored message")
+                        .with_source(err)
+                })?;
+            crate::view::MessageView::from_bytes(&payload, seq, time)
+        })
+        .await
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("feed timed out")
+                .with_source(err)
+        })?
     }
 }
 
@@ -661,6 +765,10 @@ fn pool_info_from_remote(pool_ref: &str, pool: PoolInfoWire) -> PoolInfo {
             newest_seq: pool.bounds.newest,
         },
         metrics: pool.metrics.map(pool_metrics_from_remote),
+        description: PoolDescription {
+            about: pool.about,
+            example: pool.example,
+        },
     }
 }
 
@@ -688,12 +796,13 @@ fn pool_metrics_from_remote(metrics: PoolMetricsWire) -> PoolMetrics {
     }
 }
 
-fn message_from_remote(remote: MessageWire) -> ApiResult<Message> {
-    Ok(Message {
+fn message_from_remote(remote: MessageWire) -> ApiResult<DecodedMessage> {
+    Ok(DecodedMessage {
         seq: remote.seq,
         time: super::message::parse_timestamp_ns(&remote.time)?,
         meta: Meta {
             tags: remote.meta.tags,
+            sender: remote.meta.sender,
         },
         data: remote.data,
     })

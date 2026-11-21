@@ -315,7 +315,7 @@ function encodeOwner(data, tags) {
     return encoder.finish(message ? data.data : data);
   } finally { encoder.close(); }
 }
-async function encodeMessage(data, tags) {
+function encodeMessage(data, tags) {
   const message = messageReference(data);
   if (message && tags === undefined) return encoded(message);
   const owner = encodeOwner(data, tags);

@@ -5,6 +5,7 @@
 //! Invariants: Bounded waits avoid test flakiness.
 //! Invariants: Server processes are cleaned up on drop.
 
+use plasmite::api::internal::RemotePoolTransport;
 use plasmite::api::{
     AppendOptions, Durability, ErrorKind, Feed, Pool, PoolOptions, PoolRef, Read as ReadOptions,
     RemoteClient, RemotePool, Since, access,
@@ -53,7 +54,56 @@ fn remote_append_and_get() -> TestResult<()> {
 
     let fetched = fetch_message(&pool, message.seq)?;
     assert_eq!(fetched.seq, message.seq);
-    assert_eq!(fetched.data, payload);
+    assert_eq!(fetched.data()?, &payload);
+    Ok(())
+}
+
+#[test]
+fn keyed_feed_stamps_sender_and_forwarding_uses_the_destination_identity() -> TestResult<()> {
+    use plasmite::api::FeedInput;
+
+    let dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(dir.path())?;
+    let client = server.client()?;
+    let remote = client.create_pool(&PoolRef::name("notes"), PoolOptions::new(65536))?;
+    let input = plasmite::api::lite3::Lite3Buf::from_json_str(
+        r#"{"meta":{"tags":["note"],"sender":"pretend","custom":true},"data":{"n":7}}"#,
+    )?;
+    let sent = remote.feed(FeedInput::Lite3(input.as_slice()), Feed::new())?;
+    let received = fetch_message(&remote, sent.seq)?;
+    assert_eq!(sent.sender(), Some("integration-test"));
+    assert_eq!(received, sent);
+    assert_eq!(received.tags()?, ["note"]);
+    assert_eq!(received.data()?, &json!({"n":7}));
+    let view = plasmite::view::MessageView::from_bytes(sent.raw(), sent.seq, sent.time)?;
+    assert!(view.root().get("meta")?.unwrap().get("custom")?.is_none());
+    let mut local = Pool::create(dir.path().join("copy.plasmite"), PoolOptions::new(65536))?;
+    let copy = local.feed(&received, Feed::new())?;
+    assert_eq!(copy.sender(), None);
+    assert_eq!(copy.data()?, received.data()?);
+    assert_eq!(copy.tags()?, received.tags()?);
+    Ok(())
+}
+
+#[test]
+fn pool_descriptions_round_trip_through_http() -> TestResult<()> {
+    use plasmite::api::PoolDescription;
+
+    let dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(dir.path())?;
+    let client = server.client()?;
+    let description = PoolDescription {
+        about: Some("Deployment updates".into()),
+        example: Some(json!({"deployed":true})),
+    };
+    let pool = client.create_pool(
+        &PoolRef::name("deploys"),
+        PoolOptions::new(65536).with_description(description.clone()),
+    )?;
+    assert_eq!(pool.info()?.description, description);
+    assert_eq!(client.list_pools()?[0].description, description);
+    pool.set_description(PoolDescription::default())?;
+    assert_eq!(pool.info()?.description, PoolDescription::default());
     Ok(())
 }
 
@@ -87,8 +137,8 @@ fn remote_delete_sends_no_body_and_reuses_connection() -> TestResult<()> {
         socket.set_write_timeout(Some(Duration::from_secs(5)))?;
         let mut body_lengths = Vec::new();
         for (request_line, response) in [
-            ("DELETE /v2/pools/shared HTTP/1.1", "{\"ok\":true}"),
-            ("GET /v2/pools HTTP/1.1", "{\"pools\":[]}"),
+            ("DELETE /pools/shared HTTP/1.1", "{\"ok\":true}"),
+            ("GET /pools HTTP/1.1", "{\"pools\":[]}"),
         ] {
             let mut headers = Vec::new();
             while !headers.ends_with(b"\r\n\r\n") {
@@ -198,7 +248,7 @@ fn remote_lite3_receipt_preserves_payload_and_rejects_unreadable_data() -> TestR
     let copied = pool.feed_lite3(&payload, Feed::new())?;
     assert_eq!(copied.seq, seed.seq + 1);
     assert_eq!(copied.meta.tags, tags);
-    assert_eq!(copied.data, seed.data);
+    assert_eq!(copied.data, *seed.data()?);
     assert_eq!(
         fetch_frame(&pool, copied.seq).map(|frame| frame.payload)?,
         payload
@@ -481,7 +531,7 @@ fn remote_rejects_path_pool_names() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
 
-    let create_url = format!("{}/v2/pools", server.local_url);
+    let create_url = format!("{}/pools", server.local_url);
     let create_body = r#"{"pool":"/tmp/evil","size_bytes":1024}"#;
     match ureq::post(&create_url)
         .set("Content-Type", "application/json")
@@ -497,7 +547,7 @@ fn remote_rejects_path_pool_names() -> TestResult<()> {
         Err(err) => return Err(err.into()),
     }
 
-    let open_url = format!("{}/v2/pools/%2Ftmp%2Fevil/open", server.local_url);
+    let open_url = format!("{}/pools/%2Ftmp%2Fevil/open", server.local_url);
     let open_body = r#"{"create":true}"#;
     match ureq::post(&open_url)
         .set("Content-Type", "application/json")
@@ -623,7 +673,7 @@ fn remote_tail_filters_by_tags() -> TestResult<()> {
     let mut tail = pool.follow(options)?;
     let msg = tail.next_message()?.expect("filtered message");
     assert_eq!(msg.seq, second.seq);
-    assert_eq!(msg.data, json!({"kind": "keep"}));
+    assert_eq!(msg.data()?, &json!({"kind": "keep"}));
     Ok(())
 }
 
@@ -649,7 +699,7 @@ fn remote_tail_filters_by_tags_with_commas() -> TestResult<()> {
     let mut tail = pool.follow(options)?;
     let msg = tail.next_message()?.expect("filtered message");
     assert_eq!(msg.seq, second.seq);
-    assert_eq!(msg.data, json!({"kind": "keep"}));
+    assert_eq!(msg.data()?, &json!({"kind": "keep"}));
     Ok(())
 }
 
@@ -715,7 +765,7 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
 }
 
 #[test]
-fn local_ui_pool_list_reports_ring_layout() -> TestResult<()> {
+fn pool_collection_stream_reports_ring_layout() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
@@ -727,10 +777,12 @@ fn local_ui_pool_list_reports_ring_layout() -> TestResult<()> {
     pool.feed(&json!({"body": "short"}), Feed::default())?;
     pool.feed(&json!({"body": "x".repeat(2000)}), Feed::default())?;
 
-    let body: Value = ureq::get(&format!("{}/v0/ui/pools", server.local_url))
+    let response = ureq::get(&format!("{}/pools", server.local_url))
+        .set("Accept", "text/event-stream")
+        .timeout(Duration::from_secs(5))
         .call()
-        .expect("ui pool list")
-        .into_json()?;
+        .expect("pool collection stream");
+    let body = read_pool_event(&mut BufReader::new(response.into_reader()))?;
     let pools = body["pools"].as_array().expect("pools array");
     let find = |name: &str| pools.iter().find(|pool| pool["name"] == name).expect(name);
 
@@ -796,17 +848,19 @@ fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
-    let response = ureq::get(&format!("{}/v0/ui/pools/stream", server.local_url))
+    let response = ureq::get(&format!("{}/pools", server.local_url))
+        .set("Accept", "text/event-stream")
         .timeout(Duration::from_secs(5))
         .call()?;
     assert_eq!(response.status(), 200);
     assert_eq!(response.header("content-type"), Some("text/event-stream"));
+    assert_eq!(response.header("vary"), Some("Accept"));
     let mut reader = BufReader::new(response.into_reader());
     let first = read_pool_event(&mut reader)?;
-    let get: Value = ureq::get(&format!("{}/v0/ui/pools", server.local_url))
-        .call()?
-        .into_json()?;
-    assert_eq!(first, get);
+    let response = ureq::get(&format!("{}/pools", server.local_url)).call()?;
+    assert_eq!(response.header("vary"), Some("Accept"));
+    assert_eq!(response.into_json::<Value>()?, json!({"pools": []}));
+    assert_eq!(first, json!({"pools": [], "available": true}));
 
     let pool_ref = PoolRef::name("changing");
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
@@ -851,7 +905,7 @@ fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
 }
 
 #[test]
-fn browser_read_uses_v2_and_receives_pool_incarnation() -> TestResult<()> {
+fn browser_reads_and_pool_info_share_the_pool_incarnation() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
@@ -861,15 +915,19 @@ fn browser_read_uses_v2_and_receives_pool_incarnation() -> TestResult<()> {
     let pool = client.open_pool(&pool_ref, false)?;
     let created = pool.feed(&json!({"kind": "ui", "ok": true}), Feed::default())?;
 
+    let info: Value = ureq::get(&format!("{}/pools/ui-events", server.local_url))
+        .call()?
+        .into_json()?;
+    let incarnation = info["pool"]["incarnation"].as_str().expect("pool identity");
     let response = ureq::get(&format!(
-        "{}/v2/pools/ui-events/fetch?since={}&until=1",
+        "{}/pools/ui-events/fetch?since={}&until=1",
         server.local_url, created.seq
     ))
     .call()
-    .expect("local sse request");
+    .expect("local fetch request");
     assert_eq!(response.status(), 200);
     assert_eq!(response.header("content-type"), Some("application/jsonl"));
-    assert!(response.header("plasmite-incarnation").is_some());
+    assert_eq!(response.header("plasmite-incarnation"), Some(incarnation));
     let body = response.into_string()?;
     let mut lines = body.lines();
     assert_eq!(
@@ -893,7 +951,7 @@ fn continuation_checks_incarnation_before_replacement_bounds() -> TestResult<()>
     for n in 1..=3 {
         pool.feed(&json!({"n": n}), Feed::default())?;
     }
-    let url = format!("{}/v2/pools/replaced/fetch", server.local_url);
+    let url = format!("{}/pools/replaced/fetch", server.local_url);
     let response = ureq::get(&url).call()?;
     let original = response.header("plasmite-incarnation").unwrap().to_owned();
     let _ = response.into_string()?;
@@ -933,7 +991,7 @@ fn local_ui_tail_reads_reported_oldest_after_small_pool_wrap() -> TestResult<()>
     assert!(oldest > 1, "the pool must wrap and overwrite messages");
 
     let response = ureq::get(&format!(
-        "{}/v2/pools/wrapped/fetch?since={oldest}&until={oldest}",
+        "{}/pools/wrapped/fetch?since={oldest}&until={oldest}",
         server.local_url
     ))
     .call()?;
@@ -1249,12 +1307,31 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
             "method": "tools/call",
             "params": {
                 "name": "plasmite_pool_create",
-                "arguments": { "name": "flow" }
+                "arguments": {"name":"flow","about":"Build output","example":{"step":"test"}}
             }
         }),
     )
     .expect("create");
     let create_json: Value = serde_json::from_str(&create.into_string()?)?;
+    assert_eq!(
+        create_json["result"]["structuredContent"]["pool"]["about"],
+        "Build output"
+    );
+    assert_eq!(
+        create_json["result"]["structuredContent"]["pool"]["example"]["step"],
+        "test"
+    );
+    let resources: Value = serde_json::from_str(
+        &mcp_post(
+            &server.local_url,
+            &json!({"jsonrpc":"2.0","method":"resources/list","id":101}),
+        )?
+        .into_string()?,
+    )?;
+    assert_eq!(
+        resources["result"]["resources"][0]["description"],
+        "Build output"
+    );
     assert_eq!(
         create_json["result"]["structuredContent"]["pool"]["name"],
         json!("flow")
@@ -1434,7 +1511,7 @@ fn http_follow_keeps_the_same_response_open_on_a_quiet_pool() -> TestResult<()> 
     );
     let client = server.client()?;
     let pool = client.create_pool(&PoolRef::name("events"), PoolOptions::new(65536))?;
-    let url = format!("{}/v2/pools/events/follow", server.local_url);
+    let url = format!("{}/pools/events/follow", server.local_url);
     let response = ureq::get(&url).timeout(Duration::from_secs(3)).call()?;
     let mut lines = BufReader::new(response.into_reader()).lines();
     for n in 1..=2 {
@@ -1443,7 +1520,7 @@ fn http_follow_keeps_the_same_response_open_on_a_quiet_pool() -> TestResult<()> 
         let line = lines.next().expect("follow remains open")?;
         let record: Value = serde_json::from_str(&line)?;
         assert_eq!(record["seq"], saved.seq, "{record}");
-        assert_eq!(record["data"], saved.data);
+        assert_eq!(&record["data"], saved.data()?);
     }
     Ok(())
 }
@@ -1468,7 +1545,7 @@ fn real_fetch_continues_after_cutoff_with_its_original_end() -> TestResult<()> {
     for _ in 0..count {
         writer.feed(&payload, Feed::new())?;
     }
-    let url = format!("{}/v2/pools/history/fetch", server.local_url);
+    let url = format!("{}/pools/history/fetch", server.local_url);
     let request = |url: &str| -> TestResult<ureq::Response> {
         Ok(ureq::get(url).timeout(Duration::from_secs(5)).call()?)
     };
@@ -1516,7 +1593,7 @@ fn real_fetch_continues_after_cutoff_with_its_original_end() -> TestResult<()> {
 fn ordinary_http_rejects_untrusted_origin_before_body_extraction() -> TestResult<()> {
     let temp = tempfile::tempdir()?;
     let server = TestServer::try_start(temp.path())?;
-    let response = ureq::post(&format!("{}/v2/pools", server.local_url))
+    let response = ureq::post(&format!("{}/pools", server.local_url))
         .set("Origin", "https://untrusted.example")
         .set("Content-Type", "application/json")
         .send_string("{");
@@ -1582,14 +1659,21 @@ fn v2_binary_read_ends_with_a_structured_retention_gap() -> TestResult<()> {
 }
 
 #[test]
-fn version_one_pool_routes_name_required_upgrade() -> TestResult<()> {
+fn versioned_pool_routes_name_required_upgrade() -> TestResult<()> {
     let temp = tempfile::tempdir()?;
     let server = TestServer::try_start(temp.path())?;
-    for path in ["pools", "pools/events/append", "pools/events/follow"] {
-        let url = format!("{}/v0/{path}", server.local_url);
+    for path in [
+        "/v0/pools",
+        "/v0/pools/events/append",
+        "/v0/ui/pools/stream",
+        "/v2/pools",
+        "/v2/pools/events/follow",
+    ] {
+        let url = format!("{}{path}", server.local_url);
         let Err(ureq::Error::Status(426, response)) = ureq::get(&url).call() else {
             panic!("expected upgrade error for {path}");
         };
+        assert_eq!(response.header("plasmite-version"), Some("2"));
         let value: Value = response.into_json()?;
         assert_eq!(value["error"]["kind"], "Usage");
         assert!(

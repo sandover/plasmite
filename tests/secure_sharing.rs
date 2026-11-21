@@ -23,15 +23,15 @@ fn native_key_connects_and_reuses_server_identity()
     let server = TestServer::start_with_args_and_scheme(&pool_dir, &[], "https");
     let url = server.base_url.clone();
     assert!(
-        ureq::get(&format!("{}/v2/pools", server.local_url))
+        ureq::get(&format!("{}/pools", server.local_url))
             .call()
             .is_ok()
     );
-    let forged_origin = ureq::get(&format!("{}/v2/pools", server.local_url))
+    let forged_origin = ureq::get(&format!("{}/pools", server.local_url))
         .set("Origin", "https://evil.test")
         .call();
     assert!(matches!(forged_origin, Err(ureq::Error::Status(403, _))));
-    let forged_host = ureq::get(&format!("{}/v2/pools", server.local_url))
+    let forged_host = ureq::get(&format!("{}/pools", server.local_url))
         .set("Host", "evil.test")
         .call();
     assert!(matches!(forged_host, Err(ureq::Error::Status(403, _))));
@@ -186,8 +186,8 @@ fn native_key_connects_and_reuses_server_identity()
         pool.fetch(Selection::since(Since::Seq(message.seq)))?
             .next_message()?
             .ok_or("missing shared message")?
-            .data,
-        json!({"message":"hello"})
+            .data()?,
+        &json!({"message":"hello"})
     );
 
     let other_dir = temp.path().join("other-pools");
@@ -242,7 +242,7 @@ fn native_key_connects_and_reuses_server_identity()
         .fetch(Selection::since(Since::Seq(message.seq)))?
         .next_message()?
         .ok_or("missing message after server restart")?;
-    assert_eq!(restored_message.data, json!({"message":"hello"}));
+    assert_eq!(restored_message.data()?, &json!({"message":"hello"}));
     saved
         .delete_pool(&pool_ref)
         .map_err(|error| format!("delete pool after server restart: {error:?}"))?;

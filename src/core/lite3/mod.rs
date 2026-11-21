@@ -316,6 +316,26 @@ impl<'a> Lite3DocRef<'a> {
         Ok(text)
     }
 
+    pub(crate) fn str_at_key(&self, ofs: usize, key: &CStr) -> Result<&'a str, Error> {
+        let mut ptr = std::ptr::null();
+        let mut len = 0;
+        let result = unsafe {
+            sys::plasmite_lite3_get_str(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                ofs,
+                key.as_ptr(),
+                &mut ptr,
+                &mut len,
+            )
+        };
+        if result < 0 {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("missing or invalid string"));
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr.cast(), len) };
+        std::str::from_utf8(bytes).map_err(|err| Error::new(ErrorKind::Corrupt).with_source(err))
+    }
+
     pub fn bool_at_key(&self, ofs: usize, key: &str) -> Result<bool, Error> {
         let mut out = false;
         let ret = unsafe {

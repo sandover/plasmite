@@ -30,7 +30,7 @@ fn duplex_receives_its_first_send_and_an_independent_reply_after_input_eof() {
         let request = loop {
             match writer.get(1) {
                 Ok(frame) => {
-                    break plasmite::api::Message::from_lite3(
+                    break plasmite::api::MessageEnvelope::from_lite3(
                         frame.seq,
                         frame.time,
                         &frame.payload,
@@ -154,7 +154,7 @@ fn duplex_input_error_preserves_prior_appends_and_stops_reception() {
     );
     let frame = pool.get(1).unwrap();
     let message =
-        plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
+        plasmite::api::MessageEnvelope::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
     assert_eq!(message.data, json!({"n":1}));
     assert_eq!(pool.info().unwrap().bounds.newest_seq, Some(1));
 }

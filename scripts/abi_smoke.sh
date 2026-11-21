@@ -68,26 +68,44 @@ int main(int argc, char **argv) {
 
     const plsm_text_t tags[] = {{(const uint8_t *)"smoke", 5}};
     const char *json = "{\"kind\":\"smoke\"}";
-    plsm_buf_t buf = {0};
+    const plsm_message_t *message = NULL;
     const plsm_feed_options_t feed = {
         .struct_size = sizeof(feed),
         .tags = tags,
         .tags_len = 1,
     };
-    if (plsm_pool_feed_json(
-            pool,
+    if (plsm_pool_feed(
+            pool, PLSM_FEED_JSON,
             (const uint8_t *)json,
             strlen(json),
             &feed,
-            &buf,
+            &message,
             &err) != 0) {
         plsm_pool_free(pool);
         plsm_client_free(client);
-        return fail("plsm_pool_feed_json", err);
+        return fail("plsm_pool_feed", err);
     }
 
-    plsm_buf_free(&buf);
+    if (plsm_message_seq(message) != 1 || plsm_message_sender(message, &(size_t){0}) != NULL) {
+        return 1;
+    }
+    plsm_stream_t *reader = NULL;
+    const plsm_message_t *fetched = NULL;
+    if (plsm_pool_fetch(pool, NULL, &reader, &err) != 0 ||
+        plsm_stream_next_message(reader, 1000, &fetched, &err) != 1) {
+        return fail("fetch one message", err);
+    }
+    plsm_stream_free(reader);
     plsm_pool_free(pool);
+    size_t sent_len = 0, fetched_len = 0;
+    const uint8_t *sent = plsm_message_raw(message, &sent_len);
+    const uint8_t *stored = plsm_message_raw(fetched, &fetched_len);
+    if (plsm_message_seq(fetched) != 1 || sent_len == 0 || sent_len != fetched_len ||
+        memcmp(sent, stored, sent_len) != 0) {
+        return fail("retained message differs from the stored feed", NULL);
+    }
+    plsm_message_release(fetched);
+    plsm_message_release(message);
     plsm_client_free(client);
     return 0;
 }

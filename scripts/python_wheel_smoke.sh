@@ -129,11 +129,9 @@ for variant in abi3 cp310 fallback; do
   unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH PLASMITE_PYTHON_VIEWS
   EXPECTED_VIEW_BACKEND="$expected_backend" python - <<'PY'
 import gc
-import json
 import os
-from collections.abc import Mapping, Sequence
 from tempfile import TemporaryDirectory
-from plasmite import Client, to_json, to_native, view_from_lite3
+from plasmite import Client, Message
 from plasmite._views import VIEW_BACKEND
 
 assert VIEW_BACKEND == os.environ["EXPECTED_VIEW_BACKEND"], VIEW_BACKEND
@@ -142,35 +140,21 @@ with TemporaryDirectory() as directory, Client(directory) as client:
         sent = pool.feed({"wheel": True, "values": [1, 2, 3]}, ["package"])
         with pool.fetch(since=sent.seq) as reader:
             received = next(reader)
+        assert type(sent) is type(received) is Message
         assert received.data["wheel"] and received.tags == ["package"]
-        with pool.fetch_view(since=sent.seq) as reader:
-            view = next(reader)
-        assert isinstance(view.data, Mapping) and isinstance(view.data["values"], Sequence)
-        assert to_native(view)["data"] == received.data
-        assert json.loads(to_json(view))["data"] == received.data
-        child, buffer = view.data["values"], memoryview(view)
+        assert received.data is received.data
+        child, buffer = received.data["values"], received.raw
         assert buffer.readonly
-        assert view_from_lite3(bytes(buffer)).data == received.data
-        produced = pool.feed_view({"integer": (1 << 63) - 1, "bytes": b"copy"}, ["nul\0tag"])
-        assert to_native(produced.data) == {"integer": (1 << 63) - 1, "bytes": b"copy"}
-        assert list(produced.tags) == ["nul\0tag"]
-        with pool.fetch_view(since=sent.seq) as stream:
-            forwarded = pool.feed_view(produced)
-            assert to_native(forwarded.data) == to_native(produced.data)
-            assert list(forwarded.tags) == list(produced.tags)
-            sliced = pool.feed_view({"array": child[::-1], "bytes": produced.data["bytes"][::2]})
-            assert to_native(sliced.data) == {"array": [3, 2, 1], "bytes": b"cp"}
-            first = next(stream)
-            batch = stream.next_batch(4, 1024 * 1024)
-            assert first.seq == sent.seq and [item.seq for item in batch] == [produced.seq]
-            try:
-                next(stream)
-            except StopIteration:
-                pass
-            else:
-                raise AssertionError("finite view reader exceeded its opening boundary")
-
-        del view
+        assert pool.feed(buffer, format="lite3").data == received.data
+        produced = pool.feed({"integer": (1 << 63) - 1, "bytes": b"copy"}, ["nul\0tag"])
+        assert produced.data == {"integer": (1 << 63) - 1, "bytes": b"copy"}
+        assert produced.tags == ["nul\0tag"]
+        with pool.fetch(since=produced.seq) as stream:
+            forwarded = pool.feed(produced)
+            assert forwarded.raw == produced.raw and forwarded.data == produced.data
+            assert forwarded.tags == produced.tags
+            assert [item.seq for item in stream] == [produced.seq]
+        del received
     gc.collect()
     assert list(child) == [1, 2, 3] and len(buffer) > 0
 print("python-wheel-native-roundtrip-and-view-ok")

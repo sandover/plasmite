@@ -11,6 +11,10 @@ use crate::core::pool::{Pool, ProgressWatch};
 use std::path::Path;
 use std::time::Duration;
 
+mod shared;
+#[doc(hidden)]
+pub use shared::{PoolSubscription, SharedPoolWaiters};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NotifyWait {
     Signaled,

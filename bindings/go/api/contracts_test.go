@@ -1,11 +1,3 @@
-/*
-Purpose: Validate API contract helpers and message normalization logic.
-Key Exports: None (package tests).
-Role: Keep shared contract behavior deterministic without cgo dependencies.
-Invariants: Decoded message times are normalized to UTC.
-Invariants: Message tags are sourced from Message.Meta.Tags.
-Notes: These tests run under `CGO_ENABLED=0` in bindings-go-contract-test.
-*/
 package api
 
 import (
@@ -13,29 +5,48 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sandover/plasmite/bindings/go/v2/internal/message"
 )
 
-func TestDecodeMessageNormalizesUTC(t *testing.T) {
-	raw := []byte(`{"seq":7,"time":"2026-02-18T05:00:00+03:00","meta":{"tags":["alpha","beta"]},"data":{"ok":true}}`)
-	msg, err := DecodeMessage(raw)
-	if err != nil {
-		t.Fatalf("decode message: %v", err)
-	}
-	want := uint64(time.Date(2026, 2, 18, 2, 0, 0, 0, time.UTC).UnixNano())
-	if msg.Time != want {
-		t.Fatalf("expected %d ns, got %d", want, msg.Time)
-	}
-	encoded, err := json.Marshal(msg)
-	if err != nil || !strings.Contains(string(encoded), `"time":"2026-02-18T02:00:00.000000000Z"`) {
-		t.Fatalf("encode canonical time: %s (%v)", encoded, err)
-	}
+type testEncoding struct{ dataReads int }
+
+func (e *testEncoding) DataJSON() ([]byte, error) {
+	e.dataReads++
+	return []byte(`{"ok":true}`), nil
 }
 
-func TestMessageTagsAccessorUsesMeta(t *testing.T) {
-	msg := &Message{Meta: MessageMeta{Tags: []string{"one", "two"}}}
+func (e *testEncoding) MetaJSON() ([]byte, error) {
+	return []byte(`{"tags":["alpha","beta"],"sender":"reader"}`), nil
+}
+
+func (e *testEncoding) Decode(destination any) error {
+	return json.Unmarshal([]byte(`{"ok":true}`), destination)
+}
+
+func TestMessageOwnsItsEncodingAndDecodesDataOnDemand(t *testing.T) {
+	instant := uint64(time.Date(2026, 2, 18, 2, 0, 0, 123, time.UTC).UnixNano())
+	source := &testEncoding{}
+	msg := message.New(7, instant, []byte{1, 2, 3}, source)
+	if msg.Time() != instant || msg.Seq() != 7 || msg.Sender() != "reader" {
+		t.Fatal("wrong message identity or sender")
+	}
 	tags := msg.Tags()
-	if len(tags) != 2 || tags[0] != "one" || tags[1] != "two" {
-		t.Fatalf("unexpected tags: %#v", tags)
+	if len(tags) != 2 || tags[0] != "alpha" || tags[1] != "beta" {
+		t.Fatalf("wrong tags: %v", tags)
+	}
+	tags[0] = "mutated"
+	msg.Raw()[0] = 9
+	if msg.Tags()[0] != "alpha" || msg.Raw()[0] != 1 || source.dataReads != 0 {
+		t.Fatal("metadata or raw access changed the snapshot or decoded data")
+	}
+	msg.Data()[0] = 'X'
+	if string(msg.Data()) != `{"ok":true}` || source.dataReads != 1 {
+		t.Fatal("data was mutated or read twice")
+	}
+	encoded, err := json.Marshal(msg)
+	if err != nil || !strings.Contains(string(encoded), `"time":"2026-02-18T02:00:00.000000123Z"`) {
+		t.Fatalf("encode canonical time: %s (%v)", encoded, err)
 	}
 }
 
@@ -43,48 +54,5 @@ func TestDefaultPoolSizeBytesMatchesCoreDefault(t *testing.T) {
 	const want = 1024 * 1024
 	if DefaultPoolSizeBytes != want {
 		t.Fatalf("expected default pool size %d, got %d", want, DefaultPoolSizeBytes)
-	}
-}
-
-func TestMessageOwnershipAndDataIsolation(t *testing.T) {
-	const wire = `{"seq":1,"time":"2026-01-01T00:00:00Z","meta":{"tags":[]},"data":{"ok":true}}`
-	for _, owned := range []bool{false, true} {
-		raw := []byte(wire)
-		decode := DecodeMessage
-		if owned {
-			decode = DecodeOwnedMessage
-		}
-		msg, err := decode(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if (&msg.Raw[0] == &raw[0]) != owned {
-			t.Fatal("wrong raw ownership")
-		}
-		// Both public fields remain independently mutable.
-		before := string(msg.Data)
-		for i := range msg.Raw {
-			msg.Raw[i] = ' '
-		}
-		if string(msg.Data) != before {
-			t.Fatal("raw mutation changed data")
-		}
-		if !owned && string(raw) != wire {
-			t.Fatal("defensive decode modified caller bytes")
-		}
-	}
-}
-
-func BenchmarkDecodeOwnership(b *testing.B) {
-	wire := []byte(`{"seq":1,"time":"2026-01-01T00:00:00Z","meta":{"tags":[]},"data":{"text":"` + strings.Repeat("x", 1024) + `"}}`)
-	for name, decode := range map[string]func([]byte) (*Message, error){"copy": DecodeMessage, "owned": DecodeOwnedMessage} {
-		b.Run(name, func(b *testing.B) {
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				if _, err := decode(append([]byte(nil), wire...)); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
 	}
 }

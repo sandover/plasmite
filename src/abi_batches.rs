@@ -33,7 +33,7 @@ pub(super) unsafe fn tag_spans<'a>(
         .collect()
 }
 
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "plsm_internal_view_stream_next")]
 pub extern "C" fn plsm_view_stream_next(
     stream: *mut plsm_stream,
     timeout_ms: u64,
@@ -68,7 +68,12 @@ pub extern "C" fn plsm_view_stream_next(
         let batch = match &mut *state {
             StreamState::Local { pool, state } if max_count == 1 => {
                 // No allocation for companions on an ordinary pull.
-                match state.next_wait_bounded(pool, wait, max_bytes, select)? {
+                let outcome = if max_bytes == usize::MAX {
+                    state.next_wait(pool, wait, select)?
+                } else {
+                    state.next_wait_bounded(pool, wait, max_bytes, select)?
+                };
+                match outcome {
                     TailOutcome::Item(message) => {
                         publish(message, out)?;
                         unsafe {

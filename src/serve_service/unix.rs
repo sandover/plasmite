@@ -1781,7 +1781,9 @@ mod tests {
         use crate::access_store::AccessStore;
         let (temp, setup, path, source) = fixture();
         let old = AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
-        let key = old.issue("saved client").unwrap();
+        let key = old
+            .issue("saved client", crate::access_store::AccessMode::Full)
+            .unwrap();
         let fingerprint = old.fingerprint().to_owned();
         let cert_bytes = fs::read(old.cert_path()).unwrap();
         let key_bytes = fs::read(old.key_path()).unwrap();
@@ -1811,7 +1813,9 @@ mod tests {
                             .unwrap();
                     assert_eq!(store.fingerprint(), replacement_fingerprint);
                     // Model an access mutation committed before readiness fails.
-                    store.issue("during update").unwrap();
+                    store
+                        .issue("during update", crate::access_store::AccessMode::Full)
+                        .unwrap();
                     *updated_keys.borrow_mut() = fs::read(&keys_path).unwrap();
                     return Err(usage("injected readiness failure"));
                 }
@@ -1851,7 +1855,9 @@ mod tests {
         fs::remove_file(&path).unwrap();
         fs::remove_file(&setup.program).unwrap();
         let old = AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
-        let key = old.issue("manual client").unwrap();
+        let key = old
+            .issue("manual client", crate::access_store::AccessMode::Full)
+            .unwrap();
         let fingerprint = old.fingerprint().to_owned();
         let identity = setup.pool_dir.join(".plasmite-serve/identity.json");
         let identity_bytes = fs::read(&identity).unwrap();
@@ -1882,7 +1888,12 @@ mod tests {
                     AccessStore::open(&candidate.pool_dir, None, Some((&cert, &tls_key)), None)
                         .unwrap();
                 assert_eq!(store.fingerprint(), replacement_fingerprint);
-                store.issue("during first install").unwrap();
+                store
+                    .issue(
+                        "during first install",
+                        crate::access_store::AccessMode::Full,
+                    )
+                    .unwrap();
                 *updated_keys.borrow_mut() = fs::read(&keys_path).unwrap();
                 Err(usage("injected first-install readiness failure"))
             },

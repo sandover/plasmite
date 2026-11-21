@@ -117,7 +117,7 @@ func planFor(t reflect.Type) *decodePlan {
 	if !walk(t, nil, "") {
 		plan = nil
 	} else {
-		selector, err := Prepare(paths...)
+		selector, err := prepareSelector(paths...)
 		if err != nil {
 			plan = nil
 		} else {
@@ -153,7 +153,7 @@ func isASCII(text string) bool {
 // Native dispatch scans each selected object once and preserves canonical JSON
 // field precedence. Unicode or ambiguous folded names use the standard decoder.
 // Validate every assignment first so errors keep JSON's partial-update behavior.
-func (v Value) decodeStruct(destination any) (bool, error) {
+func (v viewValue) decodeStruct(destination any) (bool, error) {
 	target := reflect.ValueOf(destination)
 	if target.Kind() != reflect.Pointer || target.IsNil() || target.Elem().Kind() != reflect.Struct {
 		return false, nil

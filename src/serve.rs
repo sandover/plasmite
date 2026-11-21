@@ -22,6 +22,7 @@ use bytes::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
 use hyper_util::service::TowerToHyperService;
+use plasmite::api::internal::LocalPoolTransport;
 use rustls::ServerConfig;
 use rustls::pki_types::pem::{Error as PemError, PemObject};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -46,7 +47,7 @@ use tower_service::Service;
 use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
 
-use crate::access_store::{AccessGrant, AccessStore};
+use crate::access_store::{AccessGrant, AccessMode, AccessStore};
 #[path = "activity.rs"]
 mod activity;
 #[path = "share_addresses.rs"]
@@ -521,7 +522,7 @@ async fn prepare_server_with_access(
         .route("/v0/access/check", get(access_check))
         .route("/v0/access/status", get(access_status))
         .route(
-            "/v0/browser/session",
+            "/browser/session",
             get(browser_session_status)
                 .post(browser_login)
                 .delete(browser_logout),
@@ -543,10 +544,14 @@ async fn prepare_server_with_access(
             "/v0/pools/*legacy",
             axum::routing::any(upgrade_pool_protocol),
         )
-        .route("/v0/ui/pools", get(ui_list_pools))
-        .route("/v0/ui/pools/stream", get(ui_pool_stream))
-        .route("/v0/ui/pools/:pool/info", get(ui_pool_info))
-        .route("/v0/ui/activity", get(ui_activity))
+        .route("/v0/ui/*legacy", axum::routing::any(upgrade_pool_protocol))
+        .route(
+            "/v0/browser/session",
+            axum::routing::any(upgrade_pool_protocol),
+        )
+        .route("/v2", axum::routing::any(upgrade_pool_protocol))
+        .route("/v2/*legacy", axum::routing::any(upgrade_pool_protocol))
+        .route("/ui/activity", get(ui_activity))
         .merge(http_v2::routes(shutdown))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -558,6 +563,7 @@ async fn prepare_server_with_access(
     if let Some(oauth) = oauth {
         app = app.merge(oauth.router());
     }
+    app = app.fallback(|| async { StatusCode::NOT_FOUND });
 
     if local_admin {
         app = app.layer(middleware::from_fn(local_request_guard));
@@ -567,7 +573,13 @@ async fn prepare_server_with_access(
 
     app = app
         .layer(DefaultBodyLimit::max(max_body_bytes))
-        .layer(RequestBodyTimeoutLayer::new(REQUEST_BODY_TIMEOUT));
+        .layer(RequestBodyTimeoutLayer::new(REQUEST_BODY_TIMEOUT))
+        .layer(middleware::map_response(|mut response: Response| async {
+            response
+                .headers_mut()
+                .insert("plasmite-version", HeaderValue::from_static("2"));
+            response
+        }));
 
     Ok(PreparedServer { app, tls_config })
 }
@@ -628,7 +640,7 @@ async fn observe_activity(
 }
 
 fn observes_pool_route(route: &str) -> bool {
-    route.starts_with("/v2/pools/:pool/")
+    route.starts_with("/pools/:pool/")
 }
 
 async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
@@ -677,7 +689,7 @@ async fn remote_browser_guard(
     next: Next,
 ) -> Response {
     let browser_login =
-        request.uri().path() == "/v0/browser/session" && request.method() != Method::GET;
+        request.uri().path() == "/browser/session" && request.method() != Method::GET;
     let cookie_write = !matches!(*request.method(), Method::GET | Method::HEAD)
         && cookie_token(request.headers()).is_some()
         && !request.headers().contains_key(header::AUTHORIZATION);
@@ -690,12 +702,7 @@ async fn remote_browser_guard(
     }
     // Check permission before the extractors buffer or parse the body.
     let path = request.uri().path();
-    let protected_pool = path == "/v0/pools"
-        || path.starts_with("/v0/pools/")
-        || path == "/v2/pools"
-        || path.starts_with("/v2/pools/")
-        || path == "/v0/ui/pools"
-        || path.starts_with("/v0/ui/pools/");
+    let protected_pool = path == "/pools" || path.starts_with("/pools/");
     if protected_pool && let Err(err) = authorize(request.headers(), &state) {
         drain_rejected_body(request).await;
         return error_response(err);
@@ -1103,6 +1110,14 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<Option<AccessGrant
     authorize_bearer(headers, state)
 }
 
+fn authorize_write(headers: &HeaderMap, state: &AppState) -> Result<Option<AccessGrant>, Error> {
+    let grant = authorize(headers, state)?;
+    if grant.as_ref().is_some_and(AccessGrant::read_only) {
+        return Err(Error::new(ErrorKind::Permission).with_message("access key is read-only"));
+    }
+    Ok(grant)
+}
+
 fn authorize_bearer(headers: &HeaderMap, state: &AppState) -> Result<Option<AccessGrant>, Error> {
     if state.local_admin {
         return Ok(None);
@@ -1127,6 +1142,8 @@ fn authorize_bearer(headers: &HeaderMap, state: &AppState) -> Result<Option<Acce
 struct InviteRequest {
     name: String,
     server_fingerprint: String,
+    #[serde(default)]
+    mode: AccessMode,
 }
 
 async fn access_invite(
@@ -1137,7 +1154,7 @@ async fn access_invite(
         Ok(access) => access,
         Err(err) => return error_response(err),
     };
-    match access.issue(&request.name) {
+    match access.issue(&request.name, request.mode) {
         Ok(access_key) => json_response(json!({"access_key": access_key})),
         Err(err) => error_response(err),
     }
@@ -1235,6 +1252,7 @@ async fn access_status(State(state): State<Arc<AppState>>) -> Response {
         "pool_dir_identity": pool_dir_identity,
         "addresses": addresses,
         "server_fingerprint": access.fingerprint(),
+        "read_only_keys": true,
         "shared_address": access.shared_address(),
         "next_action": if access.shared_address().is_none() {
             Some("Restart with --shared-address to tell recipients where to connect.")
@@ -1280,7 +1298,7 @@ async fn browser_login(
     response.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_str(&format!(
-            "{COOKIE_NAME}={token}; Path=/v0; Max-Age={}; Secure; HttpOnly; SameSite=Strict",
+            "{COOKIE_NAME}={token}; Path=/; Max-Age={}; Secure; HttpOnly; SameSite=Strict",
             LIFETIME.as_secs()
         ))
         .expect("session cookie is ASCII"),
@@ -1293,11 +1311,13 @@ async fn browser_session_status(
     headers: HeaderMap,
 ) -> Response {
     if state.local_admin {
-        return json_response(json!({"authenticated": true, "local": true}));
+        return json_response(json!({"authenticated": true, "local": true, "read_only": false}));
     }
     match cookie_token(&headers).and_then(|token| state.browser_sessions.grant(token)) {
-        Some(_) => {
-            let mut response = json_response(json!({"authenticated": true, "local": false}));
+        Some(grant) => {
+            let mut response = json_response(json!({
+                "authenticated": true, "local": false, "read_only": grant.read_only()
+            }));
             response
                 .headers_mut()
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -1322,7 +1342,7 @@ async fn browser_logout(State(state): State<Arc<AppState>>, headers: HeaderMap) 
     response.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_static(
-            "plasmite_session=; Path=/v0; Max-Age=0; Secure; HttpOnly; SameSite=Strict",
+            "plasmite_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict",
         ),
     );
     response
@@ -1332,6 +1352,8 @@ async fn browser_logout(State(state): State<Arc<AppState>>, headers: HeaderMap) 
 struct CreatePoolRequest {
     pool: String,
     size_bytes: Option<u64>,
+    #[serde(flatten)]
+    description: plasmite::api::PoolDescription,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1351,12 +1373,7 @@ async fn healthz() -> Response {
 }
 
 async fn mcp_get() -> Response {
-    let mut response = Response::new(Body::empty());
-    *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
-    response
-        .headers_mut()
-        .insert("plasmite-version", HeaderValue::from_static("0"));
-    response
+    StatusCode::METHOD_NOT_ALLOWED.into_response()
 }
 
 async fn mcp_post(
@@ -1492,13 +1509,7 @@ async fn mcp_post(
     };
 
     match outcome {
-        DispatchOutcome::NoResponse => {
-            let mut response = StatusCode::ACCEPTED.into_response();
-            response
-                .headers_mut()
-                .insert("plasmite-version", HeaderValue::from_static("0"));
-            response
-        }
+        DispatchOutcome::NoResponse => StatusCode::ACCEPTED.into_response(),
         DispatchOutcome::Response(response) => {
             let status = match response.error.as_ref().map(|error| error.code) {
                 Some(-32601) if modern => StatusCode::NOT_FOUND,
@@ -1615,7 +1626,8 @@ impl ServeMcpHandler {
     fn with_grant(mut self, grant: Option<AccessGrant>) -> Self {
         self.inner = self
             .inner
-            .with_cancel(grant.as_ref().map(AccessGrant::cancellation_flag));
+            .with_cancel(grant.as_ref().map(AccessGrant::cancellation_flag))
+            .with_sender(grant.as_ref().map(|grant| grant.sender().to_owned()));
         self.grant = grant;
         self
     }
@@ -1631,7 +1643,13 @@ impl McpHandler for ServeMcpHandler {
     }
 
     fn list_tools(&mut self) -> Result<Vec<McpTool>, McpJsonRpcError> {
-        self.inner.list_tools()
+        let mut tools = self.inner.list_tools()?;
+        if self.grant.as_ref().is_some_and(AccessGrant::read_only) {
+            tools.retain(|tool| {
+                PlasmiteMcpHandler::tool_access(&tool.name) != Some(McpToolAccess::Write)
+            });
+        }
+        Ok(tools)
     }
 
     fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, McpJsonRpcError> {
@@ -1639,6 +1657,12 @@ impl McpHandler for ServeMcpHandler {
             return Ok(mcp_revoked_tool_result());
         }
         let is_write = PlasmiteMcpHandler::tool_access(&request.name) == Some(McpToolAccess::Write);
+        if is_write && self.grant.as_ref().is_some_and(AccessGrant::read_only) {
+            return Ok(ToolCallResult::execution_error_with_structured(
+                "access key is read-only",
+                Some(json!({"error_kind": "Permission"})),
+            ));
+        }
         let result = self.inner.call_tool(request);
         if !is_write && self.revoked() {
             Ok(mcp_revoked_tool_result())
@@ -1940,16 +1964,15 @@ async fn create_pool(
     headers: HeaderMap,
     Json(payload): Json<CreatePoolRequest>,
 ) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
+    let grant = authorize_write(&headers, &state)?;
     let pool_ref = pool_ref_from_request(&payload.pool)?;
     let size_bytes = payload.size_bytes.unwrap_or(1024 * 1024);
+    let options = PoolOptions::new(size_bytes).with_description(payload.description);
     let client = state.client.clone();
     let info = state
         .storage_executor
         .run_authorized(grant, move || {
-            client
-                .create_pool(&pool_ref, PoolOptions::new(size_bytes))?
-                .info()
+            client.create_pool(&pool_ref, options)?.info()
         })
         .await?;
     Ok(json_response(
@@ -1957,11 +1980,33 @@ async fn create_pool(
     ))
 }
 
+async fn set_pool_description(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(name): AxumPath<String>,
+    Json(description): Json<plasmite::api::PoolDescription>,
+) -> Result<Response, HttpError> {
+    let grant = authorize_write(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&name)?;
+    let client = state.client.clone();
+    let info = state
+        .storage_executor
+        .run_authorized(grant, move || {
+            let mut pool = client.open_pool(&pool_ref, false)?;
+            pool.set_description(description)?;
+            pool.info()
+        })
+        .await?;
+    Ok(json_response(
+        json!({ "pool": pool_info_json(&name, &info) }),
+    ))
+}
+
 async fn upgrade_pool_protocol() -> Response {
     error_response_with_status(
         Error::new(ErrorKind::Usage)
             .with_message("This server requires Plasmite HTTP API v2")
-            .with_hint("Upgrade to a Plasmite 2 client."),
+            .with_hint("Use a Plasmite 2 client with unversioned HTTP routes."),
         StatusCode::UPGRADE_REQUIRED,
     )
 }
@@ -1976,17 +2021,35 @@ async fn pool_info(
     let client = state.client.clone();
     let info = state
         .storage_executor
-        .run_authorized(grant, move || client.pool_info(&pool_ref))
+        .run_authorized(grant, move || {
+            let opened = client.open_pool(&pool_ref, false)?;
+            let mut info = pool_info_json(&pool, &opened.info()?);
+            info["incarnation"] = json!(opened.incarnation()?);
+            Ok(info)
+        })
         .await?;
-    Ok(json_response(
-        json!({ "pool": pool_info_json(&pool, &info) }),
-    ))
+    Ok(json_response(json!({ "pool": info })))
 }
 
 async fn list_pools(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Result<Response, HttpError> {
+    let mut response = if headers
+        .get(header::ACCEPT)
+        .is_some_and(|value| value == "text/event-stream")
+    {
+        ui_pool_stream(state, headers).await
+    } else {
+        list_pools_json(state, headers).await?
+    };
+    response
+        .headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("Accept"));
+    Ok(response)
+}
+
+async fn list_pools_json(state: Arc<AppState>, headers: HeaderMap) -> Result<Response, HttpError> {
     let grant = authorize(&headers, &state)?;
 
     let client = state.client.clone();
@@ -2045,29 +2108,6 @@ struct UiCachedPool {
 
 type UiPoolCache = BTreeMap<PathBuf, UiCachedPool>;
 
-fn ui_pool_info_json(name: &str, pool: &Pool) -> Result<Value, Error> {
-    let mut info = pool_info_json(name, &pool.info()?);
-    info["incarnation"] = json!(pool.incarnation()?);
-    Ok(info)
-}
-
-async fn ui_pool_info(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    AxumPath(name): AxumPath<String>,
-) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
-    let pool_ref = pool_ref_from_request(&name)?;
-    let client = state.client.clone();
-    let info = state
-        .storage_executor
-        .run_authorized(grant, move || {
-            ui_pool_info_json(&name, &client.open_pool(&pool_ref, false)?)
-        })
-        .await?;
-    Ok(json_response(json!({ "pool": info })))
-}
-
 /// Pool info without message ages. Ages grow on every read, so comparing them
 /// would count every pool that holds messages as changed on every scan.
 fn settled(info: &PoolInfo) -> PoolInfo {
@@ -2122,22 +2162,6 @@ fn ui_pool_snapshot(client: &LocalClient, cache: &mut UiPoolCache) -> Result<(Va
     Ok((json!({ "pools": pools, "available": true }), changed))
 }
 
-/// The pool list plus each pool's ring layout, so the map can draw each message where it sits.
-async fn ui_list_pools(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
-    let client = state.client.clone();
-    let snapshot = state
-        .storage_executor
-        .run_authorized(grant, move || {
-            ui_pool_snapshot(&client, &mut UiPoolCache::new()).map(|(snapshot, _)| snapshot)
-        })
-        .await?;
-    Ok(json_response(snapshot))
-}
-
 async fn ui_activity(State(state): State<Arc<AppState>>) -> Response {
     if !state.local_admin {
         return error_response_with_status(
@@ -2165,7 +2189,7 @@ async fn ui_activity(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-async fn ui_pool_stream(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+async fn ui_pool_stream(state: Arc<AppState>, headers: HeaderMap) -> Response {
     let grant = match authorize(&headers, &state) {
         Ok(grant) => grant,
         Err(err) => return error_response(err),
@@ -2293,7 +2317,7 @@ async fn delete_pool(
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
 ) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
+    let grant = authorize_write(&headers, &state)?;
     let pool_ref = pool_ref_from_request(&pool)?;
     let client = state.client.clone();
     state
@@ -2304,23 +2328,21 @@ async fn delete_pool(
 }
 
 async fn append_message(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    AxumPath(pool): AxumPath<String>,
-    Json(payload): Json<AppendRequest>,
+    state: Arc<AppState>,
+    grant: Option<AccessGrant>,
+    pool: String,
+    payload: AppendRequest,
 ) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
     let pool_ref = pool_ref_from_request(&pool)?;
     let durability = durability_from_str(payload.durability.as_deref());
     let tags = payload.tags.unwrap_or_default();
-    let data = payload.data;
+    let sender = grant.as_ref().map(|grant| grant.sender().to_owned());
     let client = state.client.clone();
     let message = state
         .storage_executor
         .run_authorized(grant, move || {
-            client.open_pool(&pool_ref, false).and_then(|mut pool| {
-                pool.feed(&data, Feed::default().tags(tags).durability(durability))
-            })
+            let mut pool = client.open_pool(&pool_ref, false)?;
+            pool.feed_received_data(&payload.data, tags, durability, sender.as_deref())
         })
         .await?;
     Ok(json_response(Value::from_iter([(
@@ -2330,22 +2352,13 @@ async fn append_message(
 }
 
 async fn append_lite3(
-    State(state): State<Arc<AppState>>,
+    state: Arc<AppState>,
     headers: HeaderMap,
-    AxumPath(pool): AxumPath<String>,
-    Query(query): Query<AppendLite3Query>,
+    grant: Option<AccessGrant>,
+    pool: String,
+    query: AppendLite3Query,
     payload: Bytes,
 ) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
-    if let Some(content_type) = headers
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        && !content_type.starts_with("application/x-plasmite-lite3")
-    {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("invalid content-type for lite3 append")
-            .into());
-    }
     if payload.is_empty() {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("lite3 payload is required")
@@ -2353,51 +2366,57 @@ async fn append_lite3(
     }
     let pool_ref = pool_ref_from_request(&pool)?;
     let durability = durability_from_str(query.durability.as_deref());
-    // The sender already owns the encoding. Return only its new identity when
-    // requested, rather than decoding and exporting the entire message again.
-    if headers.get("accept").and_then(|value| value.to_str().ok())
-        == Some("application/x-plasmite-identity")
-    {
-        let client = state.client.clone();
-        let receipt = state
-            .storage_executor
-            .run_authorized(grant, move || {
-                let view = plasmite::view::MessageView::from_feed_bytes(&payload)?;
-                client.open_pool(&pool_ref, false).and_then(|mut pool| {
-                    pool.feed_view(&view, Feed::default().durability(durability))
-                })
-            })
-            .await?;
-        let mut response = Response::new(Body::empty());
-        *response.status_mut() = StatusCode::NO_CONTENT;
-        response.headers_mut().insert(
-            "plasmite-seq",
-            HeaderValue::from_str(&receipt.seq.to_string()).expect("decimal u64 is a valid header"),
-        );
-        response.headers_mut().insert(
-            "plasmite-timestamp-ns",
-            HeaderValue::from_str(&receipt.time.to_string())
-                .expect("decimal u64 is a valid header"),
-        );
-        response
-            .headers_mut()
-            .insert("plasmite-version", HeaderValue::from_static("0"));
-        return Ok(response);
-    }
-    let payload = payload.to_vec();
+    let sender = grant.as_ref().map(|grant| grant.sender().to_owned());
     let client = state.client.clone();
-    let message = state
+    let view = state
         .storage_executor
         .run_authorized(grant, move || {
-            client.open_pool(&pool_ref, false).and_then(|mut pool| {
-                pool.feed_lite3(&payload, Feed::default().durability(durability))
-            })
+            let view = plasmite::view::MessageView::from_feed_bytes(&payload)?;
+            let mut pool = client.open_pool(&pool_ref, false)?;
+            pool.feed_received_view(&view, Feed::new().durability(durability), sender.as_deref())
         })
         .await?;
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok());
+    if matches!(
+        accept,
+        Some("application/x-plasmite-identity" | "application/x-plasmite-lite3")
+    ) {
+        return Ok(append_view_response(
+            view,
+            accept == Some("application/x-plasmite-lite3"),
+        ));
+    }
+    let message = plasmite::api::MessageEnvelope::from_lite3(view.seq, view.time, view.bytes())?;
     Ok(json_response(Value::from_iter([(
         "message",
         message_json(message),
     )])))
+}
+
+fn append_view_response(view: plasmite::view::MessageView, binary: bool) -> Response {
+    let mut response = if binary {
+        let mut response = Response::new(Body::from(view.bytes().to_vec()));
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/x-plasmite-lite3"),
+        );
+        response
+    } else {
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::NO_CONTENT;
+        response
+    };
+    response.headers_mut().insert(
+        "plasmite-seq",
+        HeaderValue::from_str(&view.seq.to_string()).expect("decimal u64 is a valid header"),
+    );
+    response.headers_mut().insert(
+        "plasmite-timestamp-ns",
+        HeaderValue::from_str(&view.time.to_string()).expect("decimal u64 is a valid header"),
+    );
+    response
 }
 
 fn tail_pool_ref_from_request(
@@ -2446,22 +2465,19 @@ fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
     Ok(PoolRef::name(pool))
 }
 
-fn message_json(message: plasmite::api::Message) -> Value {
+fn message_json(message: plasmite::api::MessageEnvelope) -> Value {
     MessageWire::new(
         message.seq,
         message.time_rfc3339(),
         message.meta.tags,
         message.data,
     )
+    .with_sender(message.meta.sender)
     .into_json()
 }
 
 fn json_response(payload: serde_json::Value) -> Response {
-    let mut response = Json(payload).into_response();
-    response
-        .headers_mut()
-        .insert("plasmite-version", HeaderValue::from_static("0"));
-    response
+    Json(payload).into_response()
 }
 
 fn html_response(body: &str) -> Response {
@@ -2470,9 +2486,6 @@ fn html_response(body: &str) -> Response {
         "content-type",
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
-    response
-        .headers_mut()
-        .insert("plasmite-version", HeaderValue::from_static("0"));
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -2507,11 +2520,7 @@ fn error_response_with_status(err: Error, status: StatusCode) -> Response {
     let body = ErrorEnvelope {
         error: error_body(&err),
     };
-    let mut response = (status, Json(body)).into_response();
-    response
-        .headers_mut()
-        .insert("plasmite-version", HeaderValue::from_static("0"));
-    response
+    (status, Json(body)).into_response()
 }
 
 fn error_body(err: &Error) -> ErrorBody {
@@ -2555,6 +2564,7 @@ mod tests {
     use axum::extract::State;
     use axum::http::{HeaderMap, HeaderValue, Uri, header};
     use axum::response::IntoResponse;
+    use plasmite::api::internal::LocalPoolTransport;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
     use tokio::sync::Semaphore;
@@ -2601,10 +2611,11 @@ mod tests {
                 0
             );
             let response = super::append_lite3(
-                State(state.clone()),
+                state.clone(),
                 headers,
-                axum::extract::Path("receipts".into()),
-                axum::extract::Query(super::AppendLite3Query { durability: None }),
+                None,
+                "receipts".into(),
+                super::AppendLite3Query { durability: None },
                 payload,
             )
             .await
@@ -2662,10 +2673,11 @@ mod tests {
             HeaderValue::from_static("application/x-plasmite-identity"),
         );
         let response = super::append_lite3(
-            State(state),
+            state,
             headers,
-            axum::extract::Path("receipts".into()),
-            axum::extract::Query(super::AppendLite3Query { durability: None }),
+            None,
+            "receipts".into(),
+            super::AppendLite3Query { durability: None },
             bytes::Bytes::from(bytes),
         )
         .await
@@ -2730,14 +2742,8 @@ mod tests {
 
     #[test]
     fn activity_ignores_map_reads_and_identifies_mcp_pool_use() {
-        assert!(super::observes_pool_route("/v2/pools/:pool/follow"));
-        for route in [
-            "/v0/ui/activity",
-            "/v0/ui/pools",
-            "/v0/ui/pools/stream",
-            "/v0/ui/pools/:pool/info",
-            "/v2/pools/:pool",
-        ] {
+        assert!(super::observes_pool_route("/pools/:pool/follow"));
+        for route in ["/ui/activity", "/pools", "/pools/:pool"] {
             assert!(!super::observes_pool_route(route));
         }
         assert_eq!(
@@ -2786,7 +2792,7 @@ mod tests {
         .unwrap()
         .app;
         let mut follow = Request::builder()
-            .uri("/v2/pools/events/follow")
+            .uri("/pools/events/follow")
             .header("host", "localhost")
             .header("sec-fetch-site", "same-origin")
             .header("user-agent", "Browser test")
@@ -2800,7 +2806,7 @@ mod tests {
         let snapshot = app
             .call(
                 Request::builder()
-                    .uri("/v0/ui/activity")
+                    .uri("/ui/activity")
                     .header("host", "localhost")
                     .body(Body::empty())
                     .unwrap(),
@@ -2843,7 +2849,7 @@ mod tests {
         let forbidden = remote
             .call(
                 Request::builder()
-                    .uri("/v0/ui/activity")
+                    .uri("/ui/activity")
                     .header("host", "example.test")
                     .body(Body::empty())
                     .unwrap(),
@@ -2963,14 +2969,14 @@ mod tests {
             header::ORIGIN,
             HeaderValue::from_static("https://localhost:9743"),
         );
-        let uri: Uri = "https://localhost:9743/v0/browser/session".parse().unwrap();
+        let uri: Uri = "https://localhost:9743/browser/session".parse().unwrap();
         assert!(same_origin(&headers, &uri, "https"));
 
         headers.insert(header::HOST, HeaderValue::from_static("localhost:9743"));
         assert!(same_origin(&headers, &uri, "https"));
         assert!(same_origin(
             &headers,
-            &"/v0/browser/session".parse().unwrap(),
+            &"/browser/session".parse().unwrap(),
             "https"
         ));
         headers.insert(header::HOST, HeaderValue::from_static("evil.example"));
@@ -2991,7 +2997,7 @@ mod tests {
         assert!(!same_origin(&headers, &uri, "https"));
         assert!(!same_origin(
             &headers,
-            &"/v0/browser/session".parse().unwrap(),
+            &"/browser/session".parse().unwrap(),
             "https"
         ));
     }
@@ -3095,7 +3101,9 @@ mod tests {
     async fn admitted_storage_work_may_finish_after_revocation_but_new_work_fails() {
         let temp = tempfile::tempdir().unwrap();
         let access = AccessStore::open(temp.path(), None, None, None).unwrap();
-        let key = access.issue("writer").unwrap();
+        let key = access
+            .issue("writer", crate::access_store::AccessMode::Full)
+            .unwrap();
         let grant = access
             .authorize_secret(key.rsplit('.').next().unwrap())
             .unwrap();
@@ -3150,8 +3158,9 @@ mod tests {
                 .next_message()
                 .unwrap()
                 .unwrap()
-                .data,
-            json!({"admitted": true})
+                .data()
+                .unwrap(),
+            &json!({"admitted": true})
         );
         let rejected = executor
             .run_authorized(Some(grant), || Ok(8))
@@ -3259,7 +3268,7 @@ mod tests {
         use tower_service::Service;
         let mut app = axum::Router::new()
             .route("/json", axum::routing::post(super::create_pool))
-            .route("/raw/:pool", axum::routing::post(super::append_lite3))
+            .route("/raw/:pool", axum::routing::post(super::http_v2::feed))
             .with_state(state);
         for (uri, content_type, body, expected) in [
             ("/json", "application/json", "{", 400),

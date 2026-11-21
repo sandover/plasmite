@@ -42,34 +42,54 @@ import os
 import plasmite
 
 ref = os.environ["PLASMITE_TEST_HTTPS_ORIGIN"] + "/python"
-with plasmite.create_pool(ref, 65536) as created, plasmite.open_pool(ref) as pool:
+with plasmite.create_pool(ref, 65536, about="Python smoke", example={"from": "python"}) as created, plasmite.open_pool(ref) as pool:
+    assert pool.info()["about"] == "Python smoke"
+    assert pool.info()["example"] == {"from": "python"}
     with pool.follow(tags=["test"]) as live:
         assert live.next(0.01) is None
         first = created.feed({"from": "python"}, tags=["test"])
-        assert live.next(3).seq == first.seq
+        received = live.next(3)
+        assert type(received) is type(first) is plasmite.Message
+        assert received.seq == first.seq and received.raw == first.raw
+        assert received.sender == first.sender == "binding-test"
+        assert received.field("from") == "python"
     with pool.fetch(last=1) as reader:
         messages = list(reader)
         assert len(messages) == 1 and messages[0].data == {"from": "python"}
+    created.set_description(about="Updated description")
+    assert pool.info()["about"] == "Updated description"
+    assert "example" not in pool.info()
 PY
 
 node - "$root/bindings/node" <<'JS'
 const assert = require("node:assert/strict");
-const { openPool, createPool } = require(process.argv[2]);
+const { Message, openPool, createPool } = require(process.argv[2]);
 (async () => {
   const ref = process.env.PLASMITE_TEST_HTTPS_ORIGIN + "/node";
-  const created = createPool(ref, 65536);
+  const created = createPool(ref, { sizeBytes: 65536, about: "Node smoke", example: { from: "node" } });
   const pool = openPool(ref);
   try {
+    assert.equal(pool.info().about, "Node smoke");
+    assert.deepEqual(pool.info().example, { from: "node" });
     const live = await pool.follow({ tags: ["test"] });
     try {
       assert.equal((await live.next(0.01)).value, undefined);
       const first = await created.feed({ from: "node" }, { tags: ["test"] });
-      assert.equal((await live.next(3)).value.seq, first.seq);
+      const received = (await live.next(3)).value;
+      assert.ok(first instanceof Message);
+      assert.ok(received instanceof Message);
+      assert.equal(received.seq, first.seq);
+      assert.equal(received.sender, "binding-test");
+      assert.equal(received.field("from"), "node");
+      assert.deepEqual(received.raw, first.raw);
     } finally { live.close(); }
     const reader = await pool.fetch({ last: 1 });
     const messages = [];
     for await (const message of reader) messages.push(message.data);
     assert.deepEqual(messages, [{ from: "node" }]);
+    created.setDescription({ about: "Updated description" });
+    assert.equal(pool.info().about, "Updated description");
+    assert.equal(pool.info().example, undefined);
   } finally {
     pool.close();
     created.close();

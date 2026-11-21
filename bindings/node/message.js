@@ -117,9 +117,25 @@ function timeText(ns) {
 }
 
 function parsePoolInfo(input) {
-  return JSON.parse(input.toString("utf8"), (key, value, context) =>
-    typeof value === "number" && ["oldest", "newest", "file_size"].includes(key)
-      ? BigInt(context.source) : value);
+  const numbers = new WeakMap();
+  const result = JSON.parse(input.toString("utf8"), function (key, value, context) {
+    if (typeof value === "number" && ["oldest", "newest", "file_size"].includes(key)) {
+      const fields = numbers.get(this) ?? {};
+      fields[key] = context.source;
+      numbers.set(this, fields);
+    }
+    return value;
+  });
+  const pools = Array.isArray(result) ? result : result?.pools ?? [result?.pool ?? result];
+  for (const pool of pools) {
+    for (const [target, keys] of [[pool, ["file_size"]], [pool?.bounds, ["oldest", "newest"]]]) {
+      const fields = numbers.get(target);
+      for (const key of keys) {
+        if (fields?.[key] !== undefined) target[key] = BigInt(fields[key]);
+      }
+    }
+  }
+  return result;
 }
 
 class Message {

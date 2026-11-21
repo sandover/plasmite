@@ -58,6 +58,7 @@ pub struct MessageView {
 struct Snapshot {
     storage: Storage,
     json_native_safe: bool,
+    decoded_data: std::sync::OnceLock<Result<serde_json::Value, Box<Error>>>,
     // Only objects containing duplicate names need a lookup correction.
     duplicates: HashMap<usize, HashMap<String, usize>>,
 }
@@ -96,16 +97,8 @@ impl MessageView {
         flags: u32,
         data_kind: ErrorKind,
     ) -> Result<Self, Error> {
-        let mut owner = Self {
-            snapshot: std::sync::Arc::new(Snapshot {
-                storage: Storage::new(bytes),
-                duplicates: HashMap::new(),
-                json_native_safe: false,
-            }),
-            seq,
-            time,
-            flags,
-        };
+        let storage = Storage::new(bytes);
+        let bytes = storage.bytes();
         let mut duplicates = Vec::<usize>::new();
         let mut json_native_safe = 0;
         unsafe extern "C" fn record_duplicate(
@@ -119,8 +112,8 @@ impl MessageView {
         }
         if unsafe {
             sys::plasmite_lite3_verify_view(
-                owner.bytes().as_ptr(),
-                owner.bytes().len(),
+                bytes.as_ptr(),
+                bytes.len(),
                 record_duplicate,
                 (&mut duplicates as *mut Vec<usize>).cast(),
                 &mut json_native_safe,
@@ -129,9 +122,17 @@ impl MessageView {
         {
             return Err(corrupt());
         }
-        std::sync::Arc::get_mut(&mut owner.snapshot)
-            .unwrap()
-            .json_native_safe = json_native_safe != 0;
+        let mut owner = Self {
+            snapshot: std::sync::Arc::new(Snapshot {
+                storage,
+                duplicates: HashMap::new(),
+                decoded_data: Default::default(),
+                json_native_safe: json_native_safe != 0,
+            }),
+            seq,
+            time,
+            flags,
+        };
         for offset in duplicates {
             owner.collect_duplicates(offset)?;
         }
@@ -139,20 +140,21 @@ impl MessageView {
         if owner.root().kind() != sys::LITE3_TYPE_OBJECT {
             return Err(corrupt());
         }
-        let meta = owner.root().get("meta")?.ok_or_else(corrupt)?;
-        let data = owner.root().get("data")?.ok_or_else(corrupt)?;
+        let meta = owner.root().get_key(c"meta").ok_or_else(corrupt)?;
+        let data = owner.root().get_key(c"data").ok_or_else(corrupt)?;
         if meta.kind() != sys::LITE3_TYPE_OBJECT {
             return Err(corrupt());
         }
         if data.kind() != sys::LITE3_TYPE_OBJECT {
             return Err(Error::new(data_kind).with_message("data is not object"));
         }
-        let tags = meta.get("tags")?.ok_or_else(corrupt)?;
+        let tags = meta.get_key(c"tags").ok_or_else(corrupt)?;
         if tags.kind() != sys::LITE3_TYPE_ARRAY {
             return Err(corrupt());
         }
-        for (_, tag) in tags.entries()? {
-            if tag.kind() != sys::LITE3_TYPE_STRING {
+        let doc = owner.doc();
+        for index in 0..doc.count_at(tags.offset)? {
+            if doc.array_item_type(tags.offset, index)? != sys::LITE3_TYPE_STRING {
                 return Err(corrupt());
             }
         }
@@ -177,6 +179,7 @@ impl MessageView {
             snapshot: std::sync::Arc::new(Snapshot {
                 storage: Storage::Aligned { words, len },
                 duplicates: HashMap::new(),
+                decoded_data: Default::default(),
                 json_native_safe,
             }),
             seq,
@@ -210,6 +213,27 @@ impl MessageView {
             flags,
         }
     }
+    /// Keep only user data and tags from an input message and assign destination metadata.
+    pub(crate) fn for_feed(&self, sender: Option<&str>) -> Result<Self, Error> {
+        let meta = self.root().get_key(c"meta").ok_or_else(corrupt)?;
+        if sender.is_none() && meta.len()? == 1 {
+            return Ok(self.clone());
+        }
+        let tags = meta.get_key(c"tags").ok_or_else(corrupt)?;
+        let tags = tags
+            .iter()?
+            .map(|entry| entry?.1.text().ok_or_else(corrupt))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut builder = crate::core::lite3::builder::Builder::new_with_sender(&tags, sender)?;
+        copy_serialized(&mut builder, 0, Some("data"), &self.data(), 1)?;
+        // The writer checks each node and the source snapshot has a valid envelope.
+        unsafe { builder.finish_proven() }
+    }
+
+    pub fn sender(&self) -> Option<&str> {
+        self.root().get_key(c"meta")?.get_key(c"sender")?.text()
+    }
+
     pub fn bytes(&self) -> &[u8] {
         self.snapshot.storage.bytes()
     }
@@ -229,11 +253,33 @@ impl MessageView {
         }
     }
     pub fn data(&self) -> ValueRef<'_> {
-        self.root()
-            .get("data")
-            .expect("checked lookup")
-            .expect("checked data")
+        self.root().get_key(c"data").expect("checked data")
     }
+    pub(crate) fn decoded_data(&self) -> Result<&serde_json::Value, Error> {
+        self.snapshot
+            .decoded_data
+            .get_or_init(|| {
+                // Checked snapshots verify the subtree and its collection counts
+                // on construction. Builders maintain the same proof as they write.
+                unsafe { JsonValue::from_validated(self.doc(), self.data().offset) }
+                    .to_owned_value()
+                    .map_err(Box::new)
+            })
+            .as_ref()
+            .map_err(|error| (**error).clone())
+    }
+
+    pub(crate) fn tags(&self) -> Result<Vec<&str>, Error> {
+        self.root()
+            .get_key(c"meta")
+            .ok_or_else(corrupt)?
+            .get_key(c"tags")
+            .ok_or_else(corrupt)?
+            .iter()?
+            .map(|entry| entry?.1.text().ok_or_else(corrupt))
+            .collect()
+    }
+
     fn raw_entries(&self, offset: usize) -> Result<Vec<sys::Entry>, Error> {
         let count = self.doc().count_at(offset)? as usize;
         if count > self.bytes().len() {
@@ -292,6 +338,21 @@ impl MessageView {
     }
 }
 impl<'a> ValueRef<'a> {
+    fn get_key(self, key: &std::ffi::CStr) -> Option<Self> {
+        if self.kind() != sys::LITE3_TYPE_OBJECT {
+            return None;
+        }
+        let offset = if let Some(keys) = self.owner.snapshot.duplicates.get(&self.offset) {
+            *keys.get(key.to_str().ok()?)?
+        } else {
+            self.owner.doc().key_offset_cstr_at(self.offset, key).ok()?
+        };
+        Some(Self {
+            owner: self.owner,
+            offset,
+        })
+    }
+
     pub fn offset(self) -> usize {
         self.offset
     }
@@ -660,6 +721,13 @@ mod tests {
         let selected = data.get(&key).unwrap().unwrap().integer().unwrap();
         let json: serde_json::Value = serde_json::from_slice(&data.to_json().unwrap()).unwrap();
         assert_eq!(json[&key].as_i64(), Some(selected));
+        assert_eq!(*view.decoded_data().unwrap(), json);
+        let message = crate::api::Message::from_view(view);
+        assert_eq!(
+            message.field(&key).unwrap().unwrap().integer(),
+            Some(selected)
+        );
+        assert!(message.field("missing").unwrap().is_none());
         assert_eq!(selected, initial.node(last.offset).integer);
     }
     #[test]

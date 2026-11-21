@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#define PLSM_INTERNAL_ABI
 #include "plasmite.h"
 #include <Python.h>
 #include <stdint.h>
@@ -64,6 +65,9 @@ static int (*append_owner)(plsm_pool_t *, const plsm_message_view_t *, const pls
 
 static int (*stream_next)(plsm_stream_t *, uint64_t, size_t, size_t, const plsm_message_view_t **,
                           size_t *, plsm_error_t **);
+static int (*stream_next_message)(plsm_stream_t *, uint64_t, const plsm_message_view_t **,
+                                  plsm_error_t **);
+static int (*builder_finish)(plsm_builder_t *, const plsm_message_view_t **, plsm_error_t **);
 
 static int fail(plsm_error_t *error) {
     PyObject *exc = PyObject_CallFunction(error_factory, "K", (unsigned long long)(uintptr_t)error);
@@ -524,6 +528,30 @@ static PyObject *adopt_owner(PyObject *module, PyObject *arg) {
     return snapshot_from_owner(owner);
 }
 
+static PyObject *next_snapshot(PyObject *module, PyObject *args) {
+    (void)module;
+    unsigned long long address, timeout;
+    if (!PyArg_ParseTuple(args, "KK", &address, &timeout))
+        return NULL;
+    const plsm_message_view_t *owner = NULL;
+    plsm_error_t *error = NULL;
+    int status;
+    Py_BEGIN_ALLOW_THREADS
+    status = stream_next_message((plsm_stream_t *)(uintptr_t)address, timeout, &owner, &error);
+    Py_END_ALLOW_THREADS
+    if (status < 0) {
+        fail(error);
+        return NULL;
+    }
+    if (status == 1)
+        return snapshot_from_owner(owner);
+    if (status == 2 || status == 3) {
+        PyErr_SetNone(PyExc_StopIteration);
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
 static PyObject *next_snapshots(PyObject *module, PyObject *args) {
     (void)module;
     unsigned long long address, timeout;
@@ -750,11 +778,17 @@ static PyObject *append_python(PyObject *module, PyObject *args) {
     unsigned int durability;
     if (!PyArg_ParseTuple(args, "OOOI", &address, &data, &tags, &durability))
         return NULL;
-    plsm_pool_t *pool = PyLong_AsVoidPtr(address);
+    plsm_pool_t *pool = address == Py_None ? NULL : PyLong_AsVoidPtr(address);
     if (PyErr_Occurred())
         return NULL;
+    if (address != Py_None && !pool) {
+        PyErr_SetString(PyExc_ValueError, "null pool handle");
+        return NULL;
+    }
     const plsm_feed_options_t options = {.struct_size = sizeof(options), .durability = durability};
     if (Py_IS_TYPE(data, snapshot_type) && tags == Py_None) {
+        if (!pool)
+            return Py_NewRef(data);
         const plsm_message_view_t *view = NULL;
         plsm_error_t *error = NULL;
         int rc;
@@ -823,7 +857,8 @@ static PyObject *append_python(PyObject *module, PyObject *args) {
     const plsm_message_view_t *view = NULL;
     /* Input access has finished; the builder now owns all bytes. */
     Py_BEGIN_ALLOW_THREADS
-    rc = append_builder(pool, builder, &options, &view, &error);
+    rc = pool ? append_builder(pool, builder, &options, &view, &error)
+              : builder_finish(builder, &view, &error);
     builder_free(builder);
     Py_END_ALLOW_THREADS
     if (rc) {
@@ -889,11 +924,13 @@ static PyObject *configure(PyObject *module, PyObject *args) {
     LOAD(buf_free, "plsm_buf_free");
     LOAD(builder_new, "plsm_builder_new");
     LOAD(builder_put, "plsm_builder_put");
-    LOAD(append_builder, "plsm_pool_feed_builder_view");
+    LOAD(append_builder, "plsm_internal_pool_feed_builder_view");
     LOAD(builder_free, "plsm_builder_free");
+    LOAD(builder_finish, "plsm_internal_builder_finish");
     LOAD(copy_value, "plsm_builder_copy_value");
-    LOAD(append_owner, "plsm_pool_feed_view");
-    LOAD(stream_next, "plsm_view_stream_next");
+    LOAD(append_owner, "plsm_internal_pool_feed_view");
+    LOAD(stream_next, "plsm_internal_view_stream_next");
+    LOAD(stream_next_message, "plsm_stream_next_message");
     configured_interpreter = PyInterpreterState_Get();
     configured_handle = (uintptr_t)address;
     Py_INCREF(library);
@@ -908,6 +945,7 @@ static PyMethodDef module_methods[] = {{"_configure", configure, METH_VARARGS, N
                                        {"adopt_owner", adopt_owner, METH_O, NULL},
                                        {"append", append_python, METH_VARARGS, NULL},
                                        {"from_bytes", bytes_snapshot, METH_VARARGS, NULL},
+                                       {"next_message", next_snapshot, METH_VARARGS, NULL},
                                        {"next_batch", next_snapshots, METH_VARARGS, NULL},
                                        {NULL}};
 static struct PyModuleDef definition = {PyModuleDef_HEAD_INIT, "_views_native", NULL, -1,

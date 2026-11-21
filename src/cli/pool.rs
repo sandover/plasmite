@@ -16,7 +16,9 @@ use super::support::{
 };
 use crate::pool_info_json::pool_info_json;
 use crate::{PoolCommand, PoolTarget};
-use plasmite::api::{Error, ErrorKind, LocalClient, PoolOptions, PoolRef, to_exit_code};
+use plasmite::api::{
+    Error, ErrorKind, LocalClient, PoolDescription, PoolOptions, PoolRef, to_exit_code,
+};
 use serde_json::json;
 use std::collections::HashSet;
 use std::io::{self, IsTerminal};
@@ -29,6 +31,8 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             names,
             size,
             index_capacity,
+            about,
+            example,
             ..
         } => {
             if names.iter().any(|name| name.starts_with("udp://")) {
@@ -45,7 +49,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 .map(parse_size)
                 .transpose()?
                 .unwrap_or(DEFAULT_POOL_SIZE);
-            let mut options = PoolOptions::new(size);
+            let mut options = PoolOptions::new(size).with_description(description(about, example)?);
             if let Some(index_capacity) = index_capacity {
                 let index_size_bytes = index_capacity as u64 * 16;
                 if index_size_bytes > size / 2 {
@@ -76,13 +80,36 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             let mut results = Vec::new();
             for (name, path) in names.into_iter().zip(paths) {
                 let pool_ref = PoolRef::path(path);
-                let info = client.create_pool(&pool_ref, options)?.info()?;
+                let info = client.create_pool(&pool_ref, options.clone())?.info()?;
                 results.push(pool_info_json(&name, &info));
             }
             if output_mode.is_structured() {
                 emit_output(json!({ "created": results }), output_mode)?;
             } else {
                 emit_pool_create_table(&results, pool_dir)?;
+            }
+            Ok(CommandResult::ok())
+        }
+        PoolCommand::Describe {
+            name,
+            about,
+            example,
+        } => {
+            let description = description(about, example)?;
+            let info = match resolve_pool_target(&name, pool_dir)? {
+                PoolTarget::LocalPath(path) => {
+                    let mut pool = LocalClient::new().open_pool(&PoolRef::path(path), false)?;
+                    pool.set_description(description)?;
+                    pool.info()?
+                }
+                PoolTarget::Remote { base_url, pool } => remote_client(base_url)?
+                    .set_pool_description(&PoolRef::name(pool), description)?,
+                PoolTarget::Udp { .. } => return Err(super::support::udp_unsupported()),
+            };
+            if output_mode.is_structured() {
+                emit_output(pool_info_json(&name, &info), output_mode)?;
+            } else {
+                emit_pool_info_pretty(&name, &info)?;
             }
             Ok(CommandResult::ok())
         }
@@ -362,6 +389,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                                 file_size: info.file_size,
                                 bounds: info.bounds,
                                 mtime: None,
+                                description: info.description,
                             }
                         })
                         .collect::<Vec<_>>();
@@ -382,4 +410,17 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             Ok(CommandResult::ok())
         }
     }
+}
+
+fn description(about: Option<String>, example: Option<String>) -> Result<PoolDescription, Error> {
+    let example = example
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("pool example must be a JSON object")
+                .with_source(err)
+        })?;
+    Ok(PoolDescription { about, example })
 }

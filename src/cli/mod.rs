@@ -5,6 +5,7 @@
 
 mod access;
 pub(crate) mod args;
+mod compact_output;
 mod context;
 mod doctor;
 pub(crate) mod doctor_support;

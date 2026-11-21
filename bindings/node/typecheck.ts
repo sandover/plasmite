@@ -11,38 +11,25 @@ import {
   Durability,
   ErrorKind,
   Message,
-  parseMessage,
   RemoteClient,
   RemoteError,
 } from ".";
 
 const client = new Client("./data");
-const pool = client.createPool("docs", 1024 * 1024);
+const pool = client.createPool("docs", {
+  sizeBytes: 1024 * 1024, about: "Document events", example: { kind: "note" },
+});
+pool.setDescription({ about: "Draft document events" });
 const pooled = client.openPool("docs", { create: true });
-const appended = pool.feedJson(Buffer.from("{}"), { durability: Durability.Fast });
+const appended = pool.feed(Buffer.from("{}"), { format: "json", durability: Durability.Fast });
 const fed = pool.feed({ kind: "note" }, { tags: ["tag"], durability: Durability.Fast });
-const parsedFromEnvelope: Message = parseMessage({
-  seq: 1,
-  time: "2026-02-18T00:00:00Z",
-  data: { ok: true },
-  meta: { tags: ["tag"] },
-});
-const constructed = new Message({
-  seq: 1,
-  time: "2026-02-18T00:00:00Z",
-  data: { ok: true },
-});
-void pool.feed(constructed.data as object, { tags: parsedFromEnvelope.tags });
-// @ts-expect-error Message requires an envelope
+// @ts-expect-error Encoded input needs its format.
+pool.feed(Buffer.from("{}"));
+// @ts-expect-error Messages come from pools.
 new Message();
-// @ts-expect-error message tags are immutable
-parsedFromEnvelope.tags.push("tag");
-// @ts-expect-error message metadata is immutable
-parsedFromEnvelope.meta.tags = [];
 const retentionGap: ErrorKind = ErrorKind.RetentionGap;
 void pooled;
 void fed;
-void parsedFromEnvelope;
 void retentionGap;
 
 async function smokeRemote() {
@@ -57,8 +44,14 @@ async function smokeRemote() {
 }
 
 async function smokeLocalStreams() {
-  const parsed: Message = parseMessage(await appended);
-  void parsed;
+  const parsed: Message = await appended;
+  // @ts-expect-error Message tags are immutable.
+  parsed.tags.push("tag");
+  // @ts-expect-error Message metadata is immutable.
+  parsed.meta.tags = [];
+  void pool.feed(parsed);
+  // @ts-expect-error Forwarded messages keep their tags.
+  void pool.feed(parsed, { tags: [] });
   for await (const message of await pool.follow({ tags: ["tag"] })) {
     void message;
     break;
@@ -70,10 +63,10 @@ async function smokeLocalStreams() {
     void time;
   }
   await history.return();
-  const binary = await pool.fetchLite3({ since: 1n });
+  const binary = await pool.fetch({ since: 1n });
   const frame = await binary.next();
   if (frame.value) {
-    const payload: Buffer = frame.value.payload;
+    const payload: Buffer = frame.value.raw;
     void payload;
   }
   await binary.return();

@@ -1,6 +1,6 @@
 # Plasmite for Go
 
-Plasmite stores JSON messages in pools: bounded ring buffers on disk that many processes can write and read at once. `Feed` writes a message, `Follow` waits for new ones, and `Fetch` reads what the pool holds and stops. Each message carries a sequence number (`Seq`), a time, tags and a JSON object as `Data`. When a pool fills, the oldest messages make room for new ones. These packages open local pools, pools on a shared HTTPS server and UDP endpoints. The [project README](https://github.com/sandover/plasmite#readme) explains the model and the CLI.
+Plasmite stores JSON messages in pools: bounded ring buffers on disk that many processes can write and read at once. `Feed` writes a message, `Follow` waits for new ones, and `Fetch` reads what the pool holds and stops. Each message carries a sequence number (`Seq`), a time, tags and a JSON object available through `Data()`. When a pool fills, the oldest messages make room for new ones. These packages open local pools, pools on a shared HTTPS server and UDP endpoints. The [project README](https://github.com/sandover/plasmite#readme) explains the model and the CLI.
 
 ## Install
 
@@ -51,7 +51,7 @@ func main() {
 
 	live := must(pool.Follow(plasmite.Tags("kitchen")))
 	must(pool.Feed(map[string]any{"temp_c": 21.4}, []string{"kitchen"}))
-	fmt.Println(string(must(live.Next(ctx)).Data)) // {"temp_c":21.4}
+	fmt.Println(string(must(live.Next(ctx)).Data())) // {"temp_c":21.4}
 	live.Close()
 
 	recent := must(pool.Fetch(plasmite.Last(10)))
@@ -64,12 +64,12 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(message.Seq, message.Tags(), string(message.Data))
+		fmt.Println(message.Seq(), message.Tags(), string(message.Data()))
 	}
 }
 ```
 
-`Follow` fixes its position before it returns, so it sees the feed that comes after it. `Fetch` returns `io.EOF` after the last message present when it opened. `Message.Data` holds the raw JSON and `Message.Time` counts Unix nanoseconds. `pool.Info()` reports the oldest and newest retained sequence in `Bounds`. `NewDefaultClient()` uses the default directory, `~/.plasmite/pools`. Use `client.CreatePool(ref, sizeBytes)` to choose a size; `Create(true)` makes a 1 MiB pool.
+`Follow` fixes its position before it returns, so it sees the feed that comes after it. `Fetch` returns `io.EOF` after the last message present when it opened. `message.Data()` returns the JSON object. `message.Time()` counts Unix nanoseconds. `pool.Info()` reports the oldest and newest retained sequence in `Bounds`. `NewDefaultClient()` uses the default directory, `~/.plasmite/pools`. Use `client.CreatePool(ref, sizeBytes)` to choose a size; `Create(true)` makes a 1 MiB pool.
 
 ## Reading
 
@@ -114,8 +114,8 @@ read := func() error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(string(message.Data))
-		save(message.Seq + 1)
+		fmt.Println(string(message.Data()))
+		save(message.Seq() + 1)
 	}
 }
 for {
@@ -161,7 +161,7 @@ events := must(pool.Follow(udp.Since("oldest")))
 defer events.Close()
 for {
 	if frame, ok := must(events.Next(ctx)).(*udp.Frame); ok {
-		fmt.Println(frame.Seq, string(frame.Message.Data))
+		fmt.Println(frame.Message.Seq(), string(frame.Message.Data()))
 	}
 }
 ```
@@ -174,32 +174,43 @@ Plasmite failures are `*plasmite.Error` values (an alias of `api.Error`). `Kind`
 
 Clients, pools and readers serialize calls on their own native handle, so goroutines can share them. Separate handles can run concurrently. A reader owns its own handle and keeps working after its pool closes. A context deadline also limits the wait behind another `Next` on the same reader.
 
-## Advanced
+## Message bytes and forwarding
 
-These methods avoid conversion work when you forward messages or read a few fields from large ones. The [language interface measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-interfaces.md) show when each one pays off.
-
-**Views.** `FetchView` and `FollowView` open readers that yield immutable `*MessageView` values. `FeedView` returns the view for the message it wrote. A view lives in Go memory, needs no `Close`, and stays valid after the reader closes or the pool overwrites the message.
+A message keeps the bytes Plasmite stored and remains valid after the reader closes or the pool overwrites it. `Seq()`, `Time()`, `Tags()` and `Sender()` read metadata. `Sender()` returns the server access key's name when a keyed write supplied one. `Data()` renders the JSON object on first access and returns a copy. `Decode(&reading)` can read selected fields from those bytes directly. `Raw()` copies the stored Lite3 bytes, and `json.Marshal(message)` writes the complete JSON envelope.
 
 ```go
-reader := must(pool.FetchView(plasmite.Last(1)))
-view := must(reader.Next(ctx))
+reader := must(pool.Fetch(plasmite.Last(1)))
+message := must(reader.Next(ctx))
 reader.Close()
 
 var reading struct {
 	TempC float64 `json:"temp_c"`
 }
-must(0, view.Decode(&reading)) // fills the struct by encoding/json rules
-fmt.Println(view.Seq(), reading.TempC)
-must(pool.FeedView(view, nil)) // forward: new seq and time, same data and tags
+must(0, message.Decode(&reading))
+fmt.Println(message.Seq(), reading.TempC)
+must(pool.Feed(message, nil))
 ```
 
-`Prepare("/temp_c")` compiles JSON Pointer paths once. Call `selector.Read(view)` to read those fields from each message, then call `selector.Close()` when you finish. `view.JSON()` formats the full envelope and `view.Lite3()` copies the encoded bytes. `FeedView` also accepts Go values that encode as a data object. Inside that object, `[]byte` becomes native bytes. Pass `view.Data()` with new tags to retag a message. `udp.Pool.FollowView` delivers `*udp.ViewFrame` events that carry the same views. See the [Go view measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-boundary-results/owned-views/go/README.md) and [stream measurements](https://github.com/sandover/plasmite/blob/main/docs/performance/language-boundary-results/owned-views/go/streams/README.md).
+`Feed` accepts a Go object, explicit JSON (`plasmite.JSON(rawJSON)`), a message, or stored bytes (`plasmite.Lite3(rawBytes)`). Forward a message or its stored bytes with `nil` tags. The destination assigns its own sequence and time and keeps the original data and tags. To change the tags, send `plasmite.JSON(message.Data())` with the new tags. Inside a native Go object, `[]byte` encodes as a Lite3 byte value.
 
-**Receipts.** `FeedReceipt`, `FeedJSONReceipt` and `FeedLite3Receipt` return only `Seq` and `Time`, skipping the committed message.
+Use `plasmite.WithDurability(plasmite.DurabilityFlush)` on a local or HTTPS feed to wait for the write to flush.
 
-**Lite3.** `FeedLite3`, `FetchLite3` and `FollowLite3` move the binary encoding Plasmite stores. Reads yield `*Lite3Frame` values with `Seq`, `Time` and `Payload`.
+## Pool descriptions
 
-**Durability.** For local and HTTPS pools, pass `plasmite.WithDurability(plasmite.DurabilityFlush)` to ask Plasmite to flush the write before reporting success.
+A description helps readers choose the right pool. An optional example shows the kind of JSON object they can expect.
+
+```go
+description := plasmite.PoolDescription{
+	About: "Kitchen temperature readings",
+	Example: plasmite.JSON(`{"temp_c":21.4}`),
+}
+pool := must(client.CreatePool("readings", 1<<20, plasmite.WithDescription(description)))
+defer pool.Close()
+fmt.Println(must(pool.Info()).About)
+must(0, pool.SetDescription(plasmite.PoolDescription{About: "Temperatures in Celsius"}))
+```
+
+`SetDescription` replaces the description and example. Pass an empty `PoolDescription{}` to clear both.
 
 ## Building from source
 

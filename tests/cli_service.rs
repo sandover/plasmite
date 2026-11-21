@@ -1,5 +1,7 @@
 //! Purpose: Verify foreground and installed-server CLI behavior at process boundaries.
 
+#[cfg(windows)]
+use plasmite::api::internal::LocalPoolTransport;
 use serde_json::Value;
 use std::fs;
 use std::io::Read;
@@ -601,7 +603,8 @@ mod windows_upgrade {
             .next_frame()?
             .ok_or("missing retained message after service upgrade")?;
         assert_eq!(frame.seq, 1);
-        let message = plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload)?;
+        let message =
+            plasmite::api::MessageEnvelope::from_lite3(frame.seq, frame.time, &frame.payload)?;
         assert_eq!(message.data, serde_json::json!({"probe": "retained"}));
         Ok(())
     }

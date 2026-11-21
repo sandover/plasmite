@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { RemoteClient, RemoteError } = require("../remote");
 const { mapDurability } = require("../mappings");
+const { frame, control } = require("./http_records");
+const { encodeMessage } = require("../portable");
 
 async function withFetchStub(fetchImpl, callback) {
   const originalFetch = global.fetch;
@@ -59,7 +61,7 @@ test("HTTP remains available without credentials and with loopback credentials",
 
 test("HTTPS bearer requests use the requested origin and reject redirects", async () => {
   await withFetchStub((url, options) => {
-    assert.equal(url, "https://service.example:9700/v2/pools");
+    assert.equal(url, "https://service.example:9700/pools");
     assert.equal(options.redirect, "manual");
     assert.equal(options.headers.Authorization, "Bearer secret");
     return new Response(null, {
@@ -71,6 +73,22 @@ test("HTTPS bearer requests use the requested origin and reject redirects", asyn
     await assert.rejects(client.listPools(), /redirected the request \(HTTP 302\); redirects are not followed/);
     assert.equal(calls.length, 1);
   });
+});
+
+test("an unversioned pool 404 uses the server version to distinguish old servers", async () => {
+  const body = '{"error":{"kind":"NotFound","message":"missing pool"}}';
+  for (const version of [null, "0", "2"]) {
+    await withFetchStub(() => new Response(body, {
+      status: 404, headers: version ? { "Plasmite-Version": version } : {},
+    }), async (calls) => {
+      const client = new RemoteClient("http://localhost:9700");
+      await assert.rejects(
+        client.poolInfo("missing"),
+        version === "2" ? /missing pool/ : /requires upgrade to Plasmite 2/,
+      );
+      assert.equal(new URL(calls[0].url).pathname, "/pools/missing");
+    });
+  }
 });
 
 test("stream requests also enforce transport security and reject redirects", async () => {
@@ -125,16 +143,17 @@ test("2.0 fetch opens eagerly and keeps its bound through cutoff", async () => {
   globalThis.fetch = async url => {
     const request = new URL(url);
     calls.push(request);
-    const message = (seq) => `{"seq":${seq},"time":"2026-11-17T01:00:00.123456789Z","meta":{"tags":["keep"]},"data":{}}\n`;
-    const cutoff = '{"type":"cutoff","next_seq":2,"until":3}\n';
-    const body = [message(1) + cutoff, cutoff, message(3) + '{"type":"complete"}\n'];
+    const payload = encodeMessage({}, ["keep"]);
+    const message = seq => frame(BigInt(seq), 123456789n, payload);
+    const cutoff = control({ type: "cutoff", next_seq: 2, until: 3 });
+    const body = [Buffer.concat([message(1), cutoff]), cutoff, Buffer.concat([message(3), control({ type: "complete" })])];
     return new Response(body[calls.length - 1], { headers: { "Plasmite-Incarnation": "original" } });
   };
   try {
     const pool = new RemotePool(new RemoteClient("http://localhost"), "events");
     const read = await pool.fetch({ last: 3, tags: ["keep"] });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].pathname, "/v2/pools/events/fetch");
+    assert.equal(calls[0].pathname, "/pools/events/fetch");
     assert.equal(calls[0].searchParams.get("last"), "3");
     const first = (await read.next()).value;
     assert.equal(first.seq, 1n);
@@ -157,11 +176,11 @@ test("HTTP continuation rejects another pool or a missing identity before readin
     let calls = 0;
     await withFetchStub(() => {
       if (++calls === 1) {
-        return new Response('{"type":"cutoff","next_seq":2,"until":3}\n', {
+        return new Response(control({ type: "cutoff", next_seq: 2, until: 3 }), {
           headers: { "Plasmite-Incarnation": "original" },
         });
       }
-      return new Response('{"seq":2,"time":"2026-11-17T00:00:00Z","meta":{"tags":[]},"data":{}}\n', {
+      return new Response(frame(2n, 1n, encodeMessage({})), {
         headers: identity === null ? {} : { "Plasmite-Incarnation": identity },
       });
     }, async () => {
@@ -177,7 +196,7 @@ test("HTTP follow rejects cutoff without opening another request", async () => {
   let calls = 0;
   await withFetchStub(() => {
     calls++;
-    return new Response('{"type":"cutoff","next_seq":2}\n', {
+    return new Response(control({ type: "cutoff", next_seq: 2 }), {
       headers: { "Plasmite-Incarnation": "original" },
     });
   }, async () => {

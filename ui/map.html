@@ -813,7 +813,7 @@ Invariants: Message data enters the DOM as text.
           const controller = new AbortController();
           activityController = controller;
           try {
-            const response = await fetch("/v0/ui/activity", { cache: "no-store", signal: controller.signal });
+            const response = await fetch("/ui/activity", { cache: "no-store", signal: controller.signal });
             if (response.status === 403) {
               activityAllowed = false;
               updateActivityButtons();
@@ -1034,10 +1034,10 @@ Invariants: Message data enters the DOM as text.
 
         // Streams.
 
-        function follow(url, onEvent, { onDrop, onEnd, onResponse, read } = {}) {
+        function follow(url, onEvent, { onDrop, onEnd, onResponse, read, accept } = {}) {
           const controller = new AbortController();
           followEvents({
-            url, signal: controller.signal, retryMs, onDrop, read,
+            url, signal: controller.signal, retryMs, onDrop, read, accept,
             onResponse(response) {
               if (response.status === 401) { location.assign("/ui"); return false; }
               return response.status !== 403 && response.status !== 404 && onResponse?.(response) !== false;
@@ -1052,9 +1052,10 @@ Invariants: Message data enters the DOM as text.
 
         function startList() {
           if (state.stopList || document.visibilityState !== "visible") return;
-          const stop = follow(() => "/v0/ui/pools/stream",
+          const stop = follow(() => "/pools",
             (event) => { if (event.name === "pools") showPools(event.data); },
             {
+              accept: "text/event-stream",
               onDrop: () => setStatus("reconnecting"),
               onEnd: () => { if (state.stopList === stop) state.stopList = null; },
             });
@@ -1073,7 +1074,7 @@ Invariants: Message data enters the DOM as text.
           const stop = follow(() => {
             const query = new URLSearchParams();
             if (state.nextSeq != null) query.set("since", cursor(state.nextSeq));
-            return "/v2/pools/" + encodeURIComponent(name) + "/follow?" + query;
+            return "/pools/" + encodeURIComponent(name) + "/follow?" + query;
           }, (event) => {
             if (event.name === "cutoff") state.nextSeq = event.data.next_seq;
             if (event.name === "error") {
@@ -1328,7 +1329,7 @@ Invariants: Message data enters the DOM as text.
             return;
           }
           try {
-            const session = await fetch("/v0/browser/session", { cache: "no-store" });
+            const session = await fetch("/browser/session", { cache: "no-store" });
             if (!session.ok) { location.assign("/ui"); return; }
             const identity = await session.json();
             state.local = Boolean(identity.local);
@@ -1346,7 +1347,7 @@ Invariants: Message data enters the DOM as text.
               logout.type = "button";
               logout.textContent = "Log out";
               logout.addEventListener("click", async () => {
-                await fetch("/v0/browser/session", { method: "DELETE" });
+                await fetch("/browser/session", { method: "DELETE" });
                 location.assign("/ui");
               });
               actions.append(logout);

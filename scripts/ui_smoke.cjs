@@ -263,8 +263,8 @@ test('a rejected map stream stops retrying and a later start opens a fresh strea
   const env = browser('map', mapExports);
   env.context.document.visibilityState = 'visible';
   const requests = [];
-  env.context.fetch = async url => {
-    requests.push(url);
+  env.context.fetch = async (url, options) => {
+    requests.push([url, options.headers?.Accept]);
     return { ok: false, status: 403 };
   };
   env.page.startList();
@@ -272,7 +272,7 @@ test('a rejected map stream stops retrying and a later start opens a fresh strea
   assert.equal(env.timers.size, 0);
   env.page.startList();
   await new Promise(setImmediate);
-  assert.deepEqual(requests, ['/v0/ui/pools/stream', '/v0/ui/pools/stream']);
+  assert.deepEqual(requests, [['/pools', 'text/event-stream'], ['/pools', 'text/event-stream']]);
 });
 
 test('signing out discards a pool list event from the old connection', async () => {
@@ -317,12 +317,12 @@ test('history sends bounded exact parameters and inserts a finite earlier batch'
   const env = historyBrowser();
   let requested;
   env.context.fetch = async (url) => {
-    if (url.endsWith('/info')) return info('9007199254740991');
+    if (url === '/pools/test') return info('9007199254740991');
     requested = new URL(url, 'http://localhost');
     return jsonStream('current', '{"seq":9007199254740993,"data":1}\n{"seq":9007199254740994,"data":2}\n{"type":"complete"}\n');
   };
   await env.page.loadEarlier();
-  assert.equal(requested.pathname, '/v2/pools/test/fetch');
+  assert.equal(requested.pathname, '/pools/test/fetch');
   assert.equal(requested.searchParams.get('since'), '9007199254740993');
   assert.equal(requested.searchParams.get('until'), '9007199254740994');
   assert.equal(env.page.state.messages.length, 3);
@@ -333,7 +333,7 @@ test('history sends bounded exact parameters and inserts a finite earlier batch'
 test('history aborts a stalled server and exposes retry guidance', async () => {
   const env = historyBrowser();
   env.context.fetch = async (url, options) => {
-    if (url.endsWith('/info')) return info('9007199254740991');
+    if (url === '/pools/test') return info('9007199254740991');
     return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted'))));
   };
   const loading = env.page.loadEarlier();
@@ -346,7 +346,7 @@ test('history aborts a stalled server and exposes retry guidance', async () => {
 
 test('history surfaces stream errors and retains a partial page', async () => {
   const env = historyBrowser();
-  env.context.fetch = async (url) => url.endsWith('/info') ? info('9007199254740991') :
+  env.context.fetch = async (url) => url === '/pools/test' ? info('9007199254740991') :
     jsonStream('current', '{"seq":9007199254740993,"data":1}\n{"type":"error","error":{"message":"retention gap"}}\n');
   await env.page.loadEarlier();
   assert.equal(env.page.state.messages.length, 2);
@@ -361,6 +361,22 @@ test('clipboard and session failures surface useful status', async () => {
   env.context.fetch = async () => { throw new Error('offline'); };
   await env.page.boot();
   assert.match(env.nodes.get('ui-notice').textContent, /check your session.*Reload/);
+});
+
+test('the pool page shows Feed only for a session with write access', async () => {
+  for (const readOnly of [true, false]) {
+    const env = browser('pool', poolExports);
+    env.page.quietRendering();
+    env.context.fetch = async (url) => {
+      if (url === '/browser/session') {
+        return { ok: true, json: async () => ({ local: false, read_only: readOnly }) };
+      }
+      if (url === '/pools/test') return info('1');
+      return new Promise(() => {});
+    };
+    await env.page.boot();
+    assert.equal(env.nodes.get('append').hidden, readOnly);
+  }
 });
 
 
@@ -397,7 +413,7 @@ test('stream incarnation catches replacement after the info request', async () =
   const requests = [];
   const stale = jsonStream('new', '{"seq":101,"data":{}}\n');
   env.context.fetch = async url => {
-    if (url.endsWith('/info')) return info(1, 'new', 2);
+    if (url === '/pools/test') return info(1, 'new', 2);
     requests.push(new URL(url, env.context.location.origin));
     if (requests.length === 1) return stale;
     return jsonStream('new', '{"seq":1,"data":{}}\n{"seq":2,"data":{}}\n');
@@ -484,6 +500,7 @@ test('map stream-start identity resets an info-to-stream replacement before acce
 test('a deleted pool clears old rows and recreation restores the controls', () => {
   const env = browser('pool', poolExports);
   env.page.quietRendering();
+  env.page.state.canWrite = true;
   env.page.state.info = { incarnation: 'old' };
   env.page.addMessage(raw(env.api, '100'));
   env.page.showMissing();

@@ -1,6 +1,6 @@
 /*
 Purpose: Backend-agnostic Go contracts and shared model types for Plasmite.
-Key Exports: Client, Pool, Message, MessageMeta, Reader, Error.
+Key Exports: Pool, Message, Reader, Error.
 Role: Stable pure-Go surface consumed by local/fake/future transport backends.
 Invariants: No cgo imports; error kinds are stable; stream APIs remain cancel-safe.
 Invariants: Pool ordering and bounded buffering semantics are preserved by implementations.
@@ -14,7 +14,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/sandover/plasmite/bindings/go/v2/internal/message"
 )
 
 type ErrorKind int32
@@ -103,115 +104,19 @@ func PoolRefPath(path string) PoolRef {
 
 func PoolRefURI(uri string) PoolRef { return PoolRef(uri) }
 
-type MessageMeta struct {
-	Tags []string `json:"tags"`
-}
+// Message is an immutable record returned by Feed, Follow and Fetch.
+type Message = message.Message
 
-type Message struct {
-	Seq  uint64          `json:"seq"`
-	Time uint64          `json:"-"`
-	Data json.RawMessage `json:"data"`
-	Meta MessageMeta     `json:"meta"`
-	Raw  []byte          `json:"-"`
-}
+// JSON passes an explicitly encoded data object to Feed.
+type JSON = json.RawMessage
 
-// MarshalJSON uses the same UTC nanosecond timestamp as the CLI.
-func (m Message) MarshalJSON() ([]byte, error) {
-	const nanosecondsPerSecond = 1_000_000_000
-	instant := time.Unix(int64(m.Time/nanosecondsPerSecond), int64(m.Time%nanosecondsPerSecond)).UTC()
-	type fields Message
-	return json.Marshal(struct {
-		fields
-		Time string `json:"time"`
-	}{fields(m), instant.Format("2006-01-02T15:04:05.000000000Z")})
-}
-
-func (m *Message) Tags() []string {
-	if m == nil {
-		return nil
-	}
-	return m.Meta.Tags
-}
-
-// EncodeFeedJSON keeps a forwarded message's application data and tags.
-func EncodeFeedJSON(value any, tags []string) ([]byte, []string, error) {
-	var message *Message
-	switch value := value.(type) {
-	case Message:
-		message = &value
-	case *Message:
-		if value == nil {
-			return nil, nil, InvalidArgumentError("missing message")
-		}
-		message = value
-	}
-	if message != nil {
-		if tags != nil {
-			return nil, nil, InvalidArgumentError("cannot supply tags when forwarding a message")
-		}
-		return message.Data, message.Tags(), nil
-	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil, nil, InvalidArgumentError(fmt.Sprintf("cannot encode feed value: %v", err))
-	}
-	return payload, tags, nil
-}
-
-func DecodeMessage(raw []byte) (*Message, error) {
-	return decodeMessage(raw, false)
-}
-
-// DecodeOwnedMessage takes ownership of raw. The caller must not mutate or reuse
-// it after this call. Data keeps its own copy, independent of Raw.
-func DecodeOwnedMessage(raw []byte) (*Message, error) {
-	return decodeMessage(raw, true)
-}
-
-func decodeMessage(raw []byte, owned bool) (*Message, error) {
-	var payload struct {
-		Seq  uint64          `json:"seq"`
-		Time string          `json:"time"`
-		Data json.RawMessage `json:"data"`
-		Meta MessageMeta     `json:"meta"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, &Error{Kind: ErrorCorrupt, Message: fmt.Sprintf("decode message: %v", err)}
-	}
-	parsedTime, err := time.Parse(time.RFC3339Nano, payload.Time)
-	if err != nil {
-		return nil, &Error{Kind: ErrorCorrupt, Message: fmt.Sprintf("parse message time: %v", err)}
-	}
-	if !owned {
-		raw = append([]byte(nil), raw...)
-	}
-	return &Message{
-		Seq:  payload.Seq,
-		Time: unixNanoseconds(parsedTime),
-		Data: payload.Data,
-		Meta: payload.Meta,
-		Raw:  raw,
-	}, nil
-}
-
-type Lite3Frame struct {
-	Seq     uint64
-	Time    uint64
-	Flags   uint32
-	Payload []byte
-}
-
-// FeedReceipt identifies a successful commit. Time counts Unix nanoseconds.
-type FeedReceipt struct {
-	Seq  uint64
-	Time uint64
-}
+// Lite3 passes the stored encoding of a message to Feed.
+type Lite3 []byte
 
 type Pool interface {
 	Close()
 	Info() (PoolInfo, error)
 	Feed(value any, tags []string, opts ...FeedOption) (*Message, error)
-	FeedJSON(payload []byte, tags []string, opts ...FeedOption) ([]byte, error)
 	Follow(opts ...ReadOption) (Reader, error)
 	Fetch(opts ...ReadOption) (Reader, error)
 }
@@ -220,24 +125,9 @@ type UDPEvent interface {
 	udpEvent()
 }
 
-type UDPFrame struct {
-	Seq     uint64
-	Time    uint64
-	Payload []byte
-	Message *Message
-}
+type UDPFrame struct{ Message *Message }
 
 func (*UDPFrame) udpEvent() {}
-
-// UDPViewFrame carries a backend's immutable view without tying these contracts
-// to cgo. Concrete bindings choose the view type; ordinary messages need no Close.
-type UDPViewFrame[V any] struct {
-	Seq  uint64
-	Time uint64
-	View V
-}
-
-func (*UDPViewFrame[V]) udpEvent() {}
 
 // UDPSkip reports a range the server explicitly skipped.
 type UDPSkip struct {

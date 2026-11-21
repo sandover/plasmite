@@ -9,7 +9,6 @@ const { execFileSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 const root = path.resolve(process.env.PLASMITE_BENCH_BINDING || path.join(__dirname, '..'));
 const { RemoteClient } = require(path.join(root, 'remote'));
-const { toNative } = require(path.join(root, 'views'));
 const [baseUrl, output] = process.argv.slice(2);
 const operations = Number(process.argv[4] || 300), repeats = Number(process.argv[5] || 7);
 assert.ok(baseUrl && output && Number.isSafeInteger(operations) && operations > 0);
@@ -50,10 +49,11 @@ async function main() {
   const pool = await client.openPool(poolName), measurements = [];
   try {
     for (const [fixture, data] of Object.entries(fixtures)) {
-      const prepared = await source.feed(data), frame = await first(source.fetchLite3({ since: prepared.seq }));
-      const url = new URL(`/v2/pools/${poolName}/feed`, baseUrl);
+      const prepared = await source.feed(data), frame = await first(source.fetch({ since: prepared.seq }));
+      const payload = frame.raw;
+      const url = new URL(`/pools/${poolName}/feed`, baseUrl);
       async function appendReceipt(identity) {
-        const response = await fetch(url, { method: 'POST', body: frame.payload, headers: {
+        const response = await fetch(url, { method: 'POST', body: payload, headers: {
           'Content-Type': 'application/x-plasmite-lite3',
           Accept: identity ? 'application/x-plasmite-identity' : 'application/json',
         } });
@@ -72,17 +72,16 @@ async function main() {
         ['encoded-append/full-json-receipt', () => appendReceipt(false)],
       ];
       if (process.env.RECEIPT_ONLY !== '1') {
-        const sourceView = await first(source.fetchView({ since: prepared.seq }));
+        const sourceMessage = await first(source.fetch({ since: prepared.seq }));
+        const json = Buffer.from(JSON.stringify(data));
         lanes.push(
-        ['forward-selected/view', async () => (await pool.feedView(sourceView)).data.metrics.power],
-        ['forward-selected/json', async () => (await pool.feed(data)).data.metrics.power],
-        ['append-selected/view', async () => (await pool.feedView(data)).data.metrics.power],
-        ['append-selected/json', async () => (await pool.feed(data)).data.metrics.power],
-        ['get-selected/view', async () => (await first(source.fetchView({ since: prepared.seq }))).data.metrics.power],
-        ['get-selected/json', async () => (await first(source.fetch({ since: prepared.seq }))).data.metrics.power],
-        ['get-native/view', async () => toNative((await first(source.fetchView({ since: prepared.seq }))).data).metrics.power],
-        ['get-native/json', async () => (await first(source.fetch({ since: prepared.seq }))).data.metrics.power],
-      );
+          ['forward-selected/message', async () => (await pool.feed(sourceMessage)).field('metrics').power],
+          ['forward-selected/encoded-bytes', async () => (await pool.feed(payload, { format: 'lite3' })).field('metrics').power],
+          ['append-selected/object', async () => (await pool.feed(data)).field('metrics').power],
+          ['append-selected/json-bytes', async () => (await pool.feed(json, { format: 'json' })).field('metrics').power],
+          ['get-selected/message', async () => (await first(source.fetch({ since: prepared.seq }))).field('metrics').power],
+          ['get-native/message', async () => (await first(source.fetch({ since: prepared.seq }))).data.metrics.power],
+        );
       }
       for (const [, run] of lanes) for (let i = 0; i < 5; i++) assert.equal(await run(), 42);
       const rows = [];
@@ -91,7 +90,7 @@ async function main() {
       }
       // Verify all data outside selected-field timing, including array/text contents.
       assert.deepEqual((await first(source.fetch({ since: prepared.seq }))).data, data);
-      measurements.push({ fixture, encodedBytes: frame.payload.length, rows });
+      measurements.push({ fixture, encodedBytes: payload.length, rows });
     }
     const hashes = {};
     for (const file of ['remote.js', 'views.js', 'portable.js', 'portable/plasmite_core.wasm', 'portable/manifest.json']) {
@@ -105,7 +104,7 @@ async function main() {
       limits: ['Sequential loopback HTTP includes fetch/request scheduling.',
         probe ? 'Server CPU uses the native process counter probe, sampled outside client timing.'
           : 'Server CPU uses ps time deltas; short intervals have coarse resolution.',
-        'Encoded-append controls isolate receipt work; only full view lanes include native encoding and view acquisition.',
+        'Encoded-append controls isolate receipt work; message lanes include input conversion and committed-message acquisition.',
         'JSON fixtures contain safe integers and no native bytes.'] }, null, 2) + '\n');
   } finally { await client.deletePool(poolName); await client.deletePool(poolName + '-read'); }
 }

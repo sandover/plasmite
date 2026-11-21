@@ -42,10 +42,17 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Invite {
-            name, legacy_name, ..
+            name,
+            legacy_name,
+            read_only,
         } => {
             let name = name.or(legacy_name).expect("clap requires one client name");
-            let access_key = crate::secure_serve::invite(context.pool_dir()?, &name)?;
+            let mode = if read_only {
+                crate::access_store::AccessMode::ReadOnly
+            } else {
+                crate::access_store::AccessMode::Full
+            };
+            let access_key = crate::secure_serve::invite(context.pool_dir()?, &name, mode)?;
             if !output_mode.is_structured() {
                 super::output::write_stdout(
                     format!("Access key for {}: {access_key}\n", human_literal(&name)).as_bytes(),
@@ -54,7 +61,7 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                 super::output::write_stdout(b"For Plasmite CLI access, run `plasmite access connect <server-address>` on the client machine.\n")?;
             } else {
                 emit_output(
-                    json!({ "name": name, "access_key": access_key }),
+                    json!({ "name": name, "mode": mode, "access_key": access_key }),
                     output_mode,
                 )?;
             }
@@ -196,6 +203,7 @@ fn emit_keys(keys: &serde_json::Value, output_mode: OutputMode) -> Result<(), Er
     for row in rows {
         let id = row["id"].as_str().unwrap_or("?");
         let name = row["name"].as_str().unwrap_or("?");
+        let mode = row["mode"].as_str().unwrap_or("full");
         let state = if row["revoked"].as_bool().unwrap_or(false) {
             "revoked"
         } else {
@@ -212,13 +220,14 @@ fn emit_keys(keys: &serde_json::Value, output_mode: OutputMode) -> Result<(), Er
         table_rows.push(vec![
             id.to_owned(),
             name.to_owned(),
+            mode.to_owned(),
             state.to_owned(),
             created,
             last_used,
         ]);
     }
     super::output_support::emit_table(
-        &["ID", "NAME", "STATE", "CREATED", "LAST USED"],
+        &["ID", "NAME", "MODE", "STATE", "CREATED", "LAST USED"],
         &table_rows,
     )?;
     Ok(())

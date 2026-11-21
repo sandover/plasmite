@@ -13,32 +13,41 @@ mod remote;
 mod udp;
 mod validation;
 
+/// Transport and benchmark operations used inside this repository.
+#[doc(hidden)]
+pub mod internal {
+    pub use super::message::LocalPoolTransport;
+    pub use super::remote::RemotePoolTransport;
+    pub use super::udp::UdpPoolTransport;
+}
+
 pub use crate::core::cursor::{Cursor, CursorResult, FrameRef};
 #[doc(hidden)]
 pub use crate::core::error::to_exit_code;
 pub use crate::core::error::{Error, ErrorKind};
 pub use crate::core::lite3::{self, Lite3DocRef};
 pub use crate::core::pool::{
-    AppendOptions, Bounds, Durability, Pool, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
-    PoolPathGuard, PoolUtilization, SeqOffsetCache,
+    AppendOptions, Bounds, Durability, Pool, PoolAgeMetrics, PoolDescription, PoolInfo,
+    PoolMetrics, PoolOptions, PoolPathGuard, PoolUtilization, SeqOffsetCache,
 };
 pub use crate::core::ring_layout::{FrameSpan, RingLayout};
 pub use client::{DEFAULT_POOL_SIZE, LocalClient, PoolRef};
-pub use message::{
-    Feed, FeedInput, FeedReceipt, Follow, Lite3Follow, Message, Meta, Read, ReadPoll, Since,
-    ViewFollow,
-};
+pub use message::{Feed, FeedInput, Follow, Message, Read, Since};
 #[doc(hidden)]
-pub use message::{HostedRead, ReadStatus, message_json_from_frame};
+pub use message::{
+    FeedReceipt, HostedRead, Lite3Follow, MessageEnvelope, Meta, ReadPoll, ReadStatus, ViewFollow,
+    message_json_from_frame,
+};
 pub(crate) use message::{
     TailOutcome, TailState, format_ts, frame_matches_tags, message_from_udp_payload,
     select_frame_json, select_lite3_frame, select_view,
 };
+pub(crate) use remote::{AsyncRead as AsyncHttpRead, stream_runtime};
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Read, RemotePool, RemoteRead};
-pub use udp::{
-    UdpClient, UdpEvent, UdpFollow, UdpFrame, UdpPool, UdpSkipReason, UdpStart, UdpStreamEvent,
-    UdpViewEvent, UdpViewFollow,
-};
+pub(crate) use udp::AsyncUdpRead;
+pub use udp::{UdpClient, UdpEvent, UdpFollow, UdpPool, UdpSkipReason, UdpStart, UdpStreamEvent};
+#[doc(hidden)]
+pub use udp::{UdpFrame, UdpRawEvent, UdpRawFollow, UdpViewEvent, UdpViewFollow};
 pub use validation::{
     ValidationIssue, ValidationMessageStats, ValidationObservation, ValidationReport,
     ValidationStatus,

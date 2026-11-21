@@ -1,4 +1,5 @@
 //! Remote storage and bounded reads behind the native ABI.
+use crate::api::internal::{LocalPoolTransport, RemotePoolTransport};
 use crate::api::{Error, ErrorKind, Feed, FeedReceipt, FrameRef, Pool, RemotePool, TailOutcome};
 use crate::core::pool::Durability;
 use crate::view::MessageView;
@@ -25,6 +26,16 @@ impl PoolHandle {
         }
     }
 
+    pub(crate) fn set_description(
+        &mut self,
+        description: crate::api::PoolDescription,
+    ) -> Result<(), Error> {
+        match self {
+            Self::Local(pool) => pool.set_description(description),
+            Self::Remote(pool) => pool.set_description(description),
+        }
+    }
+
     pub(crate) fn append_prepared(
         &mut self,
         bytes: &[u8],
@@ -42,7 +53,7 @@ impl PoolHandle {
         &mut self,
         bytes: &[u8],
         feed: Feed,
-    ) -> Result<crate::api::Message, Error> {
+    ) -> Result<crate::api::MessageEnvelope, Error> {
         match self {
             Self::Local(pool) => pool.feed_lite3(bytes, feed),
             Self::Remote(pool) => pool.feed_lite3(bytes, feed),
@@ -62,17 +73,13 @@ impl PoolHandle {
 
     pub(crate) fn feed_prepared_view(
         &mut self,
-        mut view: MessageView,
+        view: MessageView,
         durability: Durability,
     ) -> Result<MessageView, Error> {
-        if let Self::Local(pool) = self {
-            return pool.feed_prepared_view(view, durability);
+        match self {
+            Self::Local(pool) => pool.feed_prepared_view(view, durability),
+            Self::Remote(pool) => pool.feed_committed_view(view.bytes(), durability),
         }
-        let receipt = self.append_prepared(view.bytes(), durability)?;
-        view.seq = receipt.seq;
-        view.time = receipt.time;
-        view.flags = 0;
-        Ok(view)
     }
 
     pub(crate) fn feed_view(
@@ -80,8 +87,12 @@ impl PoolHandle {
         view: &MessageView,
         feed: Feed,
     ) -> Result<MessageView, Error> {
-        let receipt = self.append_prepared(view.bytes(), feed.encoded_durability()?)?;
-        Ok(view.with_identity(receipt.seq, receipt.time, 0))
+        match self {
+            Self::Local(pool) => pool.feed_view(view, feed),
+            Self::Remote(pool) => {
+                pool.feed_committed_view(view.bytes(), feed.encoded_durability()?)
+            }
+        }
     }
 }
 

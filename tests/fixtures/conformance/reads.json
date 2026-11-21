@@ -23,8 +23,8 @@
     {"name":"past next sequence","since":5,"error":"Usage"}
   ],
   "follow": [
-    {"name":"Brygg starts live before first pull","tags":["gfx","scope:sharedCanvas"],"after_open":[{"data":{"point":[8,9]},"tags":["gfx","scope:sharedCanvas"]}],"expect":[4]},
-    {"name":"Brygg resumes from checkpoint 1","since":2,"tags":["gfx","scope:sharedCanvas"],"expect":[3]},
+    {"name":"live follow starts before first pull","tags":["gfx","scope:sharedCanvas"],"after_open":[{"data":{"point":[8,9]},"tags":["gfx","scope:sharedCanvas"]}],"expect":[4]},
+    {"name":"follow resumes from checkpoint 1","since":2,"tags":["gfx","scope:sharedCanvas"],"expect":[3]},
     {"name":"oldest is explicit history","since":"oldest","expect":[1,2,3]},
     {"name":"last includes retained history","last":2,"expect":[2,3]}
   ],

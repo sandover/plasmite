@@ -4,45 +4,36 @@ use crate::api::message::{Read as Selection, ReadStart, Since, format_ts};
 use crate::interface_wire::{
     LITE3_CONTROL_RECORD, LITE3_MESSAGE_ID_LEN, LITE3_MESSAGE_RECORD, LITE3_RECORD_HEADER_LEN,
 };
+use serde_json::Value;
 use std::sync::atomic::Ordering;
 
 pub struct RemoteRead(Stream);
 pub struct RemoteLite3Read(Stream);
 
-impl RemotePool {
-    pub fn follow(&self, read: Selection) -> ApiResult<RemoteRead> {
-        Stream::open(self, read, true, false).map(RemoteRead)
-    }
+pub trait RemotePoolTransport {
+    fn follow_lite3(&self, read: Selection) -> ApiResult<RemoteLite3Read>;
 
-    pub fn fetch(&self, read: Selection) -> ApiResult<RemoteRead> {
-        Stream::open(self, read, false, false).map(RemoteRead)
-    }
+    fn fetch_lite3(&self, read: Selection) -> ApiResult<RemoteLite3Read>;
 
-    pub fn follow_lite3(&self, read: Selection) -> ApiResult<RemoteLite3Read> {
+    fn feed_lite3(&self, bytes: &[u8], options: crate::api::Feed) -> ApiResult<DecodedMessage>;
+
+    fn feed_lite3_receipt(
+        &self,
+        bytes: &[u8],
+        options: crate::api::Feed,
+    ) -> ApiResult<crate::api::FeedReceipt>;
+}
+
+impl RemotePoolTransport for RemotePool {
+    fn follow_lite3(&self, read: Selection) -> ApiResult<RemoteLite3Read> {
         Stream::open(self, read, true, true).map(RemoteLite3Read)
     }
 
-    pub fn fetch_lite3(&self, read: Selection) -> ApiResult<RemoteLite3Read> {
+    fn fetch_lite3(&self, read: Selection) -> ApiResult<RemoteLite3Read> {
         Stream::open(self, read, false, true).map(RemoteLite3Read)
     }
 
-    pub fn feed<'a>(
-        &self,
-        input: impl Into<crate::api::FeedInput<'a>>,
-        options: crate::api::Feed,
-    ) -> ApiResult<Message> {
-        let (data, tags, durability) = options.resolve(input.into())?;
-        let url = build_url(&self.base_url, &["v2", "pools", &self.pool, "feed"])?;
-        let request = AppendRequest {
-            data,
-            tags,
-            durability: durability_to_str(durability),
-        };
-        let envelope: MessageEnvelope = self.client.request_json("POST", &url, &request)?;
-        message_from_remote(envelope.message)
-    }
-
-    pub fn feed_lite3(&self, bytes: &[u8], options: crate::api::Feed) -> ApiResult<Message> {
+    fn feed_lite3(&self, bytes: &[u8], options: crate::api::Feed) -> ApiResult<DecodedMessage> {
         let envelope: MessageEnvelope = read_json_response(self.request_lite3_feed(
             bytes,
             options.encoded_durability()?,
@@ -51,7 +42,7 @@ impl RemotePool {
         message_from_remote(envelope.message)
     }
 
-    pub fn feed_lite3_receipt(
+    fn feed_lite3_receipt(
         &self,
         bytes: &[u8],
         options: crate::api::Feed,
@@ -77,12 +68,48 @@ impl RemotePool {
     }
 }
 
+impl RemotePool {
+    pub fn follow(&self, read: Selection) -> ApiResult<RemoteRead> {
+        Stream::open(self, read, true, true).map(RemoteRead)
+    }
+
+    pub fn fetch(&self, read: Selection) -> ApiResult<RemoteRead> {
+        Stream::open(self, read, false, true).map(RemoteRead)
+    }
+
+    pub fn feed<'a>(
+        &self,
+        input: impl Into<crate::api::FeedInput<'a>>,
+        options: crate::api::Feed,
+    ) -> ApiResult<Message> {
+        let (view, durability) = options.prepare(input.into())?;
+        self.feed_committed_view(view.bytes(), durability)
+            .map(Message::from_view)
+    }
+}
+
 impl RemoteRead {
     pub fn next_message(&mut self) -> ApiResult<Option<Message>> {
         match self.0.next_record()? {
-            Some(Record::Json(message)) => Ok(Some(message)),
+            Some(Record::Lite3(frame)) => {
+                crate::view::MessageView::from_owned(frame.payload, frame.seq, frame.time, 0)
+                    .map(Message::from_view)
+                    .map(Some)
+            }
+            Some(Record::Json(message)) => {
+                let tags = message
+                    .meta
+                    .tags
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>();
+                let view = crate::view::MessageView::encode_legacy_value(&message.data, &tags)?
+                    .for_feed(message.meta.sender.as_deref())?
+                    .with_identity(message.seq, message.time, 0);
+                Ok(Some(Message::from_view(view)))
+            }
             None => Ok(None),
-            Some(_) => unreachable!("JSON reader only returns JSON messages"),
+            Some(Record::Control(_)) => unreachable!("controls are consumed by the stream"),
         }
     }
 
@@ -136,9 +163,15 @@ struct Stream {
 }
 
 enum Record {
-    Json(Message),
+    Json(DecodedMessage),
     Lite3(RemoteLite3Frame),
     Control(Ending),
+}
+
+enum RecordAction {
+    Message(Record),
+    Continue,
+    Complete,
 }
 
 #[derive(Deserialize)]
@@ -151,7 +184,13 @@ enum Ending {
 
 impl Stream {
     fn open(pool: &RemotePool, selection: Selection, live: bool, binary: bool) -> ApiResult<Self> {
-        let mut stream = Self {
+        let mut stream = Self::new(pool, selection, live, binary);
+        stream.reopen()?;
+        Ok(stream)
+    }
+
+    fn new(pool: &RemotePool, selection: Selection, live: bool, binary: bool) -> Self {
+        Self {
             pool: pool.clone(),
             selection,
             live,
@@ -161,17 +200,12 @@ impl Stream {
             resumed: None,
             last_message: None,
             failure: None,
-        };
-        stream.reopen()?;
-        Ok(stream)
+        }
     }
 
-    fn reopen(&mut self) -> ApiResult<()> {
+    fn request(&self) -> ApiResult<(Url, Option<crate::api::access::AccessKey>)> {
         let route = if self.live { "follow" } else { "fetch" };
-        let mut url = build_url(
-            &self.pool.base_url,
-            &["v2", "pools", &self.pool.pool, route],
-        )?;
+        let mut url = build_url(&self.pool.base_url, &["pools", &self.pool.pool, route])?;
         {
             let mut pairs = url.query_pairs_mut();
             if let Some((next, end)) = self.resumed {
@@ -211,37 +245,81 @@ impl Stream {
         if url.query() == Some("") {
             url.set_query(None);
         }
-        let accept = if self.binary {
-            "application/x-plasmite-lite3-stream"
-        } else {
-            "application/jsonl"
-        };
         let key = self
             .pool
             .client
             .key_for_request(&url)?
             .map(std::borrow::Cow::into_owned);
+        Ok((url, key))
+    }
+
+    fn opened(&mut self, incarnation: Option<hyper::header::HeaderValue>) -> ApiResult<()> {
+        if self.resumed.is_some() {
+            match (&self.incarnation, &incarnation) {
+                (Some(original), Some(current)) if original == current => {}
+                (Some(_), Some(_)) => {
+                    return Err(Error::new(ErrorKind::NotFound)
+                        .with_message("pool was replaced during the read"));
+                }
+                _ => {
+                    return Err(protocol_error(
+                        "missing pool identity on stream continuation",
+                    ));
+                }
+            }
+        } else {
+            self.incarnation = incarnation;
+        }
+        Ok(())
+    }
+
+    fn reopen(&mut self) -> ApiResult<()> {
+        let (url, key) = self.request()?;
+        let accept = if self.binary {
+            "application/x-plasmite-lite3-stream"
+        } else {
+            "application/jsonl"
+        };
         if let Some(body) = cancellable_read::open(url, accept, key, self.selection.cancel.clone())?
         {
-            if self.resumed.is_some() {
-                match (&self.incarnation, &body.incarnation) {
-                    (Some(original), Some(current)) if original == current => {}
-                    (Some(_), Some(_)) => {
-                        return Err(Error::new(ErrorKind::NotFound)
-                            .with_message("pool was replaced during the read"));
-                    }
-                    _ => {
-                        return Err(protocol_error(
-                            "missing pool identity on stream continuation",
-                        ));
-                    }
-                }
-            } else {
-                self.incarnation = body.incarnation.clone();
-            }
+            self.opened(body.incarnation.clone())?;
             self.reader = Some(BufReader::new(Box::new(body)));
         }
         Ok(())
+    }
+
+    fn accept(&mut self, record: Record) -> ApiResult<RecordAction> {
+        match record {
+            Record::Control(Ending::Complete) if self.live => {
+                Err(protocol_error("unexpected completion of live read"))
+            }
+            Record::Control(Ending::Complete) => Ok(RecordAction::Complete),
+            Record::Control(Ending::Error { error }) => Err(error_from_remote(error)),
+            Record::Control(Ending::Cutoff { next_seq, until }) => {
+                if self.live
+                    || next_seq == 0
+                    || self.last_message.is_some_and(|last| next_seq <= last)
+                    || next_seq > until
+                {
+                    return Err(protocol_error("invalid stream cutoff"));
+                }
+                if let Some((previous, end)) = self.resumed
+                    && (end != until || next_seq < previous)
+                {
+                    return Err(protocol_error("stream cutoff failed to advance the read"));
+                }
+                self.resumed = Some((next_seq, until));
+                Ok(RecordAction::Continue)
+            }
+            Record::Json(ref message) => {
+                self.last_message = Some(message.seq);
+                Ok(RecordAction::Message(record))
+            }
+            Record::Lite3(ref frame) => {
+                self.last_message = Some(frame.seq);
+                Ok(RecordAction::Message(record))
+            }
+        }
     }
 
     fn next_record(&mut self) -> ApiResult<Option<Record>> {
@@ -281,41 +359,16 @@ impl Stream {
                 self.reader = None;
                 return Ok(None);
             }
-            let record = record?;
-            match record {
-                Record::Control(Ending::Complete) => {
-                    if self.live {
-                        return Err(protocol_error("unexpected completion of live read"));
-                    }
+            match self.accept(record?)? {
+                RecordAction::Complete => {
                     self.reader = None;
                     return Ok(None);
                 }
-                Record::Control(Ending::Error { error }) => return Err(error_from_remote(error)),
-                Record::Control(Ending::Cutoff { next_seq, until }) => {
-                    if self.live
-                        || next_seq == 0
-                        || self.last_message.is_some_and(|last| next_seq <= last)
-                        || next_seq > until
-                    {
-                        return Err(protocol_error("invalid stream cutoff"));
-                    }
-                    if let Some((previous, end)) = self.resumed
-                        && (end != until || next_seq < previous)
-                    {
-                        return Err(protocol_error("stream cutoff failed to advance the read"));
-                    }
+                RecordAction::Continue => {
                     self.reader = None;
-                    self.resumed = Some((next_seq, until));
                     self.reopen()?;
                 }
-                Record::Json(ref message) => {
-                    self.last_message = Some(message.seq);
-                    return Ok(Some(record));
-                }
-                Record::Lite3(ref frame) => {
-                    self.last_message = Some(frame.seq);
-                    return Ok(Some(record));
-                }
+                RecordAction::Message(record) => return Ok(Some(record)),
             }
         }
         Ok(None)
@@ -346,37 +399,149 @@ impl Stream {
         if !read_exact_or_eof(reader, &mut header)? {
             return Err(protocol_error("stream ended without a terminal record"));
         }
-        let length = u32::from_be_bytes(header[1..].try_into().expect("record length")) as usize;
-        match header[0] {
-            LITE3_MESSAGE_RECORD => {
-                let length = length
-                    .checked_sub(LITE3_MESSAGE_ID_LEN)
-                    .filter(|length| *length <= MAX_REMOTE_RESPONSE_BYTES)
-                    .ok_or_else(|| protocol_error("invalid binary message length"))?;
-                let mut identity = [0; LITE3_MESSAGE_ID_LEN];
-                reader.read_exact(&mut identity).map_err(|error| {
-                    protocol_error("incomplete binary message identity").with_source(error)
-                })?;
-                let seq = u64::from_be_bytes(identity[..8].try_into().expect("sequence"));
-                let time = u64::from_be_bytes(identity[8..].try_into().expect("timestamp"));
-                let mut payload = vec![0; length];
-                reader.read_exact(&mut payload).map_err(|error| {
-                    protocol_error("incomplete binary message payload").with_source(error)
-                })?;
-                Ok(Record::Lite3(RemoteLite3Frame { seq, time, payload }))
-            }
-            LITE3_CONTROL_RECORD if length <= 64 * 1024 => {
-                let mut bytes = vec![0; length];
-                reader.read_exact(&mut bytes).map_err(|error| {
-                    protocol_error("incomplete binary control record").with_source(error)
-                })?;
-                let ending = serde_json::from_slice(&bytes).map_err(|error| {
-                    protocol_error("invalid binary control record").with_source(error)
-                })?;
-                Ok(Record::Control(ending))
-            }
-            _ => Err(protocol_error("invalid binary record type or length")),
+        let (kind, length) = binary_header(header)?;
+        let mut identity = [0; LITE3_MESSAGE_ID_LEN];
+        if kind == LITE3_MESSAGE_RECORD {
+            reader.read_exact(&mut identity).map_err(|error| {
+                protocol_error("incomplete binary message identity").with_source(error)
+            })?;
         }
+        let mut payload = vec![0; length];
+        reader
+            .read_exact(&mut payload)
+            .map_err(|error| protocol_error("incomplete binary record").with_source(error))?;
+        binary_record(kind, identity, payload)
+    }
+}
+
+fn binary_header(header: [u8; LITE3_RECORD_HEADER_LEN]) -> ApiResult<(u8, usize)> {
+    let length = u32::from_be_bytes(header[1..].try_into().expect("record length")) as usize;
+    match header[0] {
+        LITE3_MESSAGE_RECORD => length
+            .checked_sub(LITE3_MESSAGE_ID_LEN)
+            .filter(|length| *length <= MAX_REMOTE_RESPONSE_BYTES)
+            .map(|length| (LITE3_MESSAGE_RECORD, length))
+            .ok_or_else(|| protocol_error("invalid binary message length")),
+        LITE3_CONTROL_RECORD if length <= 64 * 1024 => Ok((LITE3_CONTROL_RECORD, length)),
+        _ => Err(protocol_error("invalid binary record type or length")),
+    }
+}
+
+fn binary_record(
+    kind: u8,
+    identity: [u8; LITE3_MESSAGE_ID_LEN],
+    payload: Vec<u8>,
+) -> ApiResult<Record> {
+    if kind == LITE3_MESSAGE_RECORD {
+        let seq = u64::from_be_bytes(identity[..8].try_into().expect("sequence"));
+        let time = u64::from_be_bytes(identity[8..].try_into().expect("timestamp"));
+        return Ok(Record::Lite3(RemoteLite3Frame { seq, time, payload }));
+    }
+    serde_json::from_slice(&payload)
+        .map(Record::Control)
+        .map_err(|error| protocol_error("invalid binary control record").with_source(error))
+}
+
+pub(crate) struct AsyncRead {
+    stream: Stream,
+    body: Option<axum::body::BodyDataStream>,
+    chunk: bytes::Bytes,
+}
+
+impl AsyncRead {
+    pub(crate) async fn open(pool: &RemotePool, read: Selection, live: bool) -> ApiResult<Self> {
+        let mut reader = Self {
+            stream: Stream::new(pool, read, live, true),
+            body: None,
+            chunk: bytes::Bytes::new(),
+        };
+        reader.reopen().await?;
+        Ok(reader)
+    }
+
+    async fn reopen(&mut self) -> ApiResult<()> {
+        let (url, key) = self.stream.request()?;
+        let (incarnation, body) = tokio::time::timeout(
+            REQUEST_TIMEOUT,
+            cancellable_read::connect(url, "application/x-plasmite-lite3-stream", key),
+        )
+        .await
+        .map_err(|error| protocol_error("stream opening timed out").with_source(error))??;
+        self.stream.opened(incarnation)?;
+        self.body = Some(body.into_data_stream());
+        self.chunk = bytes::Bytes::new();
+        Ok(())
+    }
+
+    async fn read_exact(&mut self, mut output: &mut [u8]) -> ApiResult<()> {
+        use bytes::Buf;
+        use tokio_stream::StreamExt;
+        while !output.is_empty() {
+            if self.chunk.is_empty() {
+                self.chunk = self
+                    .body
+                    .as_mut()
+                    .expect("opened body")
+                    .next()
+                    .await
+                    .ok_or_else(|| protocol_error("stream ended without a terminal record"))?
+                    .map_err(|error| {
+                        protocol_error("could not read stream record").with_source(error)
+                    })?;
+            }
+            let count = self.chunk.len().min(output.len());
+            let (head, rest) = output.split_at_mut(count);
+            self.chunk.copy_to_slice(head);
+            output = rest;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn next(&mut self) -> ApiResult<Option<crate::view::MessageView>> {
+        if let Some(error) = &self.stream.failure {
+            return Err((**error).clone());
+        }
+        let result = self.advance().await;
+        if let Err(error) = &result {
+            self.body = None;
+            self.stream.failure = Some(Box::new(error.clone()));
+        }
+        result
+    }
+
+    async fn advance(&mut self) -> ApiResult<Option<crate::view::MessageView>> {
+        while self.body.is_some() {
+            let mut header = [0; LITE3_RECORD_HEADER_LEN];
+            self.read_exact(&mut header).await?;
+            let (kind, length) = binary_header(header)?;
+            let mut identity = [0; LITE3_MESSAGE_ID_LEN];
+            if kind == LITE3_MESSAGE_RECORD {
+                self.read_exact(&mut identity).await?;
+            }
+            let mut payload = vec![0; length];
+            self.read_exact(&mut payload).await?;
+            match self
+                .stream
+                .accept(binary_record(kind, identity, payload)?)?
+            {
+                RecordAction::Complete => self.body = None,
+                RecordAction::Continue => {
+                    self.body = None;
+                    self.reopen().await?;
+                }
+                RecordAction::Message(Record::Lite3(frame)) => {
+                    return crate::view::MessageView::from_owned(
+                        frame.payload,
+                        frame.seq,
+                        frame.time,
+                        0,
+                    )
+                    .map(Some);
+                }
+                RecordAction::Message(_) => unreachable!("binary stream"),
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -406,8 +571,8 @@ mod tests {
     use std::io::Write;
     use std::net::TcpListener;
 
-    fn responses<const N: usize>(
-        scripts: [(&'static str, &'static str, &'static str); N],
+    fn responses<const N: usize, B: AsRef<[u8]> + Send + 'static>(
+        scripts: [(&'static str, &'static str, B); N],
     ) -> (RemotePool, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listen on loopback");
         listener.set_nonblocking(true).expect("bounded accept");
@@ -454,28 +619,73 @@ mod tests {
                         break;
                     }
                 }
-                write!(socket, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\nPlasmite-Version: 2\r\nPlasmite-Incarnation: {incarnation}\r\n\r\n{body}", body.len())
+                let body = body.as_ref();
+                write!(socket, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\nPlasmite-Version: 2\r\nPlasmite-Incarnation: {incarnation}\r\n\r\n", body.len())
                     .expect("send response");
+                socket.write_all(body).expect("send response body");
             }
         });
         (pool, worker)
+    }
+
+    fn open_json(pool: &RemotePool, selection: Selection, live: bool) -> ApiResult<RemoteRead> {
+        Stream::open(pool, selection, live, false).map(RemoteRead)
+    }
+
+    #[tokio::test]
+    async fn async_binary_fetch_keeps_its_opening_range_after_a_cutoff() {
+        fn record(kind: u8, body: &[u8]) -> Vec<u8> {
+            let mut bytes = vec![kind];
+            bytes.extend_from_slice(&(body.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(body);
+            bytes
+        }
+        let message = crate::view::MessageView::from_json(b"{}", &[]).unwrap();
+        let mut body = 2u64.to_be_bytes().to_vec();
+        body.extend_from_slice(&123u64.to_be_bytes());
+        body.extend_from_slice(message.bytes());
+        let mut ending = record(LITE3_MESSAGE_RECORD, &body);
+        ending.extend_from_slice(&record(LITE3_CONTROL_RECORD, br#"{"type":"complete"}"#));
+        let (pool, server) = responses([
+            (
+                "/pools/events/fetch",
+                "original",
+                record(
+                    LITE3_CONTROL_RECORD,
+                    br#"{"type":"cutoff","next_seq":2,"until":3}"#,
+                ),
+            ),
+            (
+                "/pools/events/fetch?since=2&until=3&incarnation=original",
+                "original",
+                ending,
+            ),
+        ]);
+        let mut reader = AsyncRead::open(&pool, Selection::new(), false)
+            .await
+            .unwrap();
+        let received = reader.next().await.unwrap().unwrap();
+        assert_eq!((received.seq, received.time), (2, 123));
+        assert_eq!(received.bytes(), message.bytes());
+        assert!(reader.next().await.unwrap().is_none());
+        server.join().unwrap();
     }
 
     #[test]
     fn cutoff_continues_from_raw_position_even_without_matching_messages() {
         let (pool, server) = responses([
             (
-                "/v2/pools/events/fetch?tag=keep",
+                "/pools/events/fetch?tag=keep",
                 "original",
                 "{\"type\":\"cutoff\",\"next_seq\":8,\"until\":10}\n",
             ),
             (
-                "/v2/pools/events/fetch?since=8&until=10&incarnation=original&tag=keep",
+                "/pools/events/fetch?since=8&until=10&incarnation=original&tag=keep",
                 "original",
                 "{\"type\":\"cutoff\",\"next_seq\":8,\"until\":10}\n",
             ),
             (
-                "/v2/pools/events/fetch?since=8&until=10&incarnation=original&tag=keep",
+                "/pools/events/fetch?since=8&until=10&incarnation=original&tag=keep",
                 "original",
                 concat!(
                     "{\"seq\":9,\"time\":\"2026-11-17T00:00:00.000000123Z\",\"data\":{},\"meta\":{\"tags\":[\"keep\"]}}\n",
@@ -483,8 +693,7 @@ mod tests {
                 ),
             ),
         ]);
-        let messages = pool
-            .fetch(Selection::new().tags(["keep"]))
+        let messages = open_json(&pool, Selection::new().tags(["keep"]), false)
             .expect("open")
             .collect::<ApiResult<Vec<_>>>()
             .expect("resume finite read");
@@ -502,17 +711,17 @@ mod tests {
     fn fetch_rejects_a_same_name_replacement_after_cutoff() {
         let (pool, server) = responses([
             (
-                "/v2/pools/events/fetch",
+                "/pools/events/fetch",
                 "original",
                 "{\"type\":\"cutoff\",\"next_seq\":2,\"until\":3}\n",
             ),
             (
-                "/v2/pools/events/fetch?since=2&until=3&incarnation=original",
+                "/pools/events/fetch?since=2&until=3&incarnation=original",
                 "replacement",
                 "{\"seq\":2,\"time\":\"2026-11-17T00:00:00Z\",\"data\":{},\"meta\":{\"tags\":[]}}\n",
             ),
         ]);
-        let mut reader = pool.fetch(Selection::new()).expect("open");
+        let mut reader = open_json(&pool, Selection::new(), false).expect("open");
         let error = reader.next_message().expect_err("pool identity changed");
         assert_eq!(error.kind(), ErrorKind::NotFound);
         assert_eq!(error.message(), Some("pool was replaced during the read"));
@@ -531,8 +740,8 @@ mod tests {
                 "invalid stream cutoff",
             ),
         ] {
-            let (pool, server) = responses([("/v2/pools/events/follow", "original", body)]);
-            let mut reader = pool.follow(Selection::new()).expect("open");
+            let (pool, server) = responses([("/pools/events/follow", "original", body)]);
+            let mut reader = open_json(&pool, Selection::new(), true).expect("open");
             let error = reader.next_message().expect_err("invalid live cutoff");
             assert_eq!(error.kind(), ErrorKind::Io);
             assert_eq!(error.message(), Some(detail));
@@ -573,11 +782,11 @@ mod tests {
     #[test]
     fn missing_ending_is_a_terminal_io_error() {
         let (pool, server) = responses([(
-            "/v2/pools/events/fetch",
+            "/pools/events/fetch",
             "original",
             "{\"seq\":1,\"time\":\"2026-11-17T00:00:00Z\",\"data\":{},\"meta\":{\"tags\":[]}}\n",
         )]);
-        let mut reader = pool.fetch(Selection::new()).expect("open");
+        let mut reader = open_json(&pool, Selection::new(), false).expect("open");
         assert_eq!(
             reader.next_message().expect("read").expect("message").seq,
             1

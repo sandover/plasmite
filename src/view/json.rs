@@ -92,7 +92,8 @@ impl MessageView {
             crate::api::format_ts(self.time)?,
             &tags,
             data,
-        );
+        )
+        .with_sender(self.sender().map(str::to_owned));
         serde_json::to_vec(&wire).map_err(|_| corrupt())
     }
 }

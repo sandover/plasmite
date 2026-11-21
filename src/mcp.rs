@@ -5,6 +5,7 @@
 //! Invariants: Unknown methods and malformed request shapes map to protocol errors.
 //! Invariants: Tool execution failures can be returned as successful `result.isError`.
 
+use crate::api::internal::LocalPoolTransport;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
@@ -13,7 +14,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use crate::api::{
-    DEFAULT_POOL_SIZE, Error, ErrorKind, Feed, HostedRead, LocalClient, Message, Pool, PoolInfo,
+    DEFAULT_POOL_SIZE, Error, ErrorKind, HostedRead, LocalClient, MessageEnvelope, Pool, PoolInfo,
     PoolOptions, PoolRef, Read, ReadStatus, Since,
 };
 use crate::interface_wire::{ErrorKindWire, MessageWire, error_policy};
@@ -305,7 +306,8 @@ fn message_output_schema() -> Value {
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"}
-                    }
+                    },
+                    "sender": {"type": "string"}
                 },
                 "required": ["tags"],
                 "additionalProperties": false
@@ -324,6 +326,8 @@ fn pool_info_output_schema() -> Value {
             "name": {"type": "string"},
             "path": {"type": "string"},
             "file_size": {"type": "integer", "minimum": 0},
+            "about": {"type": "string"},
+            "example": {"type": "object"},
             "bounds": {
                 "description": "Current retained sequence range; empty pools have no bounds.",
                 "type": "object",
@@ -744,6 +748,7 @@ fn modern_params(params: Option<&Value>) -> Result<&Map<String, Value>, JsonRpcE
 pub struct PlasmiteMcpHandler {
     client: LocalClient,
     cancel: Option<Arc<AtomicBool>>,
+    sender: Option<String>,
 }
 
 impl PlasmiteMcpHandler {
@@ -755,11 +760,18 @@ impl PlasmiteMcpHandler {
         Self {
             client,
             cancel: None,
+            sender: None,
         }
     }
 
     pub fn with_cancel(mut self, cancel: Option<Arc<AtomicBool>>) -> Self {
         self.cancel = cancel;
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn with_sender(mut self, sender: Option<String>) -> Self {
+        self.sender = sender;
         self
     }
 
@@ -800,7 +812,11 @@ impl PlasmiteMcpHandler {
     }
 
     fn tool_pool_create(&self, args: &Map<String, Value>) -> ToolCallResult {
-        if let Some(result) = reject_unknown_args("plasmite_pool_create", args, &["name", "size"]) {
+        if let Some(result) = reject_unknown_args(
+            "plasmite_pool_create",
+            args,
+            &["name", "size", "about", "example"],
+        ) {
             return result;
         }
         let name = match required_string_arg(args, "name") {
@@ -813,10 +829,28 @@ impl PlasmiteMcpHandler {
             Err(result) => return invalid_argument_result("plasmite_pool_create", "size", result),
         };
 
+        let about = match args.get("about") {
+            Some(Value::String(about)) => Some(about.clone()),
+            Some(_) => {
+                return invalid_argument_result(
+                    "plasmite_pool_create",
+                    "about",
+                    "about must be a string".to_string(),
+                );
+            }
+            None => None,
+        };
+        let description = crate::api::PoolDescription {
+            about,
+            example: args.get("example").cloned(),
+        };
         let pool_ref = PoolRef::name(name.clone());
         let info = match self
             .client
-            .create_pool(&pool_ref, PoolOptions::new(size))
+            .create_pool(
+                &pool_ref,
+                PoolOptions::new(size).with_description(description),
+            )
             .map_err(Box::new)
             .and_then(|pool| pool.info().map_err(Box::new))
         {
@@ -923,7 +957,12 @@ impl PlasmiteMcpHandler {
             }
         };
 
-        let message = match opened.feed(&data, Feed::new().tags(tags)) {
+        let message = match opened.feed_received_data(
+            &data,
+            tags,
+            crate::api::Durability::Fast,
+            self.sender.as_deref(),
+        ) {
             Ok(message) => message,
             Err(err) => return api_error_tool_result("plasmite_feed", err),
         };
@@ -1192,7 +1231,9 @@ impl PlasmiteMcpHandler {
                     "type": "object",
                     "properties": {
                         "name": {"type":"string","description":"Pool name"},
-                        "size": {"type":"integer","description":"Fixed capacity in bytes (default: 1048576)"}
+                        "size": {"type":"integer","description":"Fixed capacity in bytes (default: 1048576)"},
+                        "about": {"type":"string","description":"What this pool carries"},
+                        "example": {"type":"object","description":"Example message data"}
                     },
                     "required": ["name"],
                     "additionalProperties": false
@@ -1301,10 +1342,10 @@ impl McpHandler for PlasmiteMcpHandler {
                 McpResource {
                     uri: format!("plasmite:///pools/{name}"),
                     name: name.clone(),
-                    description: Some(format!(
+                    description: Some(info.description.about.unwrap_or_else(|| format!(
                         "Latest messages from pool {name}; reading returns up to {DEFAULT_READ_COUNT} messages ({} bytes fixed capacity; oldest messages are overwritten when full)",
                         info.file_size
-                    )),
+                    ))),
                     mime_type: Some("application/json".to_string()),
                 }
             })
@@ -1563,13 +1604,14 @@ fn pool_info_json_value(pool_ref: &str, info: &PoolInfo) -> Value {
         .expect("pool-info wire data is serializable")
 }
 
-fn message_json_value(message: crate::api::Message) -> Value {
+fn message_json_value(message: crate::api::MessageEnvelope) -> Value {
     MessageWire::new(
         message.seq,
         message.time_rfc3339(),
         message.meta.tags,
         message.data,
     )
+    .with_sender(message.meta.sender)
     .into_json()
 }
 
@@ -1578,7 +1620,7 @@ fn select_mcp_message(
     tags: &[String],
 ) -> Result<Option<Value>, Error> {
     if crate::api::frame_matches_tags(&frame, tags)? {
-        Ok(Some(message_json_value(Message::from_lite3(
+        Ok(Some(message_json_value(MessageEnvelope::from_lite3(
             frame.seq,
             frame.time,
             &frame.payload,

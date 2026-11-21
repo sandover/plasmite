@@ -61,6 +61,7 @@ def worker(args):
             client = stack.enter_context(plasmite.Client(args.directory))
             pool = stack.enter_context(client.open_pool("events"))
         current = pool is not None and hasattr(pool, "feed")
+        single_message = current and hasattr(plasmite.Message, "field")
         probe = None
         if args.native_counts:
             import ctypes
@@ -88,6 +89,8 @@ def worker(args):
         if pool is not None and args.role == "writer" and not args.binary:
             if args.receipt == "view":
                 store = lambda item: views.append(pool, item)
+            elif single_message:
+                store = pool.feed
             else:
                 names = {
                     "full": ("feed", "append"),
@@ -132,6 +135,8 @@ def worker(args):
                 elif args.binary:
                     if args.forward_view:
                         seq = views.forward(pool, source_view).seq
+                    elif single_message:
+                        seq = pool.feed(fixture, format="lite3").seq
                     elif current:
                         seq = pool.feed_lite3_receipt(fixture).seq
                     else:
@@ -149,7 +154,7 @@ def worker(args):
                 sys.stdout.buffer.flush()
         else:
             if current and batch is None:
-                follow = pool.follow_lite3 if args.binary else pool.follow
+                follow = pool.follow_lite3 if args.binary and not single_message else pool.follow
                 stream = stack.enter_context(follow(since=1))
 
                 def records():
@@ -181,7 +186,8 @@ def worker(args):
                     latencies.append(received - item.pop("sent_ns"))
                 if args.binary:
                     timestamp = item.time if current else item.timestamp_ns
-                    if item.seq != count + 1 or item.payload != fixture or timestamp <= 0:
+                    payload = item.raw if single_message else item.payload
+                    if item.seq != count + 1 or payload != fixture or timestamp <= 0:
                         raise RuntimeError(f"binary frame mismatch at {count}")
                     checksum += count * 3
                 else:
@@ -254,8 +260,11 @@ def trial(args, lane, directory, profile=False):
                             value = {record()!r}
                             if hasattr(seed, 'feed'):
                                 message = seed.feed(value, ['sensor'])
-                                with seed.fetch_lite3(since=message.seq) as reader:
-                                    payload = next(reader).payload
+                                if hasattr(message, 'field'):
+                                    payload = message.raw
+                                else:
+                                    with seed.fetch_lite3(since=message.seq) as reader:
+                                        payload = next(reader).payload
                             else:
                                 message = seed.append(value, ['sensor'])
                                 payload = seed.get_lite3(message.seq).payload

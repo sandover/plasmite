@@ -1134,7 +1134,7 @@ fn duplex_remote_url_accepts_future_since() {
         .expect("pool");
     let frame = pool.get(1).unwrap();
     let message =
-        plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
+        plasmite::api::MessageEnvelope::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
     assert_eq!(message.data, json!({"from":"alice", "msg":"hello"}));
 }
 
@@ -1201,7 +1201,7 @@ fn duplex_https_sends_complete_messages_and_receives_after_eof() {
     assert_eq!(messages[1]["meta"]["tags"], json!(["copied"]));
     let frame = pool.get(2).unwrap();
     let message =
-        plasmite::api::Message::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
+        plasmite::api::MessageEnvelope::from_lite3(frame.seq, frame.time, &frame.payload).unwrap();
     assert_eq!(message.data, messages[1]["data"]);
 }
 

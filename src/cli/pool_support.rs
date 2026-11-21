@@ -65,6 +65,7 @@ pub(crate) enum PoolListRow {
         file_size: u64,
         bounds: Bounds,
         mtime: Option<String>,
+        description: plasmite::api::PoolDescription,
     },
     Error {
         name: String,
@@ -94,13 +95,23 @@ impl PoolListRow {
                 file_size,
                 bounds,
                 mtime,
-            } => json!({
+                description,
+            } => {
+                let mut row = json!({
                 "name": name,
                 "path": path,
                 "file_size": file_size,
                 "bounds": bounds_json(*bounds),
                 "mtime": mtime,
-            }),
+                });
+                if let Some(about) = &description.about {
+                    row["about"] = json!(about);
+                }
+                if let Some(example) = &description.example {
+                    row["example"] = example.clone();
+                }
+                row
+            }
             Self::Error { name, path, error } => json!({
                 "name": name,
                 "path": path,
@@ -163,6 +174,7 @@ pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Result<Vec<Po
                     file_size: info.file_size,
                     bounds: info.bounds,
                     mtime,
+                    description: info.description,
                 });
             }
             Err(err) => {
@@ -209,13 +221,19 @@ pub(crate) fn emit_pool_list_table(
     let has_errors = pools
         .iter()
         .any(|pool| matches!(pool, PoolListRow::Error { .. }));
-    let headers = if interactive && !has_errors {
+    let has_descriptions = pools.iter().any(
+        |pool| matches!(pool, PoolListRow::Pool { description, .. } if description.about.is_some()),
+    );
+    let mut headers = if interactive && !has_errors {
         vec!["NAME", "SIZE", "MSGS", "MODIFIED", "PATH"]
     } else {
         vec![
             "NAME", "STATUS", "SIZE", "OLDEST", "NEWEST", "MTIME", "PATH", "DETAIL",
         ]
     };
+    if has_descriptions {
+        headers.push("ABOUT");
+    }
     let rows = pools
         .iter()
         .map(|pool| {
@@ -226,7 +244,7 @@ pub(crate) fn emit_pool_list_table(
                 short_display_path(Path::new(pool.path()), pool_dir)
             };
 
-            match pool {
+            let mut row = match pool {
                 PoolListRow::Error { error, .. } => vec![
                     name,
                     "ERR".to_string(),
@@ -282,7 +300,17 @@ pub(crate) fn emit_pool_list_table(
                         ]
                     }
                 }
+            };
+            if has_descriptions {
+                let about = match pool {
+                    PoolListRow::Pool { description, .. } => {
+                        description.about.as_deref().unwrap_or_default()
+                    }
+                    PoolListRow::Error { .. } => "",
+                };
+                row.push(human_literal(about));
             }
+            row
         })
         .collect::<Vec<_>>();
 
@@ -470,7 +498,7 @@ pub(crate) fn emit_pool_info_pretty(
                 .as_bytes(),
             )?;
         }
-        return Ok(());
+        return emit_pool_description(info);
     }
 
     let count = message_count_from_info(info);
@@ -535,6 +563,16 @@ pub(crate) fn emit_pool_info_pretty(
     super::output::write_stdout(
         format!("  ring:      {}\n", format_bytes(info.ring_size)).as_bytes(),
     )?;
+    emit_pool_description(info)
+}
+
+fn emit_pool_description(info: &plasmite::api::PoolInfo) -> Result<(), Error> {
+    if let Some(about) = &info.description.about {
+        super::output::write_stdout(format!("  about:     {}\n", human_literal(about)).as_bytes())?;
+    }
+    if let Some(example) = &info.description.example {
+        super::output::write_stdout(format!("  example:   {example}\n").as_bytes())?;
+    }
     Ok(())
 }
 

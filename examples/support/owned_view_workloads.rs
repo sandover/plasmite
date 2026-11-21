@@ -1,6 +1,7 @@
 //! Focused immutable-view comparison; timings exclude fixture construction.
 //! Run: cargo run --release --example bench_owned_views -- 2000
-use plasmite::api::{Message, Pool, PoolOptions, lite3::Lite3Buf};
+use plasmite::api::internal::LocalPoolTransport;
+use plasmite::api::{MessageEnvelope as Message, Pool, PoolOptions, lite3::Lite3Buf};
 use plasmite::view::MessageView;
 use std::hint::black_box;
 use std::time::Instant;
@@ -115,6 +116,7 @@ pub fn main() {
         let mut lanes = [
             "append_typed_direct",
             "append_typed_json",
+            "append_message_json",
             "retag_view_direct",
             "retag_view_json",
             "encode_native_direct",
@@ -163,6 +165,17 @@ pub fn main() {
                     let encoded = MessageView::from_json(&json, &[]).unwrap();
                     let committed = pool
                         .feed_view(&encoded, plasmite::api::Feed::default())
+                        .unwrap();
+                    assert!(committed.seq > 0);
+                    black_box(committed);
+                }),
+                "append_message_json" => run(name, lane, n, || {
+                    let json = serde_json::to_vec(black_box(&expected_typed)).unwrap();
+                    let committed = pool
+                        .feed(
+                            plasmite::api::FeedInput::Json(&json),
+                            plasmite::api::Feed::default(),
+                        )
                         .unwrap();
                     assert!(committed.seq > 0);
                     black_box(committed);

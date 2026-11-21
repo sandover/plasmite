@@ -1,5 +1,5 @@
 /*
-Purpose: Provide an HTTP/JSON RemoteClient for the Node binding.
+Purpose: Provide an HTTP RemoteClient for the Node binding.
 Key Exports: RemoteClient, RemotePool, RemoteError.
 Role: JavaScript client for Plasmite HTTP API 2.0.
 Invariants: Uses the JSON and binary streams defined in spec/v2.
@@ -7,11 +7,14 @@ Invariants: Base URL must be http(s) without a path.
 Invariants: Readers expose async iteration and propagate terminal records.
 */
 
-const { Message, messageFromEnvelope, parseMessageJson, normalizeMessageSeq, timeText, parsePoolInfo } = require("./message");
+const { parseMessageJson, normalizeMessageSeq, timeText, parsePoolInfo } = require("./message");
+const { feedBytes, snapshotTags, InputShapeError } = require("./input");
+const { messageReference } = require("./views");
 const { ERROR_KIND_VALUES, mapDurability, mapErrorKind } = require("./mappings");
 const { readStart, normalizeWait } = require("./follow");
 const MAX_FRAME_BYTES = 256 * 1024 * 1024;
 const LITE3_TYPE = "application/x-plasmite-lite3";
+const decoder = new TextDecoder("utf-8", { fatal: true });
 
 class RemoteError extends Error {
   /**
@@ -64,9 +67,11 @@ class RemoteClient {
    * @param {number|bigint} sizeBytes
    * @returns {Promise<unknown>}
    */
-  async createPool(pool, sizeBytes = 1024 * 1024) {
-    const payload = { pool, size_bytes: Number(sizeBytes) };
-    const url = buildUrl(this.baseUrl, ["v2", "pools"]);
+  async createPool(pool, options = 1024 * 1024) {
+    const { sizeBytes = 1024 * 1024, about, example } =
+      options !== null && typeof options === "object" ? options : { sizeBytes: options };
+    const payload = { pool, size_bytes: Number(sizeBytes), about, example };
+    const url = buildUrl(this.baseUrl, ["pools"]);
     await this._requestJson("POST", url, payload, parsePoolInfo);
     return new RemotePool(this, pool);
   }
@@ -78,7 +83,7 @@ class RemoteClient {
    */
   async openPool(pool, { create = false } = {}) {
     const payload = { create };
-    const url = buildUrl(this.baseUrl, ["v2", "pools", pool, "open"]);
+    const url = buildUrl(this.baseUrl, ["pools", pool, "open"]);
     await this._requestJson("POST", url, payload);
     return new RemotePool(this, pool);
   }
@@ -89,7 +94,7 @@ class RemoteClient {
    * @returns {Promise<unknown>}
    */
   async poolInfo(pool) {
-    const url = buildUrl(this.baseUrl, ["v2", "pools", pool]);
+    const url = buildUrl(this.baseUrl, ["pools", pool]);
     const data = await this._requestJson("GET", url, null, parsePoolInfo);
     return data.pool;
   }
@@ -99,7 +104,7 @@ class RemoteClient {
    * @returns {Promise<unknown[]>}
    */
   async listPools() {
-    const url = buildUrl(this.baseUrl, ["v2", "pools"]);
+    const url = buildUrl(this.baseUrl, ["pools"]);
     const data = await this._requestJson("GET", url, null, parsePoolInfo);
     return data.pools;
   }
@@ -110,8 +115,13 @@ class RemoteClient {
    * @returns {Promise<void>}
    */
   async deletePool(pool) {
-    const url = buildUrl(this.baseUrl, ["v2", "pools", pool]);
+    const url = buildUrl(this.baseUrl, ["pools", pool]);
     await this._requestJson("DELETE", url, null);
+  }
+
+  async _setPoolDescription(pool, { about, example } = {}) {
+    const url = buildUrl(this.baseUrl, ["pools", pool, "description"]);
+    await this._requestJson("PUT", url, { about, example }, parsePoolInfo);
   }
 
   async _requestJson(method, url, body, decode = text => parseMessageJson(text, "message")) {
@@ -154,7 +164,8 @@ class RemoteClient {
     rejectRedirect(response);
 
     if (!response.ok) {
-      if (response.status === 404 && url.pathname.startsWith("/v2/") &&
+      if (response.status === 404 &&
+          (url.pathname === "/pools" || url.pathname.startsWith("/pools/")) &&
           response.headers.get("plasmite-version") !== "2") {
         await response.body?.cancel().catch(() => {});
         throw new RemoteError({ kind: "Usage", message: "Server requires upgrade to Plasmite 2" }, 404);
@@ -193,88 +204,79 @@ class RemotePool {
     return this.client.poolInfo(this.pool);
   }
 
-  async feed(data, { tags, durability = "fast" } = {}) {
-    const { messageReference, toLite3 } = require("./views");
-    const view = messageReference(data);
-    if (view || data instanceof Message) {
-      if (tags !== undefined) throw new RemoteError({ kind: "Usage", message: "cannot supply tags when forwarding a message" }, 400);
-      if (view) return this.feedLite3(toLite3(data), { durability });
-      tags = data.tags;
-      data = data.data;
+  setDescription(description) {
+    return this.client._setPoolDescription(this.pool, description);
+  }
+
+  async feed(data, { tags, durability = "fast", format } = {}) {
+    let bytes;
+    try { bytes = feedBytes(data, format); } catch (err) {
+      throw new RemoteError({ kind: "Usage", message: err.message }, 400);
     }
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-      throw new RemoteError({ kind: "Usage", message: "feed requires an object" }, 400);
+    if (bytes && bytes.length > MAX_FRAME_BYTES) throw new RangeError("request exceeds maximum frame size");
+    const forwarded = messageReference(data);
+    if ((forwarded || format === "lite3") && tags !== undefined) {
+      throw new RemoteError({ kind: "Usage", message: "cannot supply tags when forwarding a message" }, 400);
     }
-    const url = buildUrl(this.client.baseUrl, ["v2", "pools", this.pool, "feed"]);
-    const payload = { data, tags: tags ?? [], durability: mapDurability(durability) };
-    const response = await this.client._requestJson("POST", url, payload);
-    return messageFromEnvelope(response.message);
+    const backend = require("./portable");
+    const policy = mapDurability(durability);
+    const url = buildUrl(this.client.baseUrl, ["pools", this.pool, "feed"]);
+    let body;
+    let contentType;
+    let prepared;
+    if (format === "json") {
+      let text, parsed;
+      try {
+        text = decoder.decode(bytes);
+        parsed = JSON.parse(text);
+      } catch (err) {
+        throw new RemoteError({ kind: "Usage", message: err.message }, 400);
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new RemoteError({ kind: "Usage", message: "feed requires an object" }, 400);
+      }
+      body = JSON.stringify({ tags: snapshotTags(tags), durability: policy }).slice(0, -1)
+        + ',"data":' + text + '}';
+      contentType = "application/json";
+    } else {
+      try {
+        if (bytes) body = Buffer.from(bytes);
+        else {
+          prepared = backend.prepareAppend(data, tags);
+          body = prepared.payload;
+        }
+      } catch (err) {
+        if (!(err instanceof InputShapeError)) throw err;
+        throw new RemoteError({ kind: "Usage", message: err.message }, 400);
+      }
+      contentType = LITE3_TYPE;
+      if (policy !== "fast") url.searchParams.set("durability", policy);
+    }
+    try {
+      if (Buffer.byteLength(body) > MAX_FRAME_BYTES) throw new RangeError("request exceeds maximum frame size");
+      const response = await this.client._request("POST", url, { body, contentType, accept: LITE3_TYPE });
+      const seq = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
+      const time = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
+      const stored = await readBody(response);
+      if (prepared && stored.equals(prepared.payload)) {
+        const message = backend.messageWithIdentity(prepared.message, seq, time);
+        prepared = undefined;
+        return message;
+      }
+      return backend.decodeMessage(stored, seq, time);
+    } finally { prepared?.discard(); }
   }
 
   follow(options = {}) {
     return openV2Reader(this, true, options);
   }
 
-  followLite3(options = {}) {
-    return openV2Reader(this, true, options, "lite3");
-  }
-
   fetch(options = {}) {
     return openV2Reader(this, false, options);
   }
-
-  fetchLite3(options = {}) {
-    return openV2Reader(this, false, options, "lite3");
-  }
-
-  followView(options = {}) {
-    return openV2Reader(this, true, options, "view");
-  }
-
-  fetchView(options = {}) {
-    return openV2Reader(this, false, options, "view");
-  }
-
-  async feedLite3(payload, { tags, durability = "fast" } = {}) {
-    if (tags !== undefined) throw new RemoteError({ kind: "Usage", message: "cannot supply tags when forwarding a message" }, 400);
-    if (!Buffer.isBuffer(payload)) throw new TypeError("Lite3 payload must be a Buffer");
-    if (payload.length > MAX_FRAME_BYTES) throw new RangeError("Lite3 payload exceeds maximum frame size");
-    const response = await this._feedBinary(payload, durability, "application/json");
-    const message = parseMessageJson((await readBody(response)).toString("utf8"), "message").message;
-    return messageFromEnvelope(message);
-  }
-
-  async _feedBinary(payload, durability, accept) {
-    const url = buildUrl(this.client.baseUrl, ["v2", "pools", this.pool, "feed"]);
-    const policy = mapDurability(durability);
-    if (policy !== "fast") url.searchParams.set("durability", policy);
-    return this.client._request("POST", url, { body: payload, contentType: LITE3_TYPE, accept });
-  }
-
-  async feedView(data, { tags, durability = "fast" } = {}) {
-    if (tags !== undefined && (data instanceof Message || require("./views").messageReference(data))) {
-      throw new RemoteError({ kind: "Usage", message: "cannot supply tags when forwarding a message" }, 400);
-    }
-    if (data instanceof Message) {
-      tags = data.tags;
-      data = data.data;
-    }
-    const backend = require("./portable");
-    const prepared = backend.prepareAppend(data, tags);
-    try {
-      const response = await this._feedBinary(prepared.payload, durability, "application/x-plasmite-identity");
-      const seq = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
-      const time = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
-      return backend.messageWithIdentity(prepared.message, seq, time);
-    } catch (err) {
-      prepared.discard();
-      throw err;
-    }
-  }
-
 }
 
-async function openV2Reader(pool, live, options = {}, representation = "json") {
+async function openV2Reader(pool, live, options = {}) {
   const { since, last, tags, signal, ...extra } = options;
   if (Object.keys(extra).length) {
     throw new RemoteError({ kind: "Usage", message: "read options are since, last, tags and signal" }, 400);
@@ -284,7 +286,7 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
     throw new RemoteError({ kind: "Usage", message: err.message }, 400);
   }
   const route = live ? "follow" : "fetch";
-  const base = buildUrl(pool.client.baseUrl, ["v2", "pools", pool.pool, route]);
+  const base = buildUrl(pool.client.baseUrl, ["pools", pool.pool, route]);
   for (const tag of tags ?? []) base.searchParams.append("tag", tag);
 
   const initial = new URL(base);
@@ -296,7 +298,7 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
     case 5: initial.searchParams.set("last", value.toString()); break;
   }
   const request = requestController(signal);
-  const accept = representation === "json" ? "application/jsonl" : "application/x-plasmite-lite3-stream";
+  const accept = "application/x-plasmite-lite3-stream";
   const open = url => pool.client._requestStream(url, request.controller, accept);
   let response;
   try {
@@ -314,7 +316,7 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
     while (!request.controller.signal.aborted) {
       if (!response.body) throw invalid("read response has no body");
       let cutoff;
-      for await (const record of responseRecords(response.body, representation, invalid)) {
+      for await (const record of responseRecords(response.body, invalid)) {
         if (record.type === "complete") {
           if (live) throw invalid("unexpected completion of live read");
           return;
@@ -405,27 +407,9 @@ async function openV2Reader(pool, live, options = {}, representation = "json") {
   };
 }
 
-async function* responseRecords(body, representation, invalid) {
+async function* responseRecords(body, invalid) {
   const input = body.getReader();
   try {
-    if (representation === "json") {
-      const decoder = new TextDecoder();
-      let remainder = "";
-      for (;;) {
-        const { done, value } = await input.read();
-        const lines = (remainder + decoder.decode(value, { stream: !done })).split("\n");
-        remainder = lines.pop();
-        if (done) lines.push(remainder);
-        for (let line of lines) {
-          if (!line.trim()) continue;
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          const value = parseMessageJson(line);
-          yield value.type === undefined ? messageFromEnvelope(value, Buffer.from(line, "utf8")) : value;
-        }
-        if (done) return;
-      }
-    }
-
     const source = new FrameReader(input);
     for (;;) {
       const header = await source.read(5, true);
@@ -440,12 +424,8 @@ async function* responseRecords(body, representation, invalid) {
         const identity = await source.read(16);
         const seq = identity.readBigUInt64BE(0);
         const time = identity.readBigUInt64BE(8);
-        const payload = await source.read(length - 16, false, representation === "lite3");
-        if (representation === "view") {
-          yield await require("./portable").decodeMessage(payload, seq, time);
-        } else {
-          yield { seq, time, payload };
-        }
+        const payload = await source.read(length - 16);
+        yield await require("./portable").decodeMessage(payload, seq, time);
       } else {
         throw invalid("invalid binary read record");
       }
@@ -473,7 +453,7 @@ function frameHeader(value, name) {
 // Yielding a frame leaves the next read to the consumer, preserving backpressure.
 class FrameReader {
   constructor(reader) { this.reader = reader; this.chunk = Buffer.alloc(0); this.offset = 0; }
-  async read(length, allowEof = false, owned = false) {
+  async read(length, allowEof = false) {
     if (length === 0) return Buffer.alloc(0);
     let output;
     let copied = 0;
@@ -492,7 +472,7 @@ class FrameReader {
       if (copied === 0 && available >= length) {
         const result = this.chunk.subarray(this.offset, this.offset + length);
         this.offset += length;
-        return owned ? Buffer.from(result) : result;
+        return result;
       }
       output ||= Buffer.allocUnsafe(length);
       const take = Math.min(available, length - copied);

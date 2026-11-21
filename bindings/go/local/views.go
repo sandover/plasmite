@@ -14,13 +14,16 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/sandover/plasmite/bindings/go/v2/api"
+	"github.com/sandover/plasmite/bindings/go/v2/internal/message"
 )
 
-// MessageView owns an immutable Lite3 snapshot in the Go heap. Children retain
+// messageView owns an immutable Lite3 snapshot in the Go heap. Children retain
 // the original buffers even when callers reassign this message wrapper. Closing the pool or replacing its records does not expire it.
 // JSON, Decode and scalar/string extraction create independent requested values.
 // Ordinary messages need no Close.
-type MessageView struct {
+type messageView struct {
 	seq    uint64
 	timeNS uint64
 	valueSnapshot
@@ -44,8 +47,8 @@ func (v valueSnapshot) proofPointer() *C.size_t {
 	return &v.duplicates[0]
 }
 
-func (p *Pool) getView(seq uint64) (*MessageView, error) {
-	stream, err := p.FetchView(Since(seq))
+func (p *Pool) getView(seq uint64) (*messageView, error) {
+	stream, err := p.fetchView(Since(seq))
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +59,7 @@ func (p *Pool) getView(seq uint64) (*MessageView, error) {
 	}
 	return view, err
 }
-func (view *MessageView) validate() error {
+func (view *messageView) validate() error {
 	if len(view.encoded) == 0 {
 		return invalidArgumentError("empty encoded view")
 	}
@@ -93,33 +96,39 @@ func (view *MessageView) validate() error {
 }
 
 // Time constructs the UTC time only when requested.
-func (v *MessageView) Seq() uint64  { return v.seq }
-func (v *MessageView) Time() uint64 { return v.timeNS }
+func (v *messageView) Seq() uint64  { return v.seq }
+func (v *messageView) Time() uint64 { return v.timeNS }
 
 // Lite3 returns a mutable copy of the complete encoded snapshot.
-func (v *MessageView) Lite3() []byte { return append([]byte(nil), v.bytes()...) }
+func (v *messageView) Lite3() []byte { return append([]byte(nil), v.bytes()...) }
 
 // Data returns a borrowed reference to the data object.
-func (v *MessageView) Data() Value {
+func (v *messageView) Data() viewValue {
 	if v == nil || len(v.encoded) == 0 {
-		return Value{}
+		return viewValue{}
 	}
-	return Value{owner: v.valueSnapshot, node: v.dataNode, kind: 7}
+	return viewValue{owner: v.valueSnapshot, node: v.dataNode, kind: 7}
 }
 
 // Meta returns the complete stored metadata, including unknown fields.
-func (v *MessageView) Meta() Value {
+func (v *messageView) Meta() viewValue {
 	if v == nil || len(v.encoded) == 0 {
-		return Value{}
+		return viewValue{}
 	}
-	return Value{owner: v.valueSnapshot, node: v.metaNode, kind: 7}
+	return viewValue{owner: v.valueSnapshot, node: v.metaNode, kind: 7}
 }
 
 // DataJSON formats the data object directly, without a native object tree.
-func (v *MessageView) DataJSON() ([]byte, error) { return v.Data().JSON() }
+func (v *messageView) DataJSON() ([]byte, error) { return v.Data().JSON() }
+
+func (v *messageView) MetaJSON() ([]byte, error) { return v.Meta().JSON() }
+
+func (v *messageView) message() *api.Message {
+	return message.New(v.seq, v.timeNS, v.bytes(), v)
+}
 
 // JSON formats the complete message envelope. The returned bytes are mutable.
-func (v *MessageView) JSON() ([]byte, error) {
+func (v *messageView) JSON() ([]byte, error) {
 	if v == nil || len(v.encoded) == 0 {
 		return nil, invalidArgumentError("missing view")
 	}
@@ -132,17 +141,17 @@ func (v *MessageView) JSON() ([]byte, error) {
 }
 
 // Decode builds the requested ordinary Go value using encoding/json semantics.
-func (v *MessageView) Decode(destination any) error { return v.Data().Decode(destination) }
+func (v *messageView) Decode(destination any) error { return v.Data().Decode(destination) }
 
-// Selector prepares JSON Pointer paths relative to data for repeated reads.
+// selector prepares JSON Pointer paths relative to data for repeated reads.
 // Close releases its small native path plan; messages and values need no Close.
-type Selector struct {
+type selector struct {
 	mu      sync.RWMutex
 	pointer *C.plsm_selector_t
 	count   int
 }
 
-func Prepare(paths ...string) (*Selector, error) {
+func prepareSelector(paths ...string) (*selector, error) {
 	for _, path := range paths {
 		if strings.ContainsRune(path, '\x00') {
 			return nil, invalidArgumentError("selector path contains NUL")
@@ -155,11 +164,11 @@ func Prepare(paths ...string) (*Selector, error) {
 	if C.plsm_selector_new(input, C.size_t(len(paths)), &pointer, &cErr) != 0 {
 		return nil, fromCError(cErr)
 	}
-	selector := &Selector{pointer: pointer, count: len(paths)}
-	runtime.SetFinalizer(selector, (*Selector).Close)
-	return selector, nil
+	result := &selector{pointer: pointer, count: len(paths)}
+	runtime.SetFinalizer(result, (*selector).Close)
+	return result, nil
 }
-func (s *Selector) Close() {
+func (s *selector) Close() {
 	if s == nil {
 		return
 	}
@@ -171,7 +180,7 @@ func (s *Selector) Close() {
 	}
 	runtime.SetFinalizer(s, nil)
 }
-func (s *Selector) read(v valueSnapshot, root C.size_t) ([]C.plsm_go_value, error) {
+func (s *selector) read(v valueSnapshot, root C.size_t) ([]C.plsm_go_value, error) {
 	if s == nil || len(v.encoded) == 0 {
 		return nil, invalidArgumentError("selector and view are required")
 	}
@@ -193,7 +202,7 @@ func (s *Selector) read(v valueSnapshot, root C.size_t) ([]C.plsm_go_value, erro
 	}
 	return slots, nil
 }
-func (s *Selector) Read(v *MessageView) ([]Value, error) {
+func (s *selector) Read(v *messageView) ([]viewValue, error) {
 	if v == nil || len(v.encoded) == 0 {
 		return nil, invalidArgumentError("view is required")
 	}
@@ -202,51 +211,51 @@ func (s *Selector) Read(v *MessageView) ([]Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	values := make([]Value, len(slots))
+	values := make([]viewValue, len(slots))
 	for i, slot := range slots {
-		values[i] = Value{owner: snapshot, node: slot.node, kind: Kind(slot.kind), integer: int64(slot.integer), real: float64(slot.real), offset: int(slot.offset), length: int(slot.len)}
+		values[i] = viewValue{owner: snapshot, node: slot.node, kind: viewKind(slot.kind), integer: int64(slot.integer), real: float64(slot.real), offset: int(slot.offset), length: int(slot.len)}
 	}
 	return values, nil
 }
 
-// Kind identifies a selected Lite3 value. Missing and null remain distinct.
-type Kind uint32
+// viewKind identifies a selected Lite3 value. Missing and null remain distinct.
+type viewKind uint32
 
 const (
-	KindMissing Kind = iota
-	KindNull
-	KindBool
-	KindInt64
-	KindFloat64
-	KindString
-	KindBytes
-	KindObject
-	KindArray
+	kindMissing viewKind = iota
+	kindNull
+	kindBool
+	kindInt64
+	kindFloat64
+	kindString
+	kindBytes
+	kindObject
+	kindArray
 )
 
-// Value retains its original immutable buffers through copied slice headers.
+// viewValue retains its original immutable buffers through copied slice headers.
 // Kind follows the C value kinds: missing,
 // null, bool, integer, real, string, bytes, object and array (0 through 8).
-type Value struct {
+type viewValue struct {
 	owner          valueSnapshot
 	node           C.size_t
-	kind           Kind
+	kind           viewKind
 	integer        int64
 	real           float64
 	offset, length int
 }
 
-func (v Value) Kind() Kind               { return v.kind }
-func (v Value) Int64() (int64, bool)     { return v.integer, v.kind == 3 }
-func (v Value) Float64() (float64, bool) { return v.real, v.kind == 4 }
-func (v Value) Bool() (bool, bool)       { return v.integer != 0, v.kind == 2 }
-func (v Value) String() (string, bool) {
+func (v viewValue) Kind() viewKind           { return v.kind }
+func (v viewValue) Int64() (int64, bool)     { return v.integer, v.kind == 3 }
+func (v viewValue) Float64() (float64, bool) { return v.real, v.kind == 4 }
+func (v viewValue) Bool() (bool, bool)       { return v.integer != 0, v.kind == 2 }
+func (v viewValue) String() (string, bool) {
 	if v.kind != 5 {
 		return "", false
 	}
 	return string(v.owner.bytes()[v.offset : v.offset+v.length]), true
 }
-func (v Value) Bytes() ([]byte, bool) {
+func (v viewValue) Bytes() ([]byte, bool) {
 	if v.kind != 6 {
 		return nil, false
 	}
@@ -254,7 +263,7 @@ func (v Value) Bytes() ([]byte, bool) {
 	copy(output, v.owner.bytes()[v.offset:v.offset+v.length])
 	return output, true
 }
-func (v Value) JSON() ([]byte, error) {
+func (v viewValue) JSON() ([]byte, error) {
 	if len(v.owner.encoded) == 0 || v.kind == 0 {
 		return nil, invalidArgumentError("missing value")
 	}
@@ -265,8 +274,8 @@ func (v Value) JSON() ([]byte, error) {
 	}
 	return copyNativeJSON(result.buffer), nil
 }
-func (v Value) Decode(destination any) error {
-	if v.kind == KindBytes {
+func (v viewValue) Decode(destination any) error {
+	if v.kind == kindBytes {
 		if target, ok := destination.(*[]byte); ok && target != nil {
 			*target, _ = v.Bytes()
 			return nil
@@ -298,7 +307,7 @@ type structDecoder struct {
 	count   int
 }
 
-func prepareStructDecoder(selector *Selector, objects []byte) (*structDecoder, error) {
+func prepareStructDecoder(selector *selector, objects []byte) (*structDecoder, error) {
 	result := C.plsm_go_prepare_decoder(selector.pointer, (*C.uint8_t)(unsafe.Pointer(&objects[0])), C.size_t(len(objects)))
 	runtime.KeepAlive(selector)
 	runtime.KeepAlive(objects)
@@ -331,5 +340,5 @@ func (d *structDecoder) read(view valueSnapshot, root C.size_t) ([]C.plsm_go_val
 }
 
 // MarshalJSON lets standard Go JSON operations format views directly.
-func (v Value) MarshalJSON() ([]byte, error)        { return v.JSON() }
-func (v *MessageView) MarshalJSON() ([]byte, error) { return v.JSON() }
+func (v viewValue) MarshalJSON() ([]byte, error)    { return v.JSON() }
+func (v *messageView) MarshalJSON() ([]byte, error) { return v.JSON() }

@@ -19,7 +19,7 @@ import (
 )
 
 var udpBenchmarkValue int
-var udpBenchmarkView *local.MessageView
+var udpBenchmarkMessage *local.Message
 var udpBenchmarkFull udpBenchmarkDecoded
 var udpBenchmarkRaw []byte
 
@@ -47,15 +47,12 @@ func BenchmarkOwnedUDP(b *testing.B) {
 					}
 					seed := seedAPI
 					defer seed.Close()
-					source, err := seed.FeedView(udpBenchmarkFixture(fixture), nil)
+					source, err := seed.Feed(udpBenchmarkFixture(fixture), nil)
 					if err != nil {
 						b.Fatal(err)
 					}
-					encoded := source.Lite3()
-					expected, err := source.DataJSON()
-					if err != nil {
-						b.Fatal(err)
-					}
+					encoded := source.Raw()
+					expected := source.Data()
 					destinationAPI, err := client.CreatePool(local.PoolRefName("destination"), uint64(len(encoded)*512+65536))
 					if err != nil {
 						b.Fatal(err)
@@ -126,14 +123,7 @@ func BenchmarkOwnedUDP(b *testing.B) {
 						b.Fatal(err)
 					}
 					defer pool.Close()
-					var follow *Follow
-					if strings.HasPrefix(lane, "view") {
-						follow, err = pool.FollowView()
-					} else if strings.HasPrefix(lane, "raw") {
-						follow, err = pool.FollowLite3()
-					} else {
-						follow, err = pool.Follow()
-					}
+					follow, err := pool.Follow()
 					if err != nil {
 						b.Fatal(err)
 					}
@@ -154,50 +144,39 @@ func BenchmarkOwnedUDP(b *testing.B) {
 						if e != nil {
 							b.Fatal(e)
 						}
-						switch frame := event.(type) {
-						case *ViewFrame:
-							if frame.Seq != uint64(i) {
-								b.Fatal("lost/reordered DATA")
-							}
-							switch lane {
-							case "view_selected":
-								var out struct{ Value int }
-								e = frame.View.Decode(&out)
-								udpBenchmarkValue = out.Value
-							case "view_full":
-								var out udpBenchmarkDecoded
-								e = frame.View.Decode(&out)
-								udpBenchmarkValue = out.Value
-								udpBenchmarkFull = out
-							case "view_forward":
-								udpBenchmarkView, e = destination.FeedView(frame.View, nil)
-							case "view_copy":
-								udpBenchmarkView, e = destination.FeedView(frame.View.Data(), nil)
-							}
-						case *Frame:
-							if frame.Seq != uint64(i) {
-								b.Fatal("lost/reordered DATA")
-							}
-							switch lane {
-							case "raw":
-								udpBenchmarkValue = len(frame.Payload)
-								udpBenchmarkRaw = frame.Payload
-							case "raw_forward":
-								_, e = destination.FeedLite3Receipt(frame.Payload)
-							case "json_selected":
-								var out struct{ Value int }
-								e = json.Unmarshal(frame.Message.Data, &out)
-								udpBenchmarkValue = out.Value
-							case "json_full":
-								var out udpBenchmarkDecoded
-								e = json.Unmarshal(frame.Message.Data, &out)
-								udpBenchmarkValue = out.Value
-								udpBenchmarkFull = out
-							case "json_forward":
-								udpBenchmarkView, e = destination.FeedJSONView(frame.Message.Data, nil)
-							}
-						default:
-							b.Fatal("unexpected control event")
+						frame, ok := event.(*Frame)
+						if !ok || frame.Message.Seq() != uint64(i) {
+							b.Fatal("missing, out-of-order, or unexpected DATA")
+						}
+						message := frame.Message
+						switch lane {
+						case "view_selected":
+							var out struct{ Value int }
+							e = message.Decode(&out)
+							udpBenchmarkValue = out.Value
+						case "view_full":
+							var out udpBenchmarkDecoded
+							e = message.Decode(&out)
+							udpBenchmarkValue = out.Value
+							udpBenchmarkFull = out
+						case "view_forward":
+							udpBenchmarkMessage, e = destination.Feed(message, nil)
+						case "view_copy", "json_forward":
+							udpBenchmarkMessage, e = destination.Feed(local.JSON(message.Data()), nil)
+						case "raw":
+							udpBenchmarkRaw = message.Raw()
+							udpBenchmarkValue = len(udpBenchmarkRaw)
+						case "raw_forward":
+							udpBenchmarkMessage, e = destination.Feed(local.Lite3(message.Raw()), nil)
+						case "json_selected":
+							var out struct{ Value int }
+							e = json.Unmarshal(message.Data(), &out)
+							udpBenchmarkValue = out.Value
+						case "json_full":
+							var out udpBenchmarkDecoded
+							e = json.Unmarshal(message.Data(), &out)
+							udpBenchmarkValue = out.Value
+							udpBenchmarkFull = out
 						}
 						if e != nil {
 							b.Fatal(e)
@@ -222,21 +201,18 @@ func BenchmarkOwnedUDP(b *testing.B) {
 						b.Fatal("raw bytes changed")
 					}
 					if strings.HasSuffix(lane, "forward") || lane == "view_copy" {
-						final, e := fetchLocalView(destination, uint64(b.N))
+						final, e := fetchStored(destination, uint64(b.N))
 						if e != nil {
 							b.Fatal(e)
 						}
-						actual, e := final.DataJSON()
-						if e != nil {
-							b.Fatal(e)
-						}
+						actual := final.Data()
 						var want, got any
 						json.Unmarshal(expected, &want)
 						json.Unmarshal(actual, &got)
 						if !reflect.DeepEqual(want, got) {
 							b.Fatal("forwarded value changed")
 						}
-						if (lane == "raw_forward" || lane == "view_forward") && !bytes.Equal(final.Lite3(), encoded) {
+						if (lane == "raw_forward" || lane == "view_forward") && !bytes.Equal(final.Raw(), encoded) {
 							b.Fatal("forwarded bytes changed")
 						}
 					} else if lane != "raw" && udpBenchmarkValue != 7 {

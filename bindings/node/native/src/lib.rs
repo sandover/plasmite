@@ -152,7 +152,7 @@ fn check_plasmite_abi(_exports: napi::JsObject) -> napi::Result<()> {
 #[cfg_attr(windows, link(name = "plasmite2", kind = "raw-dylib"))]
 unsafe extern "C" {
     fn plsm_abi_major() -> u32;
-    fn plsm_view_stream_next(
+    #[link_name = "plsm_internal_view_stream_next"]    fn plsm_view_stream_next(
         stream: *mut plsm_stream_t,
         timeout: u64,
         max_count: usize,
@@ -183,6 +183,30 @@ unsafe extern "C" {
         out_pool: *mut *mut plsm_pool_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
+    fn plsm_pool_create_described(
+        client: *mut plsm_client_t,
+        pool_ref: *const c_char,
+        size_bytes: u64,
+        description: *const u8,
+        description_len: usize,
+        out_pool: *mut *mut plsm_pool_t,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_feed(
+        pool: *mut plsm_pool_t,
+        kind: u32,
+        input: *const std::ffi::c_void,
+        len: usize,
+        options: *const plsm_feed_options_t,
+        out: *mut *const views::Owner,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_set_description(
+        pool: *mut plsm_pool_t,
+        description: *const u8,
+        description_len: usize,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
     fn plsm_pool_open(
         client: *mut plsm_client_t,
         pool_ref: *const c_char,
@@ -205,7 +229,7 @@ unsafe extern "C" {
         pool_ref: *const c_char,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_pool_feed_json(
+    #[link_name = "plsm_internal_pool_feed_json"]    fn plsm_pool_feed_json(
         pool: *mut plsm_pool_t,
         json: *const u8,
         len: usize,
@@ -225,13 +249,13 @@ unsafe extern "C" {
         out: *mut *mut plsm_stream_t,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_pool_follow_lite3(
+    #[link_name = "plsm_internal_pool_follow_lite3"]    fn plsm_pool_follow_lite3(
         pool: *mut plsm_pool_t,
         options: *const plsm_read_options_t,
         out: *mut *mut plsm_lite3_stream_t,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_pool_fetch_lite3(
+    #[link_name = "plsm_internal_pool_fetch_lite3"]    fn plsm_pool_fetch_lite3(
         pool: *mut plsm_pool_t,
         options: *const plsm_read_options_t,
         out: *mut *mut plsm_lite3_stream_t,
@@ -239,6 +263,7 @@ unsafe extern "C" {
     ) -> c_int;
     fn plsm_pool_free(pool: *mut plsm_pool_t);
 
+    #[link_name = "plsm_internal_pool_feed_lite3"]
     fn plsm_pool_feed_lite3(
         pool: *mut plsm_pool_t,
         payload: *const u8,
@@ -247,7 +272,7 @@ unsafe extern "C" {
         out: *mut plsm_buf_t,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_pool_feed_json_receipt(
+    #[link_name = "plsm_internal_pool_feed_json_receipt"]    fn plsm_pool_feed_json_receipt(
         pool: *mut plsm_pool_t,
         bytes: *const u8,
         len: usize,
@@ -255,7 +280,7 @@ unsafe extern "C" {
         out: *mut plsm_feed_receipt_t,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_pool_feed_lite3_receipt(
+    #[link_name = "plsm_internal_pool_feed_lite3_receipt"]    fn plsm_pool_feed_lite3_receipt(
         pool: *mut plsm_pool_t,
         bytes: *const u8,
         len: usize,
@@ -264,22 +289,23 @@ unsafe extern "C" {
         err: *mut *mut plsm_error_t,
     ) -> c_int;
 
+    #[link_name = "plsm_internal_stream_next_wait"]
     fn plsm_stream_next_wait(
         stream: *mut plsm_stream_t,
         timeout_ms: u64,
         out: *mut plsm_buf_t,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_lite3_stream_next_wait(
+    #[link_name = "plsm_internal_lite3_stream_next_wait"]    fn plsm_lite3_stream_next_wait(
         stream: *mut plsm_lite3_stream_t,
         timeout_ms: u64,
         out: *mut plsm_lite3_frame_t,
         err: *mut *mut plsm_error_t,
     ) -> c_int;
     fn plsm_stream_cancel(stream: *mut plsm_stream_t);
-    fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream_t);
+    #[link_name = "plsm_internal_lite3_stream_cancel"]    fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream_t);
     fn plsm_stream_free(stream: *mut plsm_stream_t);
-    fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream_t);
+    #[link_name = "plsm_internal_lite3_stream_free"]    fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream_t);
 
     fn plsm_buf_free(buf: *mut plsm_buf_t);
     fn plsm_error_free(err: *mut plsm_error_t);
@@ -297,14 +323,14 @@ unsafe extern "C" {
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
     fn plsm_udp_pool_free(pool: *mut plsm_udp_pool_t);
-    fn plsm_udp_pool_feed_lite3(
+    #[link_name = "plsm_internal_udp_pool_feed_lite3"]    fn plsm_udp_pool_feed_lite3(
         pool: *mut plsm_udp_pool_t,
         payload: *const u8,
         payload_len: usize,
         options: *const plsm_feed_options_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_udp_pool_read(
+    #[link_name = "plsm_internal_udp_pool_read"]    fn plsm_udp_pool_read(
         pool: *mut plsm_udp_pool_t,
         options: *const plsm_read_options_t,
         live: u32,
@@ -312,14 +338,14 @@ unsafe extern "C" {
         out: *mut *mut plsm_udp_follow_t,
         error: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_udp_pool_feed_json(
+    #[link_name = "plsm_internal_udp_pool_feed_json"]    fn plsm_udp_pool_feed_json(
         pool: *mut plsm_udp_pool_t,
         bytes: *const u8,
         len: usize,
         options: *const plsm_feed_options_t,
         error: *mut *mut plsm_error_t,
     ) -> c_int;
-    fn plsm_udp_follow_next(
+    #[link_name = "plsm_internal_udp_follow_next"]    fn plsm_udp_follow_next(
         follow: *mut plsm_udp_follow_t,
         timeout_ms: u64,
         out_event: *mut plsm_udp_event_t,
@@ -328,7 +354,7 @@ unsafe extern "C" {
     fn plsm_udp_follow_cancel(follow: *mut plsm_udp_follow_t);
     fn plsm_udp_follow_close(follow: *mut plsm_udp_follow_t);
     fn plsm_udp_event_free(event: *mut plsm_udp_event_t);
-    fn plsm_udp_event_message(
+    #[link_name = "plsm_internal_udp_event_message"]    fn plsm_udp_event_message(
         event: *const plsm_udp_event_t,
         out_message: *mut plsm_buf_t,
         out_err: *mut *mut plsm_error_t,
@@ -382,6 +408,7 @@ impl Client {
         env: Env,
         pool_ref: String,
         size_bytes: Either<u32, BigInt>,
+        description: Option<Buffer>,
     ) -> Result<Pool> {
         let pool_ref = CString::new(pool_ref)
             .map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
@@ -389,7 +416,20 @@ impl Client {
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe {
-            plsm_pool_create(self.ptr, pool_ref.as_ptr(), size_bytes, &mut out, &mut err)
+            match description {
+                Some(description) => plsm_pool_create_described(
+                    self.ptr,
+                    pool_ref.as_ptr(),
+                    size_bytes,
+                    description.as_ptr(),
+                    description.len(),
+                    &mut out,
+                    &mut err,
+                ),
+                None => {
+                    plsm_pool_create(self.ptr, pool_ref.as_ptr(), size_bytes, &mut out, &mut err)
+                }
+            }
         };
         if rc != 0 {
             return Err(take_error(env, err)?);
@@ -561,6 +601,20 @@ impl Pool {
             return Err(take_error(env, err)?);
         }
         Ok(copy_json_buf(out))
+    }
+
+    #[napi]
+    pub fn set_description(&self, env: Env, description: Buffer) -> Result<()> {
+        let _operation = self.operation(env)?;
+        let pool = self.handle.as_ref().expect("open pool").ptr;
+        let mut error = ptr::null_mut();
+        if unsafe {
+            plsm_pool_set_description(pool, description.as_ptr(), description.len(), &mut error)
+        } != 0
+        {
+            return Err(take_error(env, error)?);
+        }
+        Ok(())
     }
 
     #[napi]

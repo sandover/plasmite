@@ -1,27 +1,26 @@
-//! Version 2 pool routes and stream endings.
+//! HTTP pool routes and stream endings.
 
 use super::*;
 use crate::interface_wire::{
     LITE3_CONTROL_RECORD, LITE3_MESSAGE_ID_LEN, LITE3_MESSAGE_RECORD, encode_lite3_record_header,
 };
+use plasmite::api::internal::LocalPoolTransport;
 use plasmite::api::{HostedRead, Read, ReadStatus, Since};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(super) fn routes(shutdown: watch::Receiver<bool>) -> Router<Arc<AppState>> {
     Router::new()
-        .route("/v2/pools", post(create_pool).get(list_pools))
-        .route("/v2/pools/:pool", get(pool_info).delete(delete_pool))
-        .route("/v2/pools/:pool/open", post(open))
-        .route("/v2/pools/:pool/feed", post(feed))
-        .route("/v2/pools/:pool/fetch", get(read::<false>))
-        .route("/v2/pools/:pool/follow", get(read::<true>))
+        .route("/pools", post(create_pool).get(list_pools))
+        .route("/pools/:pool", get(pool_info).delete(delete_pool))
+        .route("/pools/:pool/open", post(open))
+        .route(
+            "/pools/:pool/description",
+            axum::routing::put(set_pool_description),
+        )
+        .route("/pools/:pool/feed", post(feed))
+        .route("/pools/:pool/fetch", get(read::<false>))
+        .route("/pools/:pool/follow", get(read::<true>))
         .layer(Extension(shutdown))
-        .layer(middleware::map_response(|mut response: Response| async {
-            response
-                .headers_mut()
-                .insert("plasmite-version", HeaderValue::from_static("2"));
-            response
-        }))
 }
 
 #[derive(Deserialize)]
@@ -36,7 +35,11 @@ async fn open(
     AxumPath(name): AxumPath<String>,
     Json(request): Json<OpenRequest>,
 ) -> Result<Response, HttpError> {
-    let grant = authorize(&headers, &state)?;
+    let grant = if request.create {
+        authorize_write(&headers, &state)?
+    } else {
+        authorize(&headers, &state)?
+    };
     let pool_ref = pool_ref_from_request(&name)?;
     let client = state.client.clone();
     let info = state
@@ -50,13 +53,14 @@ async fn open(
     ))
 }
 
-async fn feed(
+pub(super) async fn feed(
     state: State<Arc<AppState>>,
     headers: HeaderMap,
     path: AxumPath<String>,
     query: Query<AppendLite3Query>,
     body: Bytes,
 ) -> Result<Response, HttpError> {
+    let grant = authorize_write(&headers, &state)?;
     if headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -67,10 +71,51 @@ async fn feed(
                 .with_message("durability must be fast or flush")
                 .into());
         }
-        return append_lite3(state, headers, path, query, body).await;
+        return append_lite3(state.0, headers, grant, path.0, query.0, body).await;
     }
-    // Check access before interpreting input, just as the other write routes do.
-    authorize(&headers, &state)?;
+    if headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        == Some("application/x-plasmite-lite3")
+    {
+        #[derive(Deserialize)]
+        struct BinaryReplyInput<'a> {
+            #[serde(borrow)]
+            data: &'a serde_json::value::RawValue,
+            tags: Option<Vec<String>>,
+            durability: Option<String>,
+        }
+        let request: BinaryReplyInput<'_> = serde_json::from_slice(&body).map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("invalid feed input")
+                .with_source(err)
+        })?;
+        if !matches!(request.durability.as_deref(), None | Some("fast" | "flush")) {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("durability must be fast or flush")
+                .into());
+        }
+        let pool_ref = pool_ref_from_request(&path)?;
+        let data = request.data.get().as_bytes().to_vec();
+        let tags = request.tags.unwrap_or_default();
+        let durability = durability_from_str(request.durability.as_deref());
+        let sender = grant.as_ref().map(|grant| grant.sender().to_owned());
+        let client = state.client.clone();
+        let view = state
+            .storage_executor
+            .run_authorized(grant, move || {
+                let tags = tags.iter().map(String::as_str).collect::<Vec<_>>();
+                let view = plasmite::view::MessageView::from_json(&data, &tags)?;
+                let mut pool = client.open_pool(&pool_ref, false)?;
+                pool.feed_received_view(
+                    &view,
+                    Feed::new().durability(durability),
+                    sender.as_deref(),
+                )
+            })
+            .await?;
+        return Ok(append_view_response(view, true));
+    }
     let request: AppendRequest = serde_json::from_slice(&body).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("invalid feed input")
@@ -86,7 +131,7 @@ async fn feed(
             .with_message("durability must be fast or flush")
             .into());
     }
-    append_message(state, headers, path, Json(request)).await
+    append_message(state.0, grant, path.0, request).await
 }
 
 #[derive(Deserialize)]
@@ -596,7 +641,9 @@ mod tests {
             .create_pool(&reference, PoolOptions::new(65536))
             .unwrap();
         let access = AccessStore::open(dir.path(), None, None, None).unwrap();
-        let key = access.issue("reader").unwrap();
+        let key = access
+            .issue("reader", crate::access_store::AccessMode::Full)
+            .unwrap();
         let grant = access
             .authorize_secret(key.rsplit('.').next().unwrap())
             .unwrap();
@@ -737,17 +784,14 @@ mod tests {
                 .unwrap()
         };
         let follow = app
-            .call(get("/v2/pools/stalled/follow?since=oldest"))
+            .call(get("/pools/stalled/follow?since=oldest"))
             .await
             .unwrap();
         assert_eq!(follow.status(), StatusCode::OK);
-        let second = app.call(get("/v2/pools/stalled/follow")).await.unwrap();
+        let second = app.call(get("/pools/stalled/follow")).await.unwrap();
         assert_eq!(second.status(), StatusCode::LOCKED);
         let started = Instant::now();
-        let fetch = app
-            .call(get("/v2/pools/stalled/fetch?last=1"))
-            .await
-            .unwrap();
+        let fetch = app.call(get("/pools/stalled/fetch?last=1")).await.unwrap();
         assert_eq!(fetch.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(fetch.into_body(), 1024 * 1024)
             .await
@@ -762,7 +806,7 @@ mod tests {
             .call(
                 Request::builder()
                     .method("POST")
-                    .uri("/v2/pools/stalled/feed")
+                    .uri("/pools/stalled/feed")
                     .header("host", "localhost")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"data":{"ok":true}}"#))

@@ -25,7 +25,7 @@ class ViewStreams(unittest.TestCase):
     def test_mixed_batches_iteration_and_independent_lifetimes(self):
         for i in range(9):
             self.pool.feed({"index": i, "nested": [i]})
-        with self.pool.fetch_view(since=1) as stream:
+        with self.pool.fetch(since=1)._reader as stream:
             first = next(stream)
             middle = stream.next_batch(4, 1024 * 1024)
             rest = list(stream)
@@ -40,41 +40,41 @@ class ViewStreams(unittest.TestCase):
         self.assertEqual(list(child), [4])
 
     def test_byte_limit_retry_and_poll(self):
-        message = self.pool.feed_view({"index": 0})
-        extent = len(memoryview(message))
-        with self.pool.follow_view(since=1) as stream:
+        message = self.pool.feed({"index": 0})
+        extent = len(message.raw)
+        with self.pool.follow(since=1)._reader as stream:
             with self.assertRaises(plasmite.PlasmiteError):
                 stream.next_batch(16, extent - 1, 0)
             self.assertEqual([m.seq for m in stream.next_batch(16, extent, 0)], [1])
             self.assertEqual(stream.next_batch(16, extent, 0), [])
-            self.pool.feed_view({"index": 1})
+            self.pool.feed({"index": 1})
             self.assertEqual(next(stream).seq, 2)
 
     def test_byte_budget_ignores_records_before_requested_sequence(self):
-        self.pool.feed_view({"padding": "x" * 65536})
-        wanted = self.pool.feed_view({"index": 2})
-        with self.pool.fetch_view(since=wanted.seq) as stream:
-            result = stream.next_batch(16, len(memoryview(wanted)), 0)
+        self.pool.feed({"padding": "x" * 65536})
+        wanted = self.pool.feed({"index": 2})
+        with self.pool.fetch(since=wanted.seq)._reader as stream:
+            result = stream.next_batch(16, len(wanted.raw), 0)
             self.assertEqual([message.seq for message in result], [wanted.seq])
 
     def test_batch_budget_applies_after_filtering(self):
-        self.pool.feed_view({"padding": "x" * 65536}, ["skip"])
-        large = self.pool.feed_view({"padding": "x" * 65536}, ["keep"])
-        small = self.pool.feed_view({"index": 3}, ["small"])
+        self.pool.feed({"padding": "x" * 65536}, ["skip"])
+        large = self.pool.feed({"padding": "x" * 65536}, ["keep"])
+        small = self.pool.feed({"index": 3}, ["small"])
         for count in (1, 16):
             with self.subTest(count=count):
-                with self.pool.fetch_view(tags=["small"]) as stream:
-                    batch = stream.next_batch(count, len(memoryview(small)), 0)
+                with self.pool.fetch(tags=["small"])._reader as stream:
+                    batch = stream.next_batch(count, len(small.raw), 0)
                     self.assertEqual([item.seq for item in batch], [small.seq])
-                with self.pool.fetch_view(tags=["keep"]) as stream:
+                with self.pool.fetch(tags=["keep"])._reader as stream:
                     with self.assertRaisesRegex(plasmite.PlasmiteError, "batch budget"):
                         stream.next_batch(count, 4096, 0)
-                    batch = stream.next_batch(count, len(memoryview(large)), 0)
+                    batch = stream.next_batch(count, len(large.raw), 0)
                     self.assertEqual([item.seq for item in batch], [large.seq])
 
     def test_cancel_after_native_pull_delivers_acquired_batch(self):
-        self.pool.feed_view({"index": 1})
-        self.pool.feed_view({"index": 2})
+        self.pool.feed({"index": 1})
+        self.pool.feed({"index": 2})
         cancel = threading.Event()
         next_batch = _views.backend.next_batch
 
@@ -83,7 +83,7 @@ class ViewStreams(unittest.TestCase):
             cancel.set()
             return result
 
-        with self.pool.fetch_view(cancel=cancel) as stream:
+        with self.pool.fetch(cancel=cancel)._reader as stream:
             with patch.object(_views.backend, "next_batch", side_effect=cancel_after_pull):
                 batch = stream.next_batch(2, 4096, 0)
             self.assertEqual([item.seq for item in batch], [1, 2])
@@ -92,8 +92,8 @@ class ViewStreams(unittest.TestCase):
 
     def test_tags_count_accepted_records(self):
         for i in range(12):
-            self.pool.feed_view({"index": i}, tags=["yes\0tag"] if i % 3 == 1 else [])
-        with self.pool.fetch_view(since=1, tags=["yes\0tag"]) as stream:
+            self.pool.feed({"index": i}, tags=["yes\0tag"] if i % 3 == 1 else [])
+        with self.pool.fetch(since=1, tags=["yes\0tag"])._reader as stream:
             result = stream.next_batch(16, 1024 * 1024)
             # A batch takes available companions; filtering does not change sequence policy.
             result.extend(list(stream))
@@ -102,29 +102,18 @@ class ViewStreams(unittest.TestCase):
                 stream.next_batch(16, 1024 * 1024, 0)
 
     def test_poll_scans_available_filtered_records(self):
-        self.pool.feed_view({"index": 0}, [])
-        accepted = self.pool.feed_view({"index": 1}, ["keep"])
-        with self.pool.follow_view(since=1, tags=["keep"]) as stream:
+        self.pool.feed({"index": 0}, [])
+        accepted = self.pool.feed({"index": 1}, ["keep"])
+        with self.pool.follow(since=1, tags=["keep"])._reader as stream:
             self.assertEqual(
                 [item.seq for item in stream.next_batch(16, 4096, 0)], [accepted.seq]
             )
             self.assertEqual(stream.next_batch(16, 4096, 0), [])
 
-    def test_mixed_c_json_and_owner_reads_share_filtered_checkpoint(self):
-        for i in range(4):
-            self.pool.feed_view({"index": i}, ["keep"] if i % 2 else [])
-        with self.pool.fetch_view(since=1, tags=["keep"]) as stream:
-            status, raw = stream._stream.next_wait(0)
-            self.assertEqual(status, 1)
-            self.assertEqual(plasmite.parse_message(raw).seq, 2)
-            self.assertEqual(next(stream).seq, 4)
-            with self.assertRaises(StopIteration):
-                next(stream)
-
     def test_wait_for_first_without_filling(self):
-        with self.pool.follow_view(since=1) as stream:
+        with self.pool.follow(since=1)._reader as stream:
             writer = threading.Thread(
-                target=lambda: (time.sleep(0.02), self.pool.feed_view({"x": 7}))
+                target=lambda: (time.sleep(0.02), self.pool.feed({"x": 7}))
             )
             writer.start()
             try:
@@ -141,7 +130,7 @@ class ViewStreams(unittest.TestCase):
         def publish(writer, handle):
             try:
                 for i in range(50):
-                    handle.feed_view({"writer": writer, "index": i})
+                    handle.feed({"writer": writer, "index": i})
             except BaseException as error:
                 failures.append(error)
 
@@ -150,7 +139,7 @@ class ViewStreams(unittest.TestCase):
             for i, handle in enumerate(handles)
         ]
         try:
-            with self.pool.follow_view(since=1) as stream:
+            with self.pool.follow(since=1)._reader as stream:
                 for writer in writers:
                     writer.start()
                 messages = []
@@ -184,19 +173,19 @@ class ViewStreams(unittest.TestCase):
             ("max_count", -1),
             ("max_bytes", 1 << 100),
         ]:
-            with self.subTest(key=key, value=value), self.pool.follow_view(since="oldest") as stream:
+            with self.subTest(key=key, value=value), self.pool.follow(since="oldest")._reader as stream:
                 args = {"max_count": 1, "max_bytes": 1000, key: value}
                 with self.assertRaises(ValueError):
                     stream.next_batch(**args)
-        with self.pool.follow_view(since="oldest") as stream:
+        with self.pool.follow(since="oldest")._reader as stream:
             self.assertEqual(stream.next_batch(4, 1000, wait=0), [])
-        with self.pool.follow_view(since="oldest") as stream:
+        with self.pool.follow(since="oldest")._reader as stream:
             stream.cancel()
             with self.assertRaises(StopIteration):
                 stream.next_batch(4, 1000)
 
     def test_cancel_blocked_read_and_no_hidden_prefetch(self):
-        with self.pool.follow_view(since=1) as stream:
+        with self.pool.follow(since=1)._reader as stream:
             outcome = []
 
             def wait():
@@ -215,12 +204,12 @@ class ViewStreams(unittest.TestCase):
         small = self.client.create_pool("overrun", 64 * 1024)
         try:
             for i in range(3):
-                small.feed_view({"index": i})
-            with small.follow_view(since=1) as stream:
+                small.feed({"index": i})
+            with small.follow(since=1)._reader as stream:
                 retained = next(stream)
                 self.assertEqual(retained.seq, 1)
                 for i in range(100):
-                    small.feed_view({"index": i, "text": "x" * 1000})
+                    small.feed({"index": i, "text": "x" * 1000})
                 self.assertEqual(retained.data["index"], 0)
                 # The iterator did not secretly acquire the old second record.
                 with self.assertRaises(plasmite.PlasmiteError):
@@ -229,7 +218,7 @@ class ViewStreams(unittest.TestCase):
             small.close()
 
     def test_argument_close_before_handle_borrow(self):
-        with self.pool.follow_view(since="oldest") as stream:
+        with self.pool.follow(since="oldest")._reader as stream:
 
             class Count(int):
                 def __int__(self):

@@ -10,9 +10,10 @@ use super::output_support::{emit_lite3, emit_message};
 use super::result::CommandResult;
 use super::support::{
     add_missing_pool_create_hint, add_missing_pool_hint, add_missing_seq_hint, message_from_frame,
-    message_to_json, parse_durability, remote_client, resolve_pool_target,
+    parse_durability, remote_client, resolve_pool_target,
 };
 use crate::PoolTarget;
+use plasmite::api::internal::{LocalPoolTransport, RemotePoolTransport};
 use plasmite::api::{Error, ErrorKind, LocalClient, Pool, PoolRef};
 use std::io::{self, IsTerminal, Read};
 
@@ -182,7 +183,16 @@ pub(super) fn fetch(
                 }
             } else {
                 for message in handle.fetch(options).map_err(read_error)? {
-                    emit_message(message_to_json(message?), mode, context.color_mode())?;
+                    let message = message?;
+                    emit_message(
+                        super::support::message_from_lite3(
+                            message.seq,
+                            message.time,
+                            message.raw(),
+                        )?,
+                        mode,
+                        context.color_mode(),
+                    )?;
                     found = true;
                     if seq.is_some() {
                         break;
@@ -205,10 +215,14 @@ pub(super) fn fetch(
                             continue;
                         }
                         if mode.is_binary() {
-                            emit_lite3(frame.seq, frame.time, &frame.payload, mode)?;
+                            emit_lite3(frame.seq, frame.time, frame.raw(), mode)?;
                         } else {
                             emit_message(
-                                message_to_json(frame.message()?),
+                                super::support::message_from_lite3(
+                                    frame.seq,
+                                    frame.time,
+                                    frame.raw(),
+                                )?,
                                 mode,
                                 context.color_mode(),
                             )?;

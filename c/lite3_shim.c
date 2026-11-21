@@ -66,6 +66,15 @@ static int valid_utf8(const char *text, size_t len)
                                 continue;
                         }
                 }
+                if (len >= sizeof(uint32_t)) {
+                        uint32_t word;
+                        memcpy(&word, p, sizeof(word));
+                        if ((word & UINT32_C(0x80808080)) == 0) {
+                                p += sizeof(word);
+                                len -= sizeof(word);
+                                continue;
+                        }
+                }
                 unsigned c = *p++;
                 --len;
                 if (c < 0x80) continue;
@@ -105,16 +114,21 @@ static uint32_t view_word(const unsigned char *buf, size_t ofs)
         memcpy(&value, buf + ofs, sizeof value);
         return value;
 }
-static int verify_view_index_node(const unsigned char *buf, size_t len,
-                                  size_t ofs, uint8_t type)
+static int verify_view_children(const unsigned char *buf, size_t ofs)
 {
-        if (verify_node(buf, len, ofs) < 0 || buf[ofs] != type) return -1;
         unsigned count = view_word(buf, ofs + 32) & 7;
         int children = view_word(buf, ofs + 64) != 0;
         for (unsigned i = 1; i <= count; ++i) {
                 if ((view_word(buf, ofs + 64 + 4 * i) != 0) != children) return -1;
         }
         return 0;
+}
+
+static int verify_view_index_node(const unsigned char *buf, size_t len,
+                                  size_t ofs, uint8_t type)
+{
+        if (verify_node(buf, len, ofs) < 0 || buf[ofs] != type) return -1;
+        return verify_view_children(buf, ofs);
 }
 /* Collision-only lookup: no key parsing, allocation, or full-tree walk. */
 static int view_has_hash(const unsigned char *buf, size_t len, size_t ofs,
@@ -149,10 +163,11 @@ static int verify_tree(
                 return -1;
         }
 
-        if (check && verify_view_index_node(buf, buf_len, ofs, type) < 0) return -1;
+        if (check && verify_view_children(buf, ofs) < 0) return -1;
         size_t checked_nodes[LITE3_TREE_HEIGHT_MAX + 1];
         if (check) {
-                for (unsigned d = 0; d <= LITE3_TREE_HEIGHT_MAX; ++d) checked_nodes[d] = SIZE_MAX;
+                checked_nodes[0] = ofs;
+                for (unsigned d = 1; d <= LITE3_TREE_HEIGHT_MAX; ++d) checked_nodes[d] = SIZE_MAX;
         }
         lite3_iter iter;
         if (lite3_iter_create(buf, buf_len, ofs, &iter) < 0) {
@@ -195,8 +210,9 @@ static int verify_tree(
                 }
                 if (check && type == LITE3_TYPE_OBJECT) {
                         size_t key_len = val_ofs - (size_t)((const unsigned char *)key.ptr - buf) - 1;
-                        if (memchr(key.ptr, 0, key_len) || !valid_utf8(key.ptr, key_len)) return -1;
-                        uint32_t base = lite3_get_key_data(key.ptr).hash;
+                        lite3_key_data key_data = lite3_get_key_data(key.ptr);
+                        if (key_data.size != key_len + 1 || !valid_utf8(key.ptr, key_len)) return -1;
+                        uint32_t base = key_data.hash;
                         if (base != stored_hash) {
                                 unsigned attempt;
                                 for (attempt = 1; attempt < LITE3_HASH_PROBE_MAX; ++attempt) {
@@ -548,6 +564,19 @@ int plasmite_lite3_get_val_ofs(
         if (out_ofs) {
                 *out_ofs = (size_t)((const unsigned char *)val - buf);
         }
+        return 0;
+}
+
+int plasmite_lite3_get_str(
+        const unsigned char *buf, size_t len, size_t ofs, const char *key,
+        const char **out_ptr, size_t *out_len)
+{
+        if (verify_node(buf, len, ofs) < 0) return -1;
+        lite3_str value = {0};
+        if (lite3_get_str(buf, len, ofs, key, &value) < 0 ||
+            verify_string(buf, len, value.ptr, value.len) < 0) return -1;
+        *out_ptr = value.ptr;
+        *out_len = (size_t)value.len;
         return 0;
 }
 

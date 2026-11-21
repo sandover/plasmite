@@ -268,7 +268,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
             var key = input.value.trim();
             input.value = '';
             try {
-              var response = await fetch('/v0/browser/session', {
+              var response = await fetch('/browser/session', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ access_key: key })
               });
@@ -285,7 +285,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         async function logout() {
           state.stopped = true;
           stopPoolList();
-          await fetch('/v0/browser/session', { method: 'DELETE' });
+          await fetch('/browser/session', { method: 'DELETE' });
           renderLogin('Signed out.');
         }
 
@@ -578,7 +578,8 @@ Invariants: Pool names are rendered as text (never injected as HTML).
           listController = controller;
           try {
             await PlasmiteUI.followEvents({
-              url: () => "/v0/ui/pools/stream",
+              url: () => "/pools",
+              accept: "text/event-stream",
               signal: controller.signal,
               onResponse(response) {
                 if (response.status === 401) {
@@ -618,7 +619,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
             history.replaceState(null, '', window.location.pathname + (params.size ? '?' + params.toString() : ''));
           }
           try {
-            var session = await fetch('/v0/browser/session', { cache: 'no-store' });
+            var session = await fetch('/browser/session', { cache: 'no-store' });
             if (!session.ok) { renderLogin(''); return; }
             var identity = await session.json();
             state.local = Boolean(identity.local);

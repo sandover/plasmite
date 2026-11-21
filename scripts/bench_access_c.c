@@ -4,6 +4,7 @@
  * Output: One JSON result per request, with raw message envelopes for verification.
  */
 
+#define PLSM_INTERNAL_ABI
 #include "plasmite.h"
 
 #include <errno.h>

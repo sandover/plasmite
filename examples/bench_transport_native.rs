@@ -4,6 +4,7 @@
 //! Invariants: JSON and Lite3 paths use the same application JSON values.
 //! Invariants: Output contains measurements and readback facts, never credentials.
 
+use plasmite::api::internal::{LocalPoolTransport, RemotePoolTransport};
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io::{self, BufRead, Write};
@@ -203,7 +204,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 )
                                 .into());
                             }
-                            if message.data != *expected_data {
+                            if message.data().map_err(|err| err.to_string())? != expected_data {
                                 return Err(
                                     format!("readback mismatch for sequence {sequence}").into()
                                 );

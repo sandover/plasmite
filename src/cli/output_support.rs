@@ -162,7 +162,18 @@ pub(crate) fn emit_message(
         return emit_lite3(seq, ns, payload.as_slice(), output_mode);
     }
     let is_tty = io::stdout().is_terminal();
-    let json = if color_mode.use_color(is_tty) {
+    let color = color_mode.use_color(is_tty);
+    if output_mode == OutputMode::Compact {
+        let width = if is_tty {
+            super::compact_output::terminal_width()
+        } else {
+            None
+        };
+        let line =
+            super::compact_output::render(&value, time::OffsetDateTime::now_utc(), width, color);
+        return super::output::write_stdout(line.as_bytes());
+    }
+    let json = if color {
         colorize_json(&value, true)
     } else {
         serde_json::to_string_pretty(&value).expect("JSON serializes")

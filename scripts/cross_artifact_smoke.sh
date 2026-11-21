@@ -244,7 +244,7 @@ with Client(pool_dir) as client, client.open_pool("cookbook-smoke") as pool:
     with pool.fetch(since=3) as reader:
         message = next(reader)
     assert message.data == {"writer": "node"}
-    assert message.meta.tags == ["handoff"]
+    assert message.tags == ["handoff"]
     assert pool.feed({"writer": "python"}, ["handoff"]).seq == 4
 
 out = subprocess.check_output(
